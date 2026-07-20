@@ -99,16 +99,20 @@ async function collectAndDownload(startUnix, endUnix) {
 
   const json = JSON.stringify(result, null, 2);
   const url = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-  await chrome.downloads.download({ url, filename: `viastudywiz-${startUnix}-${endUnix}.json` });
+  await chrome.downloads.download({ url, filename: `viastudywiz/_metadata/viastudywiz-${startUnix}-${endUnix}.json` });
 
-  await downloadPdfElements(result.plans);
+  await downloadFileElements(result.plans);
   return result;
 }
 
-// PDF-download-kæde (Kæde A i 05-api-reference.md, fuldt kortlagt): elementets side åbnes i en
-// skjult fane, og vi lytter efter FileDownloadUrl i PdfViewer/Viewer.aspx-requestet, som er en
-// presigned filecache-URL der kan downloades direkte uden cookies.
+// Fil-download: to kæder, begge fra 05-api-reference.md. Elementets side åbnes i en skjult fane;
+// PDF'er lytter efter FileDownloadUrl i PdfViewer/Viewer.aspx (Kæde A, 7 hop), Office-filer
+// lytter først efter LearningObjectId/LearningObjectInstanceId i File/View.aspx, navigerer så
+// til DownloadRedirect.ashx og lytter efter den endelige filecache-URL (Kæde B, 3 hop efter det).
 const PDF_VIEWER_PATTERN = "*://platform.itslearning.com/PdfViewer/Viewer.aspx*";
+const FILE_VIEW_PATTERN = "*://resource.itslearning.com/File/View.aspx*";
+const FILECACHE_PATTERN = "*://filecache.itslearning.com/*";
+const OFFICE_EXTENSIONS = [".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"];
 
 function sanitizeFilename(name) {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim();
@@ -155,12 +159,72 @@ async function resolvePdfDownloadUrl(elementUrl, timeoutMs = 20000) {
   });
 }
 
-async function downloadPdfElements(plans) {
-  const pdfElements = Object.values(plans)
+// Venter på det første webRequest der matcher urlPattern, og returnerer dets fulde URL.
+function waitForRequest(urlPattern, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.webRequest.onBeforeRequest.removeListener(listener);
+      reject(new Error(`Timeout: intet kald matcher ${urlPattern} inden for ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    function listener(details) {
+      clearTimeout(timeout);
+      chrome.webRequest.onBeforeRequest.removeListener(listener);
+      resolve(details.url);
+    }
+
+    chrome.webRequest.onBeforeRequest.addListener(listener, { urls: [urlPattern] });
+  });
+}
+
+async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
+  let tabId = null;
+  try {
+    const fileViewPromise = waitForRequest(FILE_VIEW_PATTERN, timeoutMs);
+    const tab = await chrome.tabs.create({ url: `https://via.itslearning.com${elementUrl}`, active: false });
+    tabId = tab.id;
+    const fileViewUrl = await fileViewPromise;
+
+    const params = new URL(fileViewUrl).searchParams;
+    const learningObjectId = params.get("LearningObjectId");
+    const learningObjectInstanceId = params.get("LearningObjectInstanceId");
+    if (!learningObjectId || !learningObjectInstanceId) {
+      throw new Error(`Mangler LearningObjectId/LearningObjectInstanceId i ${fileViewUrl}`);
+    }
+
+    const filecachePromise = waitForRequest(FILECACHE_PATTERN, timeoutMs);
+    const downloadRedirectUrl = `https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${learningObjectId}&LearningObjectInstanceId=${learningObjectInstanceId}`;
+    await chrome.tabs.update(tabId, { url: downloadRedirectUrl });
+    return await filecachePromise;
+  } finally {
+    if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+// Undgår gendownload (og dermed Chromes "(1)"-duplikater) af elementer vi allerede har hentet —
+// sporer via elementets stabile id, ikke filnavn, så det er robust overfor at filer bagefter
+// bliver omdøbt/deskewed/flyttet af watch-folder-scriptet.
+const DOWNLOADED_IDS_KEY = "downloadedElementIds";
+
+async function getDownloadedIds() {
+  const { [DOWNLOADED_IDS_KEY]: ids } = await chrome.storage.local.get(DOWNLOADED_IDS_KEY);
+  return new Set(ids ?? []);
+}
+
+async function markDownloaded(id) {
+  const ids = await getDownloadedIds();
+  ids.add(id);
+  await chrome.storage.local.set({ [DOWNLOADED_IDS_KEY]: [...ids] });
+}
+
+async function downloadFileElements(plans) {
+  const downloadedIds = await getDownloadedIds();
+
+  const fileElements = Object.values(plans)
     .filter(Boolean)
     .flatMap((plan) =>
       (plan.elements ?? [])
-        .filter((el) => el.typeName === "Fil" && el.title.toLowerCase().endsWith(".pdf"))
+        .filter((el) => el.typeName === "Fil" && !downloadedIds.has(el.id))
         .map((el) => ({
           courseName: plan.courseName ?? "ukendt-fag",
           weekFolder: weekFolderName(plan.start),
@@ -168,19 +232,44 @@ async function downloadPdfElements(plans) {
         }))
     );
 
-  for (const { courseName, weekFolder, element } of pdfElements) {
+  for (const { courseName, weekFolder, element } of fileElements) {
+    const titleLower = element.title.toLowerCase();
+    const isPdf = titleLower.endsWith(".pdf");
+    const isOffice = OFFICE_EXTENSIONS.some((ext) => titleLower.endsWith(ext));
+    if (!isPdf && !isOffice) continue;
+
     try {
-      const downloadUrl = await resolvePdfDownloadUrl(element.url);
+      const downloadUrl = isPdf
+        ? await resolvePdfDownloadUrl(element.url)
+        : await resolveOfficeDownloadUrl(element.url);
       const filename = `viastudywiz/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
       await chrome.downloads.download({ url: downloadUrl, filename });
+      await markDownloaded(element.id);
     } catch (err) {
-      console.error(`VIAstudyWiz PDF-fejl (${element.title}):`, err);
+      console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
     }
   }
 }
 
-chrome.action.onClicked.addListener(() => {
+function runCollectAndDownload() {
   const now = Math.floor(Date.now() / 1000);
-  const start = now - 7 * 24 * 60 * 60;
-  collectAndDownload(start, now).catch((err) => console.error("VIAstudyWiz fejl:", err));
+  const start = now - 1 * 24 * 60 * 60;
+  const end = now + 7 * 24 * 60 * 60;
+  collectAndDownload(start, end).catch((err) => console.error("VIAstudyWiz fejl:", err));
+}
+
+chrome.action.onClicked.addListener(runCollectAndDownload);
+
+// Kører automatisk hver dag uden manuelt klik — kræver en åben, logget-ind via.itslearning.com-fane.
+const DAILY_ALARM = "viastudywiz-daily-fetch";
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create(DAILY_ALARM, { periodInMinutes: 60 * 24 });
+});
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create(DAILY_ALARM, { periodInMinutes: 60 * 24 });
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === DAILY_ALARM) runCollectAndDownload();
 });
