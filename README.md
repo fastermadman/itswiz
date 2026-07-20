@@ -35,13 +35,16 @@ i ValdiVault.
    ```
    MINERU_API_TOKEN=dit-token-her
    ```
-3. Installér afhængigheder og kør:
+3. Opret isoleret venv med `uv` og installér afhængigheder:
    ```bash
-   pip3 install watchdog requests
-   python3 watchfolder/watch_viastudywiz.py   # kør manuelt/i forgrunden
+   cd watchfolder
+   uv venv
+   source .venv/bin/activate
+   uv pip install watchdog requests
+   python3 watch_viastudywiz.py   # kør manuelt/i forgrunden
    ```
 
-**Automatisk ved login (launchd):**
+**Automatisk ved login (launchd):** plisten peger på `.venv/bin/python3` — kør `uv venv` + `uv pip install` (trin 3) først.
 ```bash
 cp watchfolder/com.valdemar.viastudywiz-watchfolder.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.valdemar.viastudywiz-watchfolder.plist

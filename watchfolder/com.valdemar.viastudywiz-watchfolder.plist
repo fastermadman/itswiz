@@ -6,7 +6,7 @@
 	<string>com.valdemar.viastudywiz-watchfolder</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/valdefar/miniconda3/bin/python3</string>
+		<string>/Users/valdefar/Developer/viastudywiz-extension/watchfolder/.venv/bin/python3</string>
 		<string>/Users/valdefar/Developer/viastudywiz-extension/watchfolder/watch_viastudywiz.py</string>
 	</array>
 	<key>RunAtLoad</key>
