@@ -2,29 +2,55 @@
 """
 VIAstudyWiz watch-folder-script.
 
-Overvåger viastudywiz/-mappen for nye PDF'er, sender dem til MinerU
-(Finder-service-app'ens "upload"-kommando, cloud-baseret behandling),
-venter på at outputtet dukker op i ~/MinerU/, og flytter/omdøber det
-ind ved siden af den originale PDF. Se ValdiVault:
-10_Projects/VIAstudyWiz/07-mineru-output-integration.md for baggrund.
+Overvåger viastudywiz/-mappen for nye PDF'er, sender dem til MinerU's
+officielle REST API (mineru.net/api/v4, se ValdiVault:
+10_Projects/VIAstudyWiz/07-mineru-output-integration.md), og flytter/
+omdøber outputtet ind ved siden af den originale PDF.
+
+Kræver MINERU_API_TOKEN i en .env-fil ved siden af dette script
+(gitignored, se mineru.net/apiManage/token for at hente et token).
 """
 
 import re
 import shutil
-import subprocess
 import sys
+import tempfile
 import time
+import zipfile
 from pathlib import Path
 
+import requests
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 VAULT_ROOT = Path.home() / "Downloads" / "viastudywiz"
-MINERU_APP = Path("/Applications/MinerU.app/Contents/MacOS/MinerU")
-MINERU_OUTPUT_ROOT = Path.home() / "MinerU"
 IGNORED_DIR_NAMES = {"_metadata"}
-POLL_INTERVAL_S = 5
-POLL_TIMEOUT_S = 20 * 60  # store scanninger kan ligge i kø et stykke tid
+ENV_FILE = Path(__file__).parent / ".env"
+API_BASE = "https://mineru.net/api/v4"
+POLL_INTERVAL_S = 8
+POLL_TIMEOUT_S = 20 * 60
+
+
+def load_token() -> str:
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("MINERU_API_TOKEN="):
+            return line.split("=", 1)[1].strip()
+    raise RuntimeError(f"MINERU_API_TOKEN mangler i {ENV_FILE}")
+
+
+TOKEN = load_token()
+
+
+def api_request(method: str, path: str, body: dict | None = None) -> dict:
+    resp = requests.request(
+        method,
+        f"{API_BASE}{path}",
+        json=body,
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def sanitize(name: str) -> str:
@@ -35,77 +61,80 @@ def already_converted(pdf_path: Path) -> bool:
     return (pdf_path.parent / f"{sanitize(pdf_path.stem)}.md").exists()
 
 
-def find_run_folder(pdf_path: Path, after_ts: float) -> Path | None:
-    """MinerU-app'en navngiver output-mapper '<originalt filnavn>-<uuid>'. Vi matcher på
-    filnavn-præfiks og kræver at mappen er oprettet efter vi startede uploaden, så vi ikke
-    ved en fejl griber en gammel kørsel af en fil med samme navn."""
-    candidates = [
-        p for p in MINERU_OUTPUT_ROOT.glob(f"{pdf_path.name}-*")
-        if p.is_dir() and p.stat().st_mtime >= after_ts
-    ]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+def submit(pdf_path: Path) -> str:
+    resp = api_request(
+        "POST",
+        "/file-urls/batch",
+        {"files": [{"name": pdf_path.name, "data_id": sanitize(pdf_path.stem)}], "model_version": "vlm"},
+    )
+    if resp.get("code") != 0:
+        raise RuntimeError(f"file-urls/batch fejlede: {resp}")
+
+    batch_id = resp["data"]["batch_id"]
+    upload_url = resp["data"]["file_urls"][0]
+
+    put_resp = requests.put(upload_url, data=pdf_path.read_bytes(), timeout=300)
+    put_resp.raise_for_status()
+
+    return batch_id
 
 
-def wait_for_output(pdf_path: Path, after_ts: float) -> Path | None:
+def poll(batch_id: str) -> dict:
     deadline = time.time() + POLL_TIMEOUT_S
-    run_folder = None
     while time.time() < deadline:
-        if run_folder is None:
-            run_folder = find_run_folder(pdf_path, after_ts)
-        if run_folder is not None:
-            full_md = run_folder / "full.md"
-            if full_md.exists():
-                size_before = full_md.stat().st_size
-                time.sleep(POLL_INTERVAL_S)
-                size_after = full_md.stat().st_size if full_md.exists() else -1
-                if size_before == size_after and size_before > 0:
-                    return run_folder
-                continue
+        resp = api_request("GET", f"/extract-results/batch/{batch_id}")
+        result = resp["data"]["extract_result"][0]
+        if result["state"] == "done":
+            return result
+        if result["state"] == "failed":
+            raise RuntimeError(f"MinerU-fejl: {result.get('err_msg')}")
         time.sleep(POLL_INTERVAL_S)
-    return None
+    raise TimeoutError(f"Timeout efter {POLL_TIMEOUT_S}s")
 
 
-def integrate_output(pdf_path: Path, run_folder: Path) -> None:
+def integrate_output(pdf_path: Path, zip_url: str) -> None:
     title = sanitize(pdf_path.stem)
     dest_md = pdf_path.parent / f"{title}.md"
     dest_images = pdf_path.parent / f"{title}-images"
 
-    full_md = run_folder / "full.md"
-    images_dir = run_folder / "images"
+    # Vigtigt: udpakkes UDENFOR den overvågede vault-mappe. Ellers ser watchdog ZIP'ens egen
+    # "<uuid>_origin.pdf"-kopi som en ny fil og prøver at behandle den igen (selv-triggeret loop).
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        zip_path = tmp_dir / "result.zip"
 
-    text = full_md.read_text(encoding="utf-8")
-    text = text.replace("images/", f"{dest_images.name}/")
-    dest_md.write_text(text, encoding="utf-8")
+        zip_resp = requests.get(zip_url, timeout=120)
+        zip_resp.raise_for_status()
+        zip_path.write_bytes(zip_resp.content)
 
-    if images_dir.exists():
-        if dest_images.exists():
-            shutil.rmtree(dest_images)
-        shutil.move(str(images_dir), str(dest_images))
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp_dir)
 
-    shutil.rmtree(run_folder, ignore_errors=True)
+        full_md = tmp_dir / "full.md"
+        images_dir = tmp_dir / "images"
+
+        text = full_md.read_text(encoding="utf-8")
+        text = text.replace("images/", f"{dest_images.name}/")
+        dest_md.write_text(text, encoding="utf-8")
+
+        if images_dir.exists():
+            if dest_images.exists():
+                shutil.rmtree(dest_images)
+            shutil.move(str(images_dir), str(dest_images))
 
 
 def process_pdf(pdf_path: Path) -> None:
     if already_converted(pdf_path):
         return
 
-    print(f"Sender til MinerU: {pdf_path.name}")
-    started_at = time.time()
-    subprocess.Popen(
-        [str(MINERU_APP), "upload", str(pdf_path)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    run_folder = wait_for_output(pdf_path, started_at)
-    if run_folder is None:
-        print(f"Timeout: intet output fra MinerU for {pdf_path.name} inden for {POLL_TIMEOUT_S}s", file=sys.stderr)
-        return
-
-    integrate_output(pdf_path, run_folder)
-    print(f"Færdig: {pdf_path.name}")
+    print(f"Uploader til MinerU: {pdf_path.name}", flush=True)
+    try:
+        batch_id = submit(pdf_path)
+        result = poll(batch_id)
+        integrate_output(pdf_path, result["full_zip_url"])
+        print(f"Færdig: {pdf_path.name}", flush=True)
+    except (requests.RequestException, RuntimeError, TimeoutError, OSError) as exc:
+        print(f"Fejl ved {pdf_path.name}: {exc}", file=sys.stderr, flush=True)
 
 
 def scan_existing() -> None:
@@ -113,10 +142,7 @@ def scan_existing() -> None:
     for pdf_path in VAULT_ROOT.rglob("*.pdf"):
         if IGNORED_DIR_NAMES & {p.name for p in pdf_path.parents}:
             continue
-        try:
-            process_pdf(pdf_path)
-        except Exception as exc:
-            print(f"Fejl ved behandling af {pdf_path}: {exc}", file=sys.stderr)
+        process_pdf(pdf_path)
 
 
 class PdfHandler(FileSystemEventHandler):
@@ -129,10 +155,7 @@ class PdfHandler(FileSystemEventHandler):
         if IGNORED_DIR_NAMES & {p.name for p in path.parents}:
             return
         time.sleep(2)  # lad downloadet blive helt færdigskrevet før vi rører den
-        try:
-            process_pdf(path)
-        except Exception as exc:
-            print(f"Fejl ved behandling af {path}: {exc}", file=sys.stderr)
+        process_pdf(path)
 
 
 def main():
@@ -142,7 +165,7 @@ def main():
     observer = Observer()
     observer.schedule(PdfHandler(), str(VAULT_ROOT), recursive=True)
     observer.start()
-    print(f"Overvåger {VAULT_ROOT} ...")
+    print(f"Overvåger {VAULT_ROOT} ...", flush=True)
     try:
         while True:
             time.sleep(60)

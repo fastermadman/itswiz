@@ -22,16 +22,25 @@ De skal læses dynamisk fra browserens egen session ved runtime.
 
 ## watchfolder/ — MinerU-integration
 
-Overvåger `~/Downloads/viastudywiz/` for nye PDF'er, sender dem til MinerU
-(cloud-app, `/Applications/MinerU.app ... upload`), og flytter/omdøber
-outputtet ind ved siden af den originale PDF. Se
+Overvåger `~/Downloads/viastudywiz/` for nye PDF'er, sender dem til MinerU's
+officielle REST API (`mineru.net/api/v4`), og flytter/omdøber outputtet ind
+ved siden af den originale PDF. Se
 `10_Projects/VIAstudyWiz/07-mineru-output-integration.md` i ValdiVault.
 
-```bash
-pip3 install watchdog
-python3 watchfolder/watch_viastudywiz.py   # kør manuelt/i forgrunden
+**Opsætning:**
+1. Hent et API-token på [mineru.net/apiManage/token](https://mineru.net/apiManage/token)
+2. Opret `watchfolder/.env` (git-ignoreret) med:
+   ```
+   MINERU_API_TOKEN=dit-token-her
+   ```
+3. Installér afhængigheder og kør:
+   ```bash
+   pip3 install watchdog requests
+   python3 watchfolder/watch_viastudywiz.py   # kør manuelt/i forgrunden
+   ```
 
-# eller: kør automatisk ved login via launchd
+**Automatisk ved login (launchd):**
+```bash
 cp watchfolder/com.valdemar.viastudywiz-watchfolder.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.valdemar.viastudywiz-watchfolder.plist
 ```
