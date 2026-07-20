@@ -99,7 +99,7 @@ async function collectAndDownload(startUnix, endUnix) {
 
   const json = JSON.stringify(result, null, 2);
   const url = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-  await chrome.downloads.download({ url, filename: `VIAvault/_metadata/viastudywiz-${startUnix}-${endUnix}.json` });
+  await chrome.downloads.download({ url, filename: `ViaVault/_metadata/viastudywiz-${startUnix}-${endUnix}.json` });
 
   await downloadFileElements(result.plans);
   return result;
@@ -242,7 +242,7 @@ async function downloadFileElements(plans) {
       const downloadUrl = isPdf
         ? await resolvePdfDownloadUrl(element.url)
         : await resolveOfficeDownloadUrl(element.url);
-      const filename = `VIAvault/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
+      const filename = `ViaVault/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
       await chrome.downloads.download({ url: downloadUrl, filename });
       await markDownloaded(element.id);
     } catch (err) {
