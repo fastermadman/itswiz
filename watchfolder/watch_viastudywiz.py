@@ -2,7 +2,8 @@
 """
 VIAstudyWiz watch-folder-script.
 
-Overvåger viastudywiz/-mappen for nye PDF'er, sender dem til MinerU's
+Overvåger ~/ViaVault (symlinket ind i ~/Downloads/VIAvault for Chromes
+download-skrivning) for nye PDF'er, sender dem til MinerU's
 officielle REST API (mineru.net/api/v4, se ValdiVault:
 10_Projects/VIAstudyWiz/07-mineru-output-integration.md), og flytter/
 omdøber outputtet ind ved siden af den originale PDF.
@@ -23,7 +24,7 @@ import requests
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-VAULT_ROOT = Path.home() / "Downloads" / "viastudywiz"
+VAULT_ROOT = Path.home() / "ViaVault"  # ægte sti; ~/Downloads/VIAvault symlinker hertil
 IGNORED_DIR_NAMES = {"_metadata"}
 ENV_FILE = Path(__file__).parent / ".env"
 API_BASE = "https://mineru.net/api/v4"

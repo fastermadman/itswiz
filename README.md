@@ -22,10 +22,12 @@ De skal læses dynamisk fra browserens egen session ved runtime.
 
 ## watchfolder/ — MinerU-integration
 
-Overvåger `~/Downloads/viastudywiz/` for nye PDF'er, sender dem til MinerU's
-officielle REST API (`mineru.net/api/v4`), og flytter/omdøber outputtet ind
-ved siden af den originale PDF. Se
-`10_Projects/VIAstudyWiz/07-mineru-output-integration.md` i ValdiVault.
+Overvåger `~/ViaVault/` (symlinket ind i `~/Downloads/VIAvault` — skjult
+symlink, så Chrome kan skrive dertil uden at mappen roder i Downloads-
+oversigten) for nye PDF'er, sender dem til MinerU's officielle REST API
+(`mineru.net/api/v4`), og flytter/omdøber outputtet ind ved siden af den
+originale PDF. Se `10_Projects/VIAstudyWiz/07-mineru-output-integration.md`
+i ValdiVault.
 
 **Opsætning:**
 1. Hent et API-token på [mineru.net/apiManage/token](https://mineru.net/apiManage/token)
