@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtg1om73cFXhPLwTbwRbwJlLT1bjpfGbkMch4hxsQ6+vdPKQ1J67a6nVBvWqRdQBsbzTHJjuWKKdOXE0Z6FLU4DcJ6QyHQzPEduO38Ed1eBTG0x3FDVm/exFlv7572RE7d3jK8XuHjF++T93QR7JSa4w2RghSI2oMscLHcGXW4eiMzbMgz/u9iYFru2PWQ1CPGXdHUbqwKU6zSx+iGGI+TxopVGPAblWqu6NS14v4IQ5GpS1g6D7Yr/0Z7+6Tl+d7f0+G2UsmuGpj4M323iIinb99x2A31wcmlvMaR7WoSljkgPwtUZ9HDkFv7E5VvRRHZ45dgVSVurlO6zY0UG9HBQIDAQAB",
   "name": "VIAstudyWiz",
   "version": "0.1.0",
   "description": "Henter lektionsplaner og materialer fra via.itslearning.com programmatisk.",
