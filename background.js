@@ -2,15 +2,20 @@
 // gem-dialog uafhængigt af "spørg hvor filer skal gemmes"-indstillingen (kendt Chromium-kviks,
 // issues.chromium.org/issues/40359474). onDeterminingFilename er en separat, dokumenteret vej
 // til at styre destinationen der ikke rammer samme problem.
+//
+// Matcher på download-ID, ikke URL — en eksakt streng-sammenligning på URL'en fejlede i praksis
+// (Chrome normaliserer formentlig URL-strengen en smule inden onDeterminingFilename kaldes,
+// nok med presignede URLs med specialtegn i signaturen), så filerne landede i standard-Downloads
+// under serverens eget filnavn i stedet for i vaulten. ID er et helt tal, ingen fragilitet.
 const pendingDownloadFilenames = new Map();
 
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  const filename = pendingDownloadFilenames.get(downloadItem.url);
+  const filename = pendingDownloadFilenames.get(downloadItem.id);
   console.log(
     `VIAstudyWiz onDeterminingFilename: id=${downloadItem.id} url=${downloadItem.url} match=${Boolean(filename)}${filename ? ` -> ${filename}` : ""}`
   );
   if (filename) {
-    pendingDownloadFilenames.delete(downloadItem.url);
+    pendingDownloadFilenames.delete(downloadItem.id);
     suggest({ filename, conflictAction: "uniquify" });
   } else {
     suggest();
@@ -27,10 +32,9 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 async function queuedDownload(url, filename) {
-  pendingDownloadFilenames.set(url, filename);
-  console.log(`VIAstudyWiz queuedDownload: url=${url} -> ${filename}`);
   const downloadId = await chrome.downloads.download({ url });
-  console.log(`VIAstudyWiz queuedDownload: chrome.downloads.download returnerede id=${downloadId}`);
+  pendingDownloadFilenames.set(downloadId, filename);
+  console.log(`VIAstudyWiz queuedDownload: id=${downloadId} url=${url} -> ${filename}`);
 }
 
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
