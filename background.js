@@ -104,14 +104,15 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   if (settings.enableFileDownloads) await downloadFileElements(result.plans, settings.vaultFolderName);
 
-  // Blob-URL i stedet for data:-URL — Chrome ser ud til at gennemtvinge gem-dialogen for
-  // data:-downloads uafhængigt af "spørg hvor filer skal gemmes"-indstillingen.
+  // URL.createObjectURL findes ikke i service workers, så data:-URL er eneste mulighed her —
+  // Chrome ser ud til at gennemtvinge gem-dialogen for data:-downloads uafhængigt af "spørg
+  // hvor filer skal gemmes"-indstillingen. Ikke afventet: en hængende dialog må ikke kunne
+  // blokere noget, og kalender+filer er allerede kørt på dette tidspunkt.
   const json = JSON.stringify(result, null, 2);
-  const blobUrl = URL.createObjectURL(new Blob([json], { type: "application/json" }));
-  await chrome.downloads.download({
-    url: blobUrl,
-    filename: `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json`,
-  });
+  const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+  chrome.downloads
+    .download({ url: dataUrl, filename: `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json` })
+    .catch((err) => console.error("VIAstudyWiz JSON-download-fejl:", err));
 
   return result;
 }
