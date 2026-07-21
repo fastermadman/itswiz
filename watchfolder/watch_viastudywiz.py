@@ -58,8 +58,18 @@ def sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", name).strip()
 
 
+def error_marker_path(pdf_path: Path) -> Path:
+    return pdf_path.parent / f".{sanitize(pdf_path.stem)}.mineru-error.txt"
+
+
 def already_converted(pdf_path: Path) -> bool:
     return (pdf_path.parent / f"{sanitize(pdf_path.stem)}.md").exists()
+
+
+def previously_failed(pdf_path: Path) -> bool:
+    # Undgår at retry en fil for evigt ved hver script-genstart (fx en PDF over MinerU's
+    # sidegrænse vil aldrig lykkes) - marker-filen fjernes manuelt hvis man vil prøve igen.
+    return error_marker_path(pdf_path).exists()
 
 
 def submit(pdf_path: Path) -> str:
@@ -125,7 +135,7 @@ def integrate_output(pdf_path: Path, zip_url: str) -> None:
 
 
 def process_pdf(pdf_path: Path) -> None:
-    if already_converted(pdf_path):
+    if already_converted(pdf_path) or previously_failed(pdf_path):
         return
 
     print(f"Uploader til MinerU: {pdf_path.name}", flush=True)
@@ -136,6 +146,7 @@ def process_pdf(pdf_path: Path) -> None:
         print(f"Færdig: {pdf_path.name}", flush=True)
     except (requests.RequestException, RuntimeError, TimeoutError, OSError) as exc:
         print(f"Fejl ved {pdf_path.name}: {exc}", file=sys.stderr, flush=True)
+        error_marker_path(pdf_path).write_text(str(exc), encoding="utf-8")
 
 
 def scan_existing() -> None:
