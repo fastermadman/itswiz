@@ -396,6 +396,7 @@ async function upsertCalendarEvent(token, calendarId, itslearningEventId, body, 
   }
   const data = await res.json();
   eventMap[itslearningEventId] = data.id;
+  return data;
 }
 
 async function syncCalendar(result) {
@@ -405,7 +406,8 @@ async function syncCalendar(result) {
 
   const matchable = result.events.filter((e) => COURSE_CALENDAR_NAMES[e.title]).length;
   console.log(
-    `VIAstudyWiz: ${result.events.length} events hentet, ${matchable} matcher en kendt fag→kalender-mapping, ${Object.keys(calendarIds).length} Google-kalendere fundet: ${Object.keys(calendarIds).join(", ")}`
+    `VIAstudyWiz: ${result.events.length} events hentet, ${matchable} matcher en kendt fag→kalender-mapping, ${Object.keys(calendarIds).length} Google-kalendere fundet:`,
+    calendarIds
   );
 
   for (const event of result.events) {
@@ -430,7 +432,10 @@ async function syncCalendar(result) {
     };
 
     try {
-      await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
+      const created = await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
+      console.log(
+        `VIAstudyWiz: "${body.summary}" -> kalender-id ${calendarId}, event-link ${created.htmlLink}`
+      );
     } catch (err) {
       console.error(`VIAstudyWiz kalender-fejl (${body.summary}):`, err);
     }
