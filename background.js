@@ -423,7 +423,7 @@ async function syncCalendar(result) {
     const planKey = (event.PlanIds ?? [])[0] ? `${event.courseId}:${event.PlanIds[0]}` : null;
     const plan = planKey ? result.plans[planKey] : null;
 
-    const titlePart = stripWeekdayPrefix(event.PlanTitle ?? plan?.title) || "Lektion";
+    const titlePart = stripWeekdayPrefix(event.PlanTitle ?? plan?.title) || event.title;
     const body = {
       summary: `${calendarName} — ${titlePart}`,
       location: event.parsedDescription?.room ?? "",
