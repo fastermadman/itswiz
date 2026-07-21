@@ -306,9 +306,28 @@ function toGoogleDateTime(isoString) {
   return isoString.slice(0, 19);
 }
 
+// itslearnings plan-beskrivelser er rig HTML (<p>, <table>, links, osv.). Service workers har
+// ikke DOMParser, så det er en regex-baseret oversættelse til læsbar ren tekst, ikke en fuld parser.
+function stripHtml(html) {
+  if (!html) return "";
+  return html
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, "$2 ($1)")
+    .replace(/<\/(p|div|tr|table|li)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function buildEventDescription(plan) {
   if (!plan) return "";
-  const lines = [plan.title ?? "", "", plan.description ?? ""];
+  const lines = [plan.title ?? "", "", stripHtml(plan.description)];
   const elements = (plan.elements ?? []).map((el) => `- ${el.title}`);
   if (elements.length > 0) {
     lines.push("", "Materialer:", ...elements);
