@@ -104,15 +104,16 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   if (settings.enableFileDownloads) await downloadFileElements(result.plans, settings.vaultFolderName);
 
-  // URL.createObjectURL findes ikke i service workers, så data:-URL er eneste mulighed her —
-  // Chrome ser ud til at gennemtvinge gem-dialogen for data:-downloads uafhængigt af "spørg
-  // hvor filer skal gemmes"-indstillingen. Ikke afventet: en hængende dialog må ikke kunne
-  // blokere noget, og kalender+filer er allerede kørt på dette tidspunkt.
-  const json = JSON.stringify(result, null, 2);
-  const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-  chrome.downloads
-    .download({ url: dataUrl, filename: `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json` })
-    .catch((err) => console.error("VIAstudyWiz JSON-download-fejl:", err));
+  // Metadata-JSON'en bruges ikke til noget - hverken kalender-sync eller fil-download læser den,
+  // den er ren debug-dump. Slået fra som standard, da data:-URLs tvinger Chromes gem-dialog frem
+  // (kendt MV3-begrænsning, URL.createObjectURL findes ikke i service workers).
+  if (settings.enableMetadataExport) {
+    const json = JSON.stringify(result, null, 2);
+    const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+    chrome.downloads
+      .download({ url: dataUrl, filename: `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json` })
+      .catch((err) => console.error("VIAstudyWiz JSON-download-fejl:", err));
+  }
 
   return result;
 }
@@ -356,17 +357,31 @@ async function saveEventMap(map) {
   await chrome.storage.local.set({ [CALENDAR_EVENT_MAP_KEY]: map });
 }
 
-async function upsertCalendarEvent(token, calendarId, itslearningEventId, body, eventMap) {
-  const existingGoogleEventId = eventMap[itslearningEventId];
-  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
-  const url = existingGoogleEventId ? `${base}/${existingGoogleEventId}` : base;
-  const method = existingGoogleEventId ? "PATCH" : "POST";
-
+async function callCalendarApi(token, url, method, body) {
   const res = await fetch(url, {
     method,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  return res;
+}
+
+async function upsertCalendarEvent(token, calendarId, itslearningEventId, body, eventMap) {
+  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+  const existingGoogleEventId = eventMap[itslearningEventId];
+
+  let res;
+  if (existingGoogleEventId) {
+    res = await callCalendarApi(token, `${base}/${existingGoogleEventId}`, "PATCH", body);
+    if (res.status === 404 || res.status === 410) {
+      // Eventet er væk i Google (fx manuelt slettet) — vores gemte mapping er forældet, opret nyt.
+      delete eventMap[itslearningEventId];
+      res = await callCalendarApi(token, base, "POST", body);
+    }
+  } else {
+    res = await callCalendarApi(token, base, "POST", body);
+  }
+
   if (!res.ok) {
     throw new Error(`Calendar API-fejl (${res.status}): ${await res.text()}`);
   }
@@ -416,6 +431,7 @@ const DEFAULT_SETTINGS = {
   daysForward: 30,
   enableFileDownloads: true,
   enableCalendarSync: true,
+  enableMetadataExport: false,
   vaultFolderName: "ViaVault",
   alarmIntervalHours: 24,
 };
