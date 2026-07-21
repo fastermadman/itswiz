@@ -325,6 +325,12 @@ function stripHtml(html) {
     .trim();
 }
 
+// itslearning-planer hedder tit "Uge 33 Tirsdag <indhold>" — ugedagen er overflødig i en
+// kalender-titel, kalenderen viser jo allerede selv dato/ugedag. Fjern kun hvis mønsteret matcher.
+function stripWeekdayPrefix(title) {
+  return (title ?? "").replace(/^Uge\s+\d+\s+\S+\s*/i, "").trim();
+}
+
 function buildEventDescription(plan) {
   if (!plan) return "";
   const lines = [plan.title ?? "", "", stripHtml(plan.description)];
@@ -381,7 +387,7 @@ async function syncCalendar(result) {
     const plan = planKey ? result.plans[planKey] : null;
 
     const body = {
-      summary: `${calendarName} — ${event.PlanTitle ?? plan?.title ?? ""}`,
+      summary: `${calendarName} — ${stripWeekdayPrefix(event.PlanTitle ?? plan?.title)}`,
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
       start: { dateTime: toGoogleDateTime(event.start), timeZone: TIME_ZONE },
