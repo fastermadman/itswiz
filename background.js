@@ -1,3 +1,24 @@
+// At sætte "filename" direkte i chrome.downloads.download() ser ud til at trigge Chromes
+// gem-dialog uafhængigt af "spørg hvor filer skal gemmes"-indstillingen (kendt Chromium-kviks,
+// issues.chromium.org/issues/40359474). onDeterminingFilename er en separat, dokumenteret vej
+// til at styre destinationen der ikke rammer samme problem.
+const pendingDownloadFilenames = new Map();
+
+chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
+  const filename = pendingDownloadFilenames.get(downloadItem.url);
+  if (filename) {
+    pendingDownloadFilenames.delete(downloadItem.url);
+    suggest({ filename, conflictAction: "uniquify" });
+  } else {
+    suggest();
+  }
+});
+
+async function queuedDownload(url, filename) {
+  pendingDownloadFilenames.set(url, filename);
+  await chrome.downloads.download({ url });
+}
+
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
 // fordi myEvents-POST'et afvises med 403 når Origin er chrome-extension://... i stedet for
 // den rigtige side-origin (CSRF/Origin-tjek server-side).
@@ -112,14 +133,13 @@ async function collectAndDownload(startUnix, endUnix) {
   console.log("VIAstudyWiz: kørsel færdig");
 
   // Metadata-JSON'en bruges ikke til noget - hverken kalender-sync eller fil-download læser den,
-  // den er ren debug-dump. Slået fra som standard, da data:-URLs tvinger Chromes gem-dialog frem
-  // (kendt MV3-begrænsning, URL.createObjectURL findes ikke i service workers).
+  // den er ren debug-dump. Slået fra som standard.
   if (settings.enableMetadataExport) {
     const json = JSON.stringify(result, null, 2);
     const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-    chrome.downloads
-      .download({ url: dataUrl, filename: `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json` })
-      .catch((err) => console.error("VIAstudyWiz JSON-download-fejl:", err));
+    queuedDownload(dataUrl, `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json`).catch(
+      (err) => console.error("VIAstudyWiz JSON-download-fejl:", err)
+    );
   }
 
   return result;
@@ -265,7 +285,7 @@ async function downloadFileElements(plans, vaultFolderName) {
         ? await resolvePdfDownloadUrl(element.url)
         : await resolveOfficeDownloadUrl(element.url);
       const filename = `${vaultFolderName}/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
-      await chrome.downloads.download({ url: downloadUrl, filename });
+      await queuedDownload(downloadUrl, filename);
       await markDownloaded(element.id);
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
