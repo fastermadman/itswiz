@@ -86,6 +86,8 @@ async function collectRangeInPage(startUnix, endUnix) {
 }
 
 async function collectAndDownload(startUnix, endUnix) {
+  const settings = await getSettings();
+
   const [tab] = await chrome.tabs.query({ url: "https://via.itslearning.com/*" });
   if (!tab) {
     throw new Error("Ingen åben fane med via.itslearning.com fundet — åbn og log ind først.");
@@ -99,10 +101,13 @@ async function collectAndDownload(startUnix, endUnix) {
 
   const json = JSON.stringify(result, null, 2);
   const url = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-  await chrome.downloads.download({ url, filename: `ViaVault/_metadata/viastudywiz-${startUnix}-${endUnix}.json` });
+  await chrome.downloads.download({
+    url,
+    filename: `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json`,
+  });
 
-  await downloadFileElements(result.plans);
-  await syncCalendar(result);
+  if (settings.enableFileDownloads) await downloadFileElements(result.plans, settings.vaultFolderName);
+  if (settings.enableCalendarSync) await syncCalendar(result);
   return result;
 }
 
@@ -218,7 +223,7 @@ async function markDownloaded(id) {
   await chrome.storage.local.set({ [DOWNLOADED_IDS_KEY]: [...ids] });
 }
 
-async function downloadFileElements(plans) {
+async function downloadFileElements(plans, vaultFolderName) {
   const downloadedIds = await getDownloadedIds();
 
   const fileElements = Object.values(plans)
@@ -243,7 +248,7 @@ async function downloadFileElements(plans) {
       const downloadUrl = isPdf
         ? await resolvePdfDownloadUrl(element.url)
         : await resolveOfficeDownloadUrl(element.url);
-      const filename = `ViaVault/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
+      const filename = `${vaultFolderName}/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
       await chrome.downloads.download({ url: downloadUrl, filename });
       await markDownloaded(element.id);
     } catch (err) {
@@ -374,15 +379,23 @@ async function syncCalendar(result) {
   await saveEventMap(eventMap);
 }
 
-const DEFAULT_INTERVAL = { daysBack: 1, daysForward: 30 };
+const SETTINGS_KEY = "viastudywizSettings";
+const DEFAULT_SETTINGS = {
+  daysBack: 1,
+  daysForward: 30,
+  enableFileDownloads: true,
+  enableCalendarSync: true,
+  vaultFolderName: "ViaVault",
+  alarmIntervalHours: 24,
+};
 
-async function getIntervalSettings() {
-  const { intervalSettings } = await chrome.storage.local.get("intervalSettings");
-  return { ...DEFAULT_INTERVAL, ...intervalSettings };
+async function getSettings() {
+  const { [SETTINGS_KEY]: settings } = await chrome.storage.local.get(SETTINGS_KEY);
+  return { ...DEFAULT_SETTINGS, ...settings };
 }
 
 async function runCollectAndDownload() {
-  const { daysBack, daysForward } = await getIntervalSettings();
+  const { daysBack, daysForward } = await getSettings();
   const now = Math.floor(Date.now() / 1000);
   const start = now - daysBack * 24 * 60 * 60;
   const end = now + daysForward * 24 * 60 * 60;
@@ -391,14 +404,20 @@ async function runCollectAndDownload() {
 
 chrome.action.onClicked.addListener(runCollectAndDownload);
 
-// Kører automatisk hver dag uden manuelt klik — kræver en åben, logget-ind via.itslearning.com-fane.
+// Kører automatisk uden manuelt klik — kræver en åben, logget-ind via.itslearning.com-fane.
 const DAILY_ALARM = "viastudywiz-daily-fetch";
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create(DAILY_ALARM, { periodInMinutes: 60 * 24 });
-});
-chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create(DAILY_ALARM, { periodInMinutes: 60 * 24 });
+async function registerAlarm() {
+  const { alarmIntervalHours } = await getSettings();
+  chrome.alarms.create(DAILY_ALARM, { periodInMinutes: alarmIntervalHours * 60 });
+}
+
+chrome.runtime.onInstalled.addListener(registerAlarm);
+chrome.runtime.onStartup.addListener(registerAlarm);
+
+// Options-siden gemmer i SETTINGS_KEY — genregistrér alarmen hvis intervallet er ændret.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes[SETTINGS_KEY]) registerAlarm();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
