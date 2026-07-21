@@ -6,6 +6,9 @@ const pendingDownloadFilenames = new Map();
 
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   const filename = pendingDownloadFilenames.get(downloadItem.url);
+  console.log(
+    `VIAstudyWiz onDeterminingFilename: id=${downloadItem.id} url=${downloadItem.url} match=${Boolean(filename)}${filename ? ` -> ${filename}` : ""}`
+  );
   if (filename) {
     pendingDownloadFilenames.delete(downloadItem.url);
     suggest({ filename, conflictAction: "uniquify" });
@@ -14,9 +17,20 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   }
 });
 
+chrome.downloads.onChanged.addListener((delta) => {
+  if (delta.state) {
+    console.log(`VIAstudyWiz download onChanged: id=${delta.id} state=${delta.state.current}`);
+  }
+  if (delta.error) {
+    console.error(`VIAstudyWiz download-fejl: id=${delta.id} error=${delta.error.current}`);
+  }
+});
+
 async function queuedDownload(url, filename) {
   pendingDownloadFilenames.set(url, filename);
-  await chrome.downloads.download({ url });
+  console.log(`VIAstudyWiz queuedDownload: url=${url} -> ${filename}`);
+  const downloadId = await chrome.downloads.download({ url });
+  console.log(`VIAstudyWiz queuedDownload: chrome.downloads.download returnerede id=${downloadId}`);
 }
 
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
