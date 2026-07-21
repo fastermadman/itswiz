@@ -86,6 +86,7 @@ async function collectRangeInPage(startUnix, endUnix) {
 }
 
 async function collectAndDownload(startUnix, endUnix) {
+  console.log(`VIAstudyWiz: starter kørsel (${new Date(startUnix * 1000).toISOString()} → ${new Date(endUnix * 1000).toISOString()})`);
   const settings = await getSettings();
 
   const [tab] = await chrome.tabs.query({ url: "https://via.itslearning.com/*" });
@@ -99,10 +100,16 @@ async function collectAndDownload(startUnix, endUnix) {
     args: [startUnix, endUnix],
   });
 
+  console.log(
+    `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer`
+  );
+
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
   // ikke blokerer det der faktisk betyder noget.
   if (settings.enableCalendarSync) await syncCalendar(result);
   if (settings.enableFileDownloads) await downloadFileElements(result.plans, settings.vaultFolderName);
+
+  console.log("VIAstudyWiz: kørsel færdig");
 
   // Metadata-JSON'en bruges ikke til noget - hverken kalender-sync eller fil-download læser den,
   // den er ren debug-dump. Slået fra som standard, da data:-URLs tvinger Chromes gem-dialog frem
@@ -244,6 +251,8 @@ async function downloadFileElements(plans, vaultFolderName) {
           element: el,
         }))
     );
+
+  console.log(`VIAstudyWiz: ${fileElements.length} nye fil-elementer at behandle (efter dedup)`);
 
   for (const { courseName, weekFolder, element } of fileElements) {
     const titleLower = element.title.toLowerCase();
@@ -393,6 +402,11 @@ async function syncCalendar(result) {
   const token = await getAuthToken();
   const calendarIds = await fetchCalendarIdMap(token);
   const eventMap = await getEventMap();
+
+  const matchable = result.events.filter((e) => COURSE_CALENDAR_NAMES[e.title]).length;
+  console.log(
+    `VIAstudyWiz: ${result.events.length} events hentet, ${matchable} matcher en kendt fag→kalender-mapping, ${Object.keys(calendarIds).length} Google-kalendere fundet: ${Object.keys(calendarIds).join(", ")}`
+  );
 
   for (const event of result.events) {
     const calendarName = COURSE_CALENDAR_NAMES[event.title];
