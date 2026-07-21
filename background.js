@@ -102,6 +102,7 @@ async function collectAndDownload(startUnix, endUnix) {
   await chrome.downloads.download({ url, filename: `ViaVault/_metadata/viastudywiz-${startUnix}-${endUnix}.json` });
 
   await downloadFileElements(result.plans);
+  await syncCalendar(result);
   return result;
 }
 
@@ -249,6 +250,128 @@ async function downloadFileElements(plans) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
     }
   }
+}
+
+// Kalender-sync: ét Google Calendar-event pr. lektion, i fagets egen kalender (allerede
+// oprettet manuelt af Valdemar i viawievaldi@gmail.com). Se ValdiVault:
+// 10_Projects/VIAstudyWiz/03-kalender-integration.md.
+const COURSE_CALENDAR_NAMES = {
+  "LSmu-2527": "Musik",
+  "LSmu-ec2425": "Musik",
+  "LSkr-2628": "Religion",
+  "LSS24.1livs": "LivsOplysning",
+  "LSdau2-2526": "Dansk",
+  "LSS24.1da": "Dansk",
+  "LSS24.1psyk.spæd": "PædPsyk",
+  "LSS24pra1-2425": "Praktik",
+  "LStek-f26": "Teknologiforståelse",
+  "LSS24.1pæd.ad": "PædAd",
+};
+
+const CALENDAR_EVENT_MAP_KEY = "calendarEventMap";
+const TIME_ZONE = "Europe/Copenhagen";
+
+function getAuthToken(interactive = true) {
+  return new Promise((resolve, reject) => {
+    chrome.identity.getAuthToken({ interactive }, (token) => {
+      if (chrome.runtime.lastError || !token) {
+        reject(new Error(chrome.runtime.lastError?.message ?? "Intet token modtaget"));
+      } else {
+        resolve(token);
+      }
+    });
+  });
+}
+
+async function fetchCalendarIdMap(token) {
+  const res = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  const map = {};
+  for (const cal of data.items ?? []) {
+    map[cal.summary] = cal.id;
+  }
+  return map;
+}
+
+// itslearning-tider har ingen tidszone-suffix (fx "2026-04-29T12:30:00.0000000") — Calendar
+// API'et vil have et rent ISO-tidspunkt + separat timeZone-felt.
+function toGoogleDateTime(isoString) {
+  return isoString.slice(0, 19);
+}
+
+function buildEventDescription(plan) {
+  if (!plan) return "";
+  const lines = [plan.title ?? "", "", plan.description ?? ""];
+  const elements = (plan.elements ?? []).map((el) => `- ${el.title}`);
+  if (elements.length > 0) {
+    lines.push("", "Materialer:", ...elements);
+  }
+  return lines.join("\n");
+}
+
+async function getEventMap() {
+  const { [CALENDAR_EVENT_MAP_KEY]: map } = await chrome.storage.local.get(CALENDAR_EVENT_MAP_KEY);
+  return map ?? {};
+}
+
+async function saveEventMap(map) {
+  await chrome.storage.local.set({ [CALENDAR_EVENT_MAP_KEY]: map });
+}
+
+async function upsertCalendarEvent(token, calendarId, itslearningEventId, body, eventMap) {
+  const existingGoogleEventId = eventMap[itslearningEventId];
+  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
+  const url = existingGoogleEventId ? `${base}/${existingGoogleEventId}` : base;
+  const method = existingGoogleEventId ? "PATCH" : "POST";
+
+  const res = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`Calendar API-fejl (${res.status}): ${await res.text()}`);
+  }
+  const data = await res.json();
+  eventMap[itslearningEventId] = data.id;
+}
+
+async function syncCalendar(result) {
+  const token = await getAuthToken();
+  const calendarIds = await fetchCalendarIdMap(token);
+  const eventMap = await getEventMap();
+
+  for (const event of result.events) {
+    const calendarName = COURSE_CALENDAR_NAMES[event.title];
+    if (!calendarName) continue; // ukendt/afsluttet/ikke-mappet fag, spring over
+
+    const calendarId = calendarIds[calendarName];
+    if (!calendarId) {
+      console.warn(`VIAstudyWiz: ingen Google-kalender fundet ved navn "${calendarName}"`);
+      continue;
+    }
+
+    const planKey = (event.PlanIds ?? [])[0] ? `${event.courseId}:${event.PlanIds[0]}` : null;
+    const plan = planKey ? result.plans[planKey] : null;
+
+    const body = {
+      summary: `${calendarName} — ${event.PlanTitle ?? plan?.title ?? ""}`,
+      location: event.parsedDescription?.room ?? "",
+      description: buildEventDescription(plan),
+      start: { dateTime: toGoogleDateTime(event.start), timeZone: TIME_ZONE },
+      end: { dateTime: toGoogleDateTime(event.end), timeZone: TIME_ZONE },
+    };
+
+    try {
+      await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
+    } catch (err) {
+      console.error(`VIAstudyWiz kalender-fejl (${body.summary}):`, err);
+    }
+  }
+
+  await saveEventMap(eventMap);
 }
 
 function runCollectAndDownload() {

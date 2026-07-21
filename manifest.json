@@ -4,18 +4,26 @@
   "name": "VIAstudyWiz",
   "version": "0.1.0",
   "description": "Henter lektionsplaner og materialer fra via.itslearning.com programmatisk.",
-  "permissions": ["downloads", "scripting", "webRequest", "storage", "alarms"],
+  "permissions": ["downloads", "scripting", "webRequest", "storage", "alarms", "identity"],
   "host_permissions": [
     "https://via.itslearning.com/*",
     "https://platform.itslearning.com/*",
     "https://resource.itslearning.com/*",
     "https://filerepository.itslearning.com/*",
-    "https://filecache.itslearning.com/*"
+    "https://filecache.itslearning.com/*",
+    "https://www.googleapis.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_title": "VIAstudyWiz"
+  },
+  "oauth2": {
+    "client_id": "819788898312-nj9pg7n0qmi37c8sloe4t3q1b78n919k.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+    ]
   }
 }
