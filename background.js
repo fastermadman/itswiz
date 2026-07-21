@@ -425,6 +425,8 @@ async function syncCalendar(result) {
 
     const titlePart = stripWeekdayPrefix(event.PlanTitle ?? plan?.title) || event.title;
     const body = {
+      status: "confirmed", // PATCH på et manuelt slettet (= "cancelled") event genopliver det ikke
+      // automatisk medmindre status eksplicit sættes tilbage - Google bevarer ellers feltet.
       summary: `${calendarName} — ${titlePart}`,
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
