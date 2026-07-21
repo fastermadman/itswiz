@@ -374,10 +374,18 @@ async function syncCalendar(result) {
   await saveEventMap(eventMap);
 }
 
-function runCollectAndDownload() {
+const DEFAULT_INTERVAL = { daysBack: 1, daysForward: 30 };
+
+async function getIntervalSettings() {
+  const { intervalSettings } = await chrome.storage.local.get("intervalSettings");
+  return { ...DEFAULT_INTERVAL, ...intervalSettings };
+}
+
+async function runCollectAndDownload() {
+  const { daysBack, daysForward } = await getIntervalSettings();
   const now = Math.floor(Date.now() / 1000);
-  const start = now - 1 * 24 * 60 * 60;
-  const end = now + 7 * 24 * 60 * 60;
+  const start = now - daysBack * 24 * 60 * 60;
+  const end = now + daysForward * 24 * 60 * 60;
   collectAndDownload(start, end).catch((err) => console.error("VIAstudyWiz fejl:", err));
 }
 

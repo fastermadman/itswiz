@@ -19,6 +19,10 @@
   "action": {
     "default_title": "VIAstudyWiz"
   },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "oauth2": {
     "client_id": "819788898312-nj9pg7n0qmi37c8sloe4t3q1b78n919k.apps.googleusercontent.com",
     "scopes": [

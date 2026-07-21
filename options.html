@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VIAstudyWiz — indstillinger</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 320px; }
+    label { display: block; margin-bottom: 0.75rem; }
+    input { width: 5rem; margin-left: 0.5rem; }
+    button { margin-top: 0.5rem; }
+    #status { margin-left: 0.75rem; color: green; }
+  </style>
+</head>
+<body>
+  <h2>Tidsinterval</h2>
+  <label>Dage bagud: <input type="number" id="daysBack" min="0" /></label>
+  <label>Dage fremad: <input type="number" id="daysForward" min="0" /></label>
+  <button id="save">Gem</button>
+  <span id="status"></span>
+  <script src="options.js"></script>
+</body>
+</html>
