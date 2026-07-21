@@ -99,15 +99,20 @@ async function collectAndDownload(startUnix, endUnix) {
     args: [startUnix, endUnix],
   });
 
+  // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
+  // ikke blokerer det der faktisk betyder noget.
+  if (settings.enableCalendarSync) await syncCalendar(result);
+  if (settings.enableFileDownloads) await downloadFileElements(result.plans, settings.vaultFolderName);
+
+  // Blob-URL i stedet for data:-URL — Chrome ser ud til at gennemtvinge gem-dialogen for
+  // data:-downloads uafhængigt af "spørg hvor filer skal gemmes"-indstillingen.
   const json = JSON.stringify(result, null, 2);
-  const url = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+  const blobUrl = URL.createObjectURL(new Blob([json], { type: "application/json" }));
   await chrome.downloads.download({
-    url,
+    url: blobUrl,
     filename: `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json`,
   });
 
-  if (settings.enableFileDownloads) await downloadFileElements(result.plans, settings.vaultFolderName);
-  if (settings.enableCalendarSync) await syncCalendar(result);
   return result;
 }
 
