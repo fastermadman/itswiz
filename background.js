@@ -423,8 +423,9 @@ async function syncCalendar(result) {
     const planKey = (event.PlanIds ?? [])[0] ? `${event.courseId}:${event.PlanIds[0]}` : null;
     const plan = planKey ? result.plans[planKey] : null;
 
+    const titlePart = stripWeekdayPrefix(event.PlanTitle ?? plan?.title) || "Lektion";
     const body = {
-      summary: `${calendarName} — ${stripWeekdayPrefix(event.PlanTitle ?? plan?.title)}`,
+      summary: `${calendarName} — ${titlePart}`,
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
       start: { dateTime: toGoogleDateTime(event.start), timeZone: TIME_ZONE },
