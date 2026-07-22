@@ -172,6 +172,13 @@ const FILE_VIEW_PATTERN = "*://resource.itslearning.com/File/View.aspx*";
 const FILECACHE_PATTERN = "*://filecache.itslearning.com/*";
 const OFFICE_EXTENSIONS = [".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"];
 
+// Diagnostik: logger alle hop i download-kæderne, så vi kan se hvor den går i stå ved timeouts
+// i stedet for at gætte (fx pptx der ikke opfører sig som docx).
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => console.log(`VIAstudyWiz kæde-hop: ${details.url}`),
+  { urls: ["*://resource.itslearning.com/*", "*://filerepository.itslearning.com/*", "*://filecache.itslearning.com/*", "*://platform.itslearning.com/*"] }
+);
+
 function sanitizeFilename(name) {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim();
 }
