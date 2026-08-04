@@ -31,10 +31,18 @@ chrome.downloads.onChanged.addListener((delta) => {
   }
 });
 
-async function queuedDownload(url, filename) {
-  const downloadId = await chrome.downloads.download({ url });
-  pendingDownloadFilenames.set(downloadId, filename);
-  console.log(`VIAstudyWiz queuedDownload: id=${downloadId} url=${url} -> ${filename}`);
+function queuedDownload(url, filename) {
+  return new Promise((resolve, reject) => {
+    chrome.downloads.download({ url }, (downloadId) => {
+      if (chrome.runtime.lastError || downloadId === undefined) {
+        reject(new Error(chrome.runtime.lastError?.message ?? "Intet download-id modtaget"));
+        return;
+      }
+      pendingDownloadFilenames.set(downloadId, filename);
+      console.log(`VIAstudyWiz queuedDownload: id=${downloadId} url=${url} -> ${filename}`);
+      resolve();
+    });
+  });
 }
 
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
