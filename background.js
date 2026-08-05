@@ -311,7 +311,10 @@ async function downloadFileElements(plans, vaultFolderName) {
     const titleLower = element.title.toLowerCase();
     const isPdf = titleLower.endsWith(".pdf");
     const isOffice = OFFICE_EXTENSIONS.some((ext) => titleLower.endsWith(ext));
-    if (!isPdf && !isOffice) continue;
+    if (!isPdf && !isOffice) {
+      console.warn(`VIAstudyWiz: springer element over (ukendt filendelse i titel): "${element.title}"`);
+      continue;
+    }
 
     try {
       const downloadUrl = isPdf
