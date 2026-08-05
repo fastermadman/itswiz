@@ -191,6 +191,13 @@ function sanitizeFilename(name) {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim();
 }
 
+// Udleder filendelsen fra den endelige download-URL (filecache-URL'er indeholder det rigtige
+// filnavn+endelse i stien) — bruges når element.title ikke selv har en endelse.
+function extractExtension(url) {
+  const match = new URL(url).pathname.match(/\.[a-z0-9]{2,5}$/i);
+  return match ? match[0].toLowerCase() : "";
+}
+
 // Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs").
 function weekFolderName(isoDate) {
   const date = new Date(isoDate);
@@ -274,6 +281,17 @@ async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
   }
 }
 
+// Elementets titel har ingen filendelse (fx "KRONIK Fortidsøglen klassisk musik") — de to
+// download-kæder skelnes reelt af hvilket netværkskald der rammer først, ikke af titlen, så
+// prøv PDF-kæden (den korteste) først og fald tilbage til Office-kæden hvis den ikke rammer.
+async function resolveDownloadUrlUnknownType(elementUrl) {
+  try {
+    return await resolvePdfDownloadUrl(elementUrl, 10000);
+  } catch {
+    return await resolveOfficeDownloadUrl(elementUrl);
+  }
+}
+
 // Undgår gendownload (og dermed Chromes "(1)"-duplikater) af elementer vi allerede har hentet —
 // sporer via elementets stabile id, ikke filnavn, så det er robust overfor at filer bagefter
 // bliver omdøbt/deskewed/flyttet af watch-folder-scriptet.
@@ -311,16 +329,24 @@ async function downloadFileElements(plans, vaultFolderName) {
     const titleLower = element.title.toLowerCase();
     const isPdf = titleLower.endsWith(".pdf");
     const isOffice = OFFICE_EXTENSIONS.some((ext) => titleLower.endsWith(ext));
-    if (!isPdf && !isOffice) {
-      console.warn(`VIAstudyWiz: springer element over (ukendt filendelse i titel): "${element.title}"`, element);
-      continue;
-    }
 
     try {
-      const downloadUrl = isPdf
-        ? await resolvePdfDownloadUrl(element.url)
-        : await resolveOfficeDownloadUrl(element.url);
-      const filename = `${vaultFolderName}/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
+      let downloadUrl;
+      let filename;
+      if (isPdf || isOffice) {
+        downloadUrl = isPdf
+          ? await resolvePdfDownloadUrl(element.url)
+          : await resolveOfficeDownloadUrl(element.url);
+        filename = `${vaultFolderName}/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
+      } else {
+        downloadUrl = await resolveDownloadUrlUnknownType(element.url);
+        const extension = extractExtension(downloadUrl);
+        if (!extension) {
+          console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
+          continue;
+        }
+        filename = `${vaultFolderName}/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}${extension}`;
+      }
       await queuedDownload(downloadUrl, filename);
       await markDownloaded(element.id);
     } catch (err) {
