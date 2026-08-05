@@ -191,11 +191,21 @@ function sanitizeFilename(name) {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim();
 }
 
-// Udleder filendelsen fra den endelige download-URL (filecache-URL'er indeholder det rigtige
-// filnavn+endelse i stien) — bruges når element.title ikke selv har en endelse.
+// Udleder filendelsen fra den endelige download-URL — bruges når element.title ikke selv har
+// en endelse. Filecache-URL'er har en opak GUID-sti (intet filnavn i selve path'en); det rigtige
+// filnavn+endelse ligger derimod i response-content-disposition-query-parameteren
+// (fx filename="KRONIK Fortidsøglen klassisk musik.pdf"), så tjek den først og brug path'en
+// som fallback for URL'er der rent faktisk har endelsen i stien.
 function extractExtension(url) {
-  const match = new URL(url).pathname.match(/\.[a-z0-9]{2,5}$/i);
-  return match ? match[0].toLowerCase() : "";
+  const parsed = new URL(url);
+  const disposition = parsed.searchParams.get("response-content-disposition");
+  if (disposition) {
+    const filenameMatch = /filename="([^"]+)"/i.exec(disposition);
+    const ext = filenameMatch?.[1].match(/\.[a-z0-9]{2,5}$/i);
+    if (ext) return ext[0].toLowerCase();
+  }
+  const pathMatch = parsed.pathname.match(/\.[a-z0-9]{2,5}$/i);
+  return pathMatch ? pathMatch[0].toLowerCase() : "";
 }
 
 // Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs").
