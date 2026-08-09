@@ -5,9 +5,30 @@ const DEFAULTS = {
   enableFileDownloads: true,
   enableCalendarSync: true,
   enableMetadataExport: false,
-  vaultFolderName: "ViaVault",
   alarmIntervalHours: 24,
 };
+
+async function refreshVaultDirStatus() {
+  const statusEl = document.getElementById("vaultDirStatus");
+  const handle = await fsGet(VAULT_HANDLE_KEY);
+  if (!handle) {
+    statusEl.textContent = "Ingen mappe valgt endnu.";
+    return;
+  }
+  const permission = await handle.queryPermission({ mode: "readwrite" });
+  statusEl.textContent =
+    permission === "granted" ? `Valgt: ${handle.name}` : `Valgt: ${handle.name} (adgang skal genbekræftes)`;
+}
+
+document.getElementById("chooseVaultDir").addEventListener("click", async () => {
+  try {
+    const handle = await window.showDirectoryPicker({ id: "viastudywiz-vault", mode: "readwrite" });
+    await fsSet(VAULT_HANDLE_KEY, handle);
+    await refreshVaultDirStatus();
+  } catch (err) {
+    if (err.name !== "AbortError") console.error("VIAstudyWiz vault-mappe-fejl:", err);
+  }
+});
 
 async function load() {
   const { [SETTINGS_KEY]: settings } = await chrome.storage.local.get(SETTINGS_KEY);
@@ -18,7 +39,7 @@ async function load() {
   document.getElementById("enableFileDownloads").checked = merged.enableFileDownloads;
   document.getElementById("enableCalendarSync").checked = merged.enableCalendarSync;
   document.getElementById("enableMetadataExport").checked = merged.enableMetadataExport;
-  document.getElementById("vaultFolderName").value = merged.vaultFolderName;
+  await refreshVaultDirStatus();
 }
 
 document.getElementById("save").addEventListener("click", async () => {
@@ -29,7 +50,6 @@ document.getElementById("save").addEventListener("click", async () => {
     enableFileDownloads: document.getElementById("enableFileDownloads").checked,
     enableCalendarSync: document.getElementById("enableCalendarSync").checked,
     enableMetadataExport: document.getElementById("enableMetadataExport").checked,
-    vaultFolderName: document.getElementById("vaultFolderName").value.trim() || DEFAULTS.vaultFolderName,
   };
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
   const status = document.getElementById("status");

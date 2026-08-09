@@ -34,12 +34,14 @@
   </fieldset>
 
   <fieldset>
-    <legend>Mappenavn (undermappe under Chromes download-mappe)</legend>
-    <label>Vault-mappe: <input type="text" id="vaultFolderName" /></label>
+    <legend>Vault-mappe</legend>
+    <button id="chooseVaultDir">Vælg vault-mappe…</button>
+    <div id="vaultDirStatus">Ingen mappe valgt endnu.</div>
   </fieldset>
 
   <button id="save">Gem</button>
   <span id="status"></span>
+  <script src="fsHandle.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
