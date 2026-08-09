@@ -1,48 +1,26 @@
-// At sætte "filename" direkte i chrome.downloads.download() ser ud til at trigge Chromes
-// gem-dialog uafhængigt af "spørg hvor filer skal gemmes"-indstillingen (kendt Chromium-kviks,
-// issues.chromium.org/issues/40359474). onDeterminingFilename er en separat, dokumenteret vej
-// til at styre destinationen der ikke rammer samme problem.
-//
-// Matcher på download-ID, ikke URL — en eksakt streng-sammenligning på URL'en fejlede i praksis
-// (Chrome normaliserer formentlig URL-strengen en smule inden onDeterminingFilename kaldes,
-// nok med presignede URLs med specialtegn i signaturen), så filerne landede i standard-Downloads
-// under serverens eget filnavn i stedet for i vaulten. ID er et helt tal, ingen fragilitet.
-const pendingDownloadFilenames = new Map();
-
-chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  const filename = pendingDownloadFilenames.get(downloadItem.id);
-  console.log(
-    `VIAstudyWiz onDeterminingFilename: id=${downloadItem.id} url=${downloadItem.url} match=${Boolean(filename)}${filename ? ` -> ${filename}` : ""}`
-  );
-  if (filename) {
-    pendingDownloadFilenames.delete(downloadItem.id);
-    suggest({ filename, conflictAction: "uniquify" });
-  } else {
-    suggest();
-  }
-});
-
-chrome.downloads.onChanged.addListener((delta) => {
-  if (delta.state) {
-    console.log(`VIAstudyWiz download onChanged: id=${delta.id} state=${delta.state.current}`);
-  }
-  if (delta.error) {
-    console.error(`VIAstudyWiz download-fejl: id=${delta.id} error=${delta.error.current}`);
-  }
-});
-
-function queuedDownload(url, filename) {
-  return new Promise((resolve, reject) => {
-    chrome.downloads.download({ url }, (downloadId) => {
-      if (chrome.runtime.lastError || downloadId === undefined) {
-        reject(new Error(chrome.runtime.lastError?.message ?? "Intet download-id modtaget"));
-        return;
-      }
-      pendingDownloadFilenames.set(downloadId, filename);
-      console.log(`VIAstudyWiz queuedDownload: id=${downloadId} url=${url} -> ${filename}`);
-      resolve();
-    });
+// chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
+// hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
+// fra JS (issues.chromium.org/issues/40359474). File System Access API omgår det helt: brugeren
+// vælger vault-mappen én gang (i options.html), og vi får et permanent skrive-håndtag der kan
+// oprette vilkårligt dybe undermapper uden flere OS-prompts. showDirectoryPicker() kræver et
+// document (en "rigtig" side med brugerinteraktion), som service workeren ikke er — derfor sker
+// selve fil-skrivningen i et offscreen-dokument, som denne funktion sørger for er åbent.
+async function ensureOffscreenDocument() {
+  const existing = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
+  if (existing.length > 0) return;
+  await chrome.offscreen.createDocument({
+    url: "offscreen.html",
+    reasons: ["BLOBS"],
+    justification: "Skriver downloadede filer til vault-mappen via File System Access API",
   });
+}
+
+async function writeToVault(path, url) {
+  await ensureOffscreenDocument();
+  const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "writeFile", path, url });
+  if (!response?.ok) {
+    throw new Error(response?.error ?? "Ukendt fejl ved filskrivning i offscreen-dokumentet");
+  }
 }
 
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
@@ -154,7 +132,7 @@ async function collectAndDownload(startUnix, endUnix) {
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
   // ikke blokerer det der faktisk betyder noget.
   if (settings.enableCalendarSync) await syncCalendar(result);
-  if (settings.enableFileDownloads) await downloadFileElements(result.plans, settings.vaultFolderName);
+  if (settings.enableFileDownloads) await downloadFileElements(result.plans);
 
   console.log("VIAstudyWiz: kørsel færdig");
 
@@ -163,8 +141,8 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableMetadataExport) {
     const json = JSON.stringify(result, null, 2);
     const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-    queuedDownload(dataUrl, `${settings.vaultFolderName}/_metadata/viastudywiz-${startUnix}-${endUnix}.json`).catch(
-      (err) => console.error("VIAstudyWiz JSON-download-fejl:", err)
+    writeToVault(`_metadata/viastudywiz-${startUnix}-${endUnix}.json`, dataUrl).catch((err) =>
+      console.error("VIAstudyWiz JSON-download-fejl:", err)
     );
   }
 
@@ -318,7 +296,7 @@ async function markDownloaded(id) {
   await chrome.storage.local.set({ [DOWNLOADED_IDS_KEY]: [...ids] });
 }
 
-async function downloadFileElements(plans, vaultFolderName) {
+async function downloadFileElements(plans) {
   const downloadedIds = await getDownloadedIds();
 
   const fileElements = Object.values(plans)
@@ -347,7 +325,7 @@ async function downloadFileElements(plans, vaultFolderName) {
         downloadUrl = isPdf
           ? await resolvePdfDownloadUrl(element.url)
           : await resolveOfficeDownloadUrl(element.url);
-        filename = `${vaultFolderName}/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}`;
+        filename = `${sanitizeFilename(courseName)}/${weekFolder} - ${sanitizeFilename(element.title)}`;
       } else {
         downloadUrl = await resolveDownloadUrlUnknownType(element.url);
         const extension = extractExtension(downloadUrl);
@@ -355,9 +333,9 @@ async function downloadFileElements(plans, vaultFolderName) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
           continue;
         }
-        filename = `${vaultFolderName}/${sanitizeFilename(courseName)}/${weekFolder}/${sanitizeFilename(element.title)}${extension}`;
+        filename = `${sanitizeFilename(courseName)}/${weekFolder} - ${sanitizeFilename(element.title)}${extension}`;
       }
-      await queuedDownload(downloadUrl, filename);
+      await writeToVault(filename, downloadUrl);
       await markDownloaded(element.id);
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
@@ -546,7 +524,6 @@ const DEFAULT_SETTINGS = {
   enableFileDownloads: true,
   enableCalendarSync: true,
   enableMetadataExport: false,
-  vaultFolderName: "ViaVault",
   alarmIntervalHours: 24,
 };
 
@@ -555,12 +532,30 @@ async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...settings };
 }
 
+// Uden denne lås kan et ekstra klik (eller alarmen der fyrer midt i en kørsel) starte en ny
+// collectAndDownload() oveni den gamle. De skjulte faner og globale webRequest-listeners i
+// downloadFileElements er ikke skoped til en bestemt kørsel, så to samtidige kørsler roder i
+// hinandens faner/lyttere — det gav "Cannot access contents of the page", "result er null" og
+// en bunke USER_CANCELED downloads.
+let isRunning = false;
+
 async function runCollectAndDownload() {
-  const { daysBack, daysForward } = await getSettings();
-  const now = Math.floor(Date.now() / 1000);
-  const start = now - daysBack * 24 * 60 * 60;
-  const end = now + daysForward * 24 * 60 * 60;
-  collectAndDownload(start, end).catch((err) => console.error("VIAstudyWiz fejl:", err));
+  if (isRunning) {
+    console.log("VIAstudyWiz: kørsel allerede i gang, springer over");
+    return;
+  }
+  isRunning = true;
+  try {
+    const { daysBack, daysForward } = await getSettings();
+    const now = Math.floor(Date.now() / 1000);
+    const start = now - daysBack * 24 * 60 * 60;
+    const end = now + daysForward * 24 * 60 * 60;
+    await collectAndDownload(start, end);
+  } catch (err) {
+    console.error("VIAstudyWiz fejl:", err);
+  } finally {
+    isRunning = false;
+  }
 }
 
 chrome.action.onClicked.addListener(runCollectAndDownload);

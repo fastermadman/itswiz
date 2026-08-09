@@ -4,7 +4,7 @@
   "name": "VIAstudyWiz",
   "version": "0.1.0",
   "description": "Henter lektionsplaner og materialer fra via.itslearning.com programmatisk.",
-  "permissions": ["downloads", "scripting", "webRequest", "storage", "alarms", "identity"],
+  "permissions": ["offscreen", "scripting", "webRequest", "storage", "alarms", "identity"],
   "host_permissions": [
     "https://via.itslearning.com/*",
     "https://platform.itslearning.com/*",
