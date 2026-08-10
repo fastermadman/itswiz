@@ -205,16 +205,24 @@ function extractExtension(url) {
   return pathMatch ? pathMatch[0].toLowerCase() : "";
 }
 
-// Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs").
-function weekFolderName(isoDate) {
-  const date = new Date(isoDate);
+// Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs"). plan.topic.name
+// er strukturerede data fra itslearning (bekræftet live, ikke fritekst) — tilføjes når den
+// findes, så mappen selv fortæller hvad ugen handlede om ("W34tors - Skolens formål").
+//
+// Kun tilføjet fremadrettet: eksisterende mapper i vaulten hedder stadig bare "W34tors" uden
+// emne. Ingen migrering af dem her — det kræver et opslag pr. gammel plan for at finde emnet,
+// og er en selvstændig beslutning (se README).
+function weekFolderName(plan) {
+  const date = new Date(plan.start);
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   const dayAbbrev = ["søn", "man", "tirs", "ons", "tors", "fre", "lør"][date.getDay()];
-  return `W${week}${dayAbbrev}`;
+  const base = `W${week}${dayAbbrev}`;
+  const topic = plan.topic?.name?.trim();
+  return topic ? `${base} - ${sanitizeFilename(topic)}` : base;
 }
 
 async function resolvePdfDownloadUrl(elementUrl, timeoutMs = 20000) {
@@ -345,7 +353,7 @@ async function writePlanNotes(plans) {
     const noteId = `plan:${planKey}`;
     if (!plan || written.has(noteId)) continue;
 
-    const weekFolder = weekFolderName(plan.start);
+    const weekFolder = weekFolderName(plan);
     const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
     const materials = (plan.elements ?? []).map(
       (el) => `- [[${fag}/RAW/${weekFolder}/${sanitizeFilename(el.title)}]]`
@@ -388,7 +396,7 @@ async function downloadFileElements(plans) {
         .filter((el) => el.typeName === "Fil" && !downloadedIds.has(el.id))
         .map((el) => ({
           courseName: plan.courseName ?? "ukendt-fag",
-          weekFolder: weekFolderName(plan.start),
+          weekFolder: weekFolderName(plan),
           element: el,
         }))
     );
@@ -577,6 +585,13 @@ async function syncCalendar(result) {
     const planKey = (event.PlanIds ?? [])[0] ? `${event.courseId}:${event.PlanIds[0]}` : null;
     const plan = planKey ? result.plans[planKey] : null;
 
+    // event.start/event.end er lokale-bookingen for hele blokken (fx 08:15-15:45), ikke
+    // nødvendigvis selve lektionens tidspunkt — undervisere kan ændre det i selve planen uden at
+    // kunne ændre lokale-bookingen. plan.start/plan.stop er den planlagte tid og matcher
+    // event-blokken 1:1 når intet er ændret (bekræftet live: samme værdier for en lektion uden
+    // afvigelse), men afviger korrekt når underviseren har indsnævret tidspunktet i planen (fx
+    // Livsoplysning 17/8: event 08:15-15:45, plan.start/stop 10:00-15:00). Brug derfor plan-tiden
+    // når den findes, fald tilbage til event-blokken ellers.
     const titlePart = stripWeekdayPrefix(event.PlanTitle ?? plan?.title) || event.title;
     const body = {
       status: "confirmed", // PATCH på et manuelt slettet (= "cancelled") event genopliver det ikke
@@ -584,8 +599,8 @@ async function syncCalendar(result) {
       summary: `${calendarName} — ${titlePart}`,
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
-      start: { dateTime: toGoogleDateTime(event.start), timeZone: TIME_ZONE },
-      end: { dateTime: toGoogleDateTime(event.end), timeZone: TIME_ZONE },
+      start: { dateTime: toGoogleDateTime(plan?.start ?? event.start), timeZone: TIME_ZONE },
+      end: { dateTime: toGoogleDateTime(plan?.stop ?? event.end), timeZone: TIME_ZONE },
     };
 
     try {
