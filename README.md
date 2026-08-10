@@ -43,6 +43,10 @@ To grene pr. fag: `RAW/` er bytes til enheder (Boox/NeoReader browser bare
 filsystemet), `MD/` er noter til Obsidian. Alt nyt indhold falder i én af de to,
 så strukturen ikke skal lægges om igen.
 
+Fag-mappen hedder det venlige navn fra `COURSE_DISPLAY_NAMES` i `background.js`
+(fx `Musik`), ikke itslearnings tekniske kursuskode — samme tabel som allerede
+bruges til kalendersyncen.
+
 ```
 ViaVault/<fag>/
   RAW/<uge>/<titel>.pdf                       ← extensionen skriver kun her

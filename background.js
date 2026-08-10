@@ -303,8 +303,17 @@ async function markDownloaded(id) {
 // noter til Obsidian (watch-scriptet skriver minerU-outputtet derover). Extensionen rører kun
 // RAW/ — den skriver aldrig ind i Obsidian-grenen. Se ValdiVault:
 // 10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md.
+//
+// itslearnings API har et FriendlyName-felt på kurset, men det er altid null — det eneste
+// pæne navn der findes er COURSE_DISPLAY_NAMES, som Valdemar allerede vedligeholder i hånden
+// til kalendersyncen. Ukendte kursuskoder (nye fag, "Hjælp", "VIAs onlinekurser") falder
+// tilbage til den rå kode i stedet for at fejle.
+function courseFolderName(courseName) {
+  return COURSE_DISPLAY_NAMES[courseName] ?? courseName;
+}
+
 function rawPath(courseName, weekFolder, title) {
-  return `${sanitizeFilename(courseName)}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
+  return `${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
 }
 
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
@@ -318,7 +327,7 @@ async function writePlanNotes(plans) {
     if (!plan || written.has(noteId)) continue;
 
     const weekFolder = weekFolderName(plan.start);
-    const fag = sanitizeFilename(plan.courseName ?? "ukendt-fag");
+    const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
     const materials = (plan.elements ?? []).map(
       (el) => `- [[${fag}/RAW/${weekFolder}/${sanitizeFilename(el.title)}]]`
     );
@@ -397,7 +406,7 @@ async function downloadFileElements(plans) {
 // Kalender-sync: ét Google Calendar-event pr. lektion, i fagets egen kalender (allerede
 // oprettet manuelt af Valdemar i viawievaldi@gmail.com). Se ValdiVault:
 // 10_Projects/VIAstudyWiz/03-kalender-integration.md.
-const COURSE_CALENDAR_NAMES = {
+const COURSE_DISPLAY_NAMES = {
   "LSmu-2527": "Musik",
   "LSmu-ec2425": "Musik",
   "LSkr-2628": "Religion",
@@ -525,14 +534,14 @@ async function syncCalendar(result) {
   const calendarIds = await fetchCalendarIdMap(token);
   const eventMap = await getEventMap();
 
-  const matchable = result.events.filter((e) => COURSE_CALENDAR_NAMES[e.title]).length;
+  const matchable = result.events.filter((e) => COURSE_DISPLAY_NAMES[e.title]).length;
   console.log(
     `VIAstudyWiz: ${result.events.length} events hentet, ${matchable} matcher en kendt fag→kalender-mapping, ${Object.keys(calendarIds).length} Google-kalendere fundet:`,
     calendarIds
   );
 
   for (const event of result.events) {
-    const calendarName = COURSE_CALENDAR_NAMES[event.title];
+    const calendarName = COURSE_DISPLAY_NAMES[event.title];
     if (!calendarName) continue; // ukendt/afsluttet/ikke-mappet fag, spring over
 
     const calendarId = calendarIds[calendarName];
