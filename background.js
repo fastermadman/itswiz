@@ -534,7 +534,7 @@ function courseFolderName(courseName) {
 }
 
 function rawPath(courseName, weekFolder, title) {
-  return `${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
+  return `FAG/${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
 }
 
 // watch_viastudywiz.py navngiver MD-noten efter RAW-filens stem (Path.stem, dvs. alt før sidste
@@ -543,7 +543,7 @@ function rawPath(courseName, weekFolder, title) {
 // tilføjet oveni.
 function mdPath(courseName, weekFolder, title) {
   const stem = sanitizeFilename(title).replace(/\.[^./]+$/, "");
-  return `${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
+  return `FAG/${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
 }
 
 // "hentet:" i frontmatter — lokal væg-tid i samme tidszone som resten af extensionen (TIME_ZONE),
@@ -613,7 +613,7 @@ async function writePlanNotes(plans) {
       "",
     ].join("\n");
 
-    const path = `${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
+    const path = `FAG/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
     try {
       await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
       await markDownloaded(noteId);
