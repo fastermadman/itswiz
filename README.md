@@ -66,13 +66,19 @@ ViaVault/<fag>/
   MD/<uge> - <emne>/_attachments/<titel>/<sha>.jpg     ← udtrukne billeder
 ```
 
-Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`), så `Litteratur.base`
-kan bygge overblik på tværs af uger. Billed-embeds er wikilinks (`![[<sha>.jpg]]`),
-ikke relative stier — de knækker på titler med parentes. Begrundelse og
-alternativer i ValdiVault: `10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
+Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`, og `emne`/`start`/`stop`
+når planen har dem), så `Litteratur.base` kan bygge overblik på tværs af uger
+og emner uden at strukturen skal kode alting. `uge` er den rene ugekode
+(`W34tors`), `emne` er sit eget felt — ikke gemt inde i mappenavnets streng.
+Billed-embeds er wikilinks (`![[<sha>.jpg]]`), ikke relative stier — de
+knækker på titler med parentes. Begrundelse og alternativer i ValdiVault:
+`10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
 
 Migrering af en gammel flad vault: `watchfolder/migrate_to_raw_md.py` (dry-run
 som standard, `--apply` udfører, `--selfcheck` kører de indbyggede tests).
+Samme mønster for retroaktiv emne-tilføjelse til ugemapper
+(`watchfolder/backfill_week_topics.py`) og frontmatter-berigelse af
+eksisterende noter (`watchfolder/enrich_existing_notes.py`).
 
 ## Sikkerhed
 

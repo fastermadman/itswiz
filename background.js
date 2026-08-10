@@ -205,14 +205,11 @@ function extractExtension(url) {
   return pathMatch ? pathMatch[0].toLowerCase() : "";
 }
 
-// Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs"). plan.topic.name
-// er strukturerede data fra itslearning (bekræftet live, ikke fritekst) — tilføjes når den
-// findes, så mappen selv fortæller hvad ugen handlede om ("W34tors - Skolens formål").
-//
-// Kun tilføjet fremadrettet: eksisterende mapper i vaulten hedder stadig bare "W34tors" uden
-// emne. Ingen migrering af dem her — det kræver et opslag pr. gammel plan for at finde emnet,
-// og er en selvstændig beslutning (se README).
-function weekFolderName(plan) {
+// Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs"). Ren dato+ugedag —
+// intet fag-specifikt — så to forskellige lektioner i samme fag samme ugedag (fx Musik
+// formiddag/eftermiddag) ville ellers kollidere i weekFolderName() nedenfor, hvis ikke emnet
+// adskilte dem.
+function weekFolderBase(plan) {
   const date = new Date(plan.start);
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -220,7 +217,18 @@ function weekFolderName(plan) {
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   const dayAbbrev = ["søn", "man", "tirs", "ons", "tors", "fre", "lør"][date.getDay()];
-  const base = `W${week}${dayAbbrev}`;
+  return `W${week}${dayAbbrev}`;
+}
+
+// plan.topic.name er strukturerede data fra itslearning (bekræftet live, ikke fritekst) —
+// tilføjes når den findes, så mappen selv fortæller hvad lektionen handlede om
+// ("W34tors - Skolens formål"). Løser samtidig kollisionen ovenfor: to lektioner samme ugedag har
+// (næsten altid) hver sit emne, og får dermed hver sin mappe uden ekstra "A"/"B"-mærkning.
+//
+// Kun tilføjet fremadrettet: eksisterende mapper i vaulten hedder stadig bare "W34tors" uden
+// emne. Migreret retroaktivt med watchfolder/backfill_week_topics.py.
+function weekFolderName(plan) {
+  const base = weekFolderBase(plan);
   const topic = plan.topic?.name?.trim();
   return topic ? `${base} - ${sanitizeFilename(topic)}` : base;
 }
@@ -358,11 +366,17 @@ async function writePlanNotes(plans) {
     const materials = (plan.elements ?? []).map(
       (el) => `- [[${fag}/RAW/${weekFolder}/${sanitizeFilename(el.title)}]]`
     );
+    const topic = plan.topic?.name?.trim();
     const note = [
       "---",
       `fag: ${fag}`,
-      `uge: ${weekFolder}`,
+      `uge: ${weekFolderBase(plan)}`,
+      ...(topic ? [`emne: "${topic}"`] : []),
       `dato: ${(plan.start ?? "").slice(0, 10)}`,
+      // Lektionens rigtige tidspunkt (ikke lokale-bookingens) — se toGoogleDateTime/syncCalendar
+      // for hvorfor plan.start/stop er den pålidelige kilde.
+      `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
+      `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
       "type: lektionsplan",
       "---",
       "",
