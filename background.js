@@ -377,6 +377,19 @@ async function writePlanNotes(plans) {
   return true;
 }
 
+// itslearning bruger separate typeNames pr. dokumenttype for samme
+// ViewLearningToolElement-URL-mønster, ikke kun "Fil" — bekræftet i gemte metadata-dumps
+// (~/ViaVault/_metadata/*.json) for "Microsoft Word". PowerPoint/Excel/PDF er ikke observeret
+// endnu, kun et kvalificeret gæt ud fra samme mønster — harmløst at have med (Set.has() på et
+// navn der aldrig dukker op koster intet), men ret det hvis et rigtigt eksempel viser noget andet.
+const DOWNLOADABLE_DOC_TYPE_NAMES = new Set([
+  "Fil",
+  "Microsoft Word",
+  "Microsoft PowerPoint",
+  "Microsoft Excel",
+  "PDF",
+]);
+
 // Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
 async function downloadFileElements(plans) {
   const downloadedIds = await getDownloadedIds();
@@ -385,7 +398,7 @@ async function downloadFileElements(plans) {
     .filter(Boolean)
     .flatMap((plan) =>
       (plan.elements ?? [])
-        .filter((el) => el.typeName === "Fil" && !downloadedIds.has(el.id))
+        .filter((el) => DOWNLOADABLE_DOC_TYPE_NAMES.has(el.typeName) && !downloadedIds.has(el.id))
         .map((el) => ({
           courseName: plan.courseName ?? "ukendt-fag",
           weekFolder: weekFolderName(plan.start),
