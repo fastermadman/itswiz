@@ -25,14 +25,44 @@ async function writeToVault(path, url) {
   }
 }
 
+// Tæller fejlede enkelt-elementer (fil-downloads, kalender-events, lektionsplan-noter) i den
+// aktuelle kørsel. Nulstilles i collectAndDownload. Uden denne var den slags fejl kun synlige i
+// service worker-konsollen — man skulle vide de skulle kigges efter for overhovedet at opdage dem.
+let runErrorCount = 0;
+
+function recordError() {
+  runErrorCount++;
+}
+
 // Advarer via extension-ikonet når vault-tilladelsen mangler (sker typisk ved genstart af
-// browseren/extensionen — File System Access-tilladelser overlever ikke det pålideligt) —
-// ellers opdager man det først ved at læse service worker-loggen efter en kørsel der intet lavede.
-async function setVaultPermissionWarning(hasProblem) {
-  await chrome.action.setBadgeText({ text: hasProblem ? "!" : "" });
-  await chrome.action.setBadgeBackgroundColor({ color: "#d93025" });
-  await chrome.action.setTitle({
-    title: hasProblem ? "VIAstudyWiz — vault-adgang mangler, åbn indstillinger" : "VIAstudyWiz",
+// browseren/extensionen — File System Access-tilladelser overlever ikke det pålideligt), eller
+// når enkelt-elementer fejlede i seneste kørsel. Vault-adgang har forrang i badge't, da det
+// blokerer alt indtil det rettes, mens enkelt-fejl typisk kun rammer ét dokument.
+async function updateStatusBadge(vaultPermissionMissing) {
+  if (vaultPermissionMissing) {
+    await chrome.action.setBadgeText({ text: "!" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#d93025" });
+    await chrome.action.setTitle({ title: "VIAstudyWiz — vault-adgang mangler, åbn indstillinger" });
+  } else if (runErrorCount > 0) {
+    await chrome.action.setBadgeText({ text: String(runErrorCount) });
+    await chrome.action.setBadgeBackgroundColor({ color: "#f9ab00" });
+    await chrome.action.setTitle({
+      title: `VIAstudyWiz — ${runErrorCount} element(er) fejlede i seneste kørsel, se service worker-konsollen`,
+    });
+  } else {
+    await chrome.action.setBadgeText({ text: "" });
+    await chrome.action.setTitle({ title: "VIAstudyWiz" });
+  }
+}
+
+// Vises kun ved fejl der stopper hele kørslen (fx ingen åben itslearning-fane) — badge't alene
+// opdages typisk ikke før man selv klikker ind i extensionen, en notifikation ses med det samme.
+function notifyCriticalFailure(err) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon128.png"),
+    title: "VIAstudyWiz — kørsel fejlede",
+    message: err.message ?? String(err),
   });
 }
 
@@ -125,6 +155,7 @@ async function collectRangeInPage(startUnix, endUnix) {
 
 async function collectAndDownload(startUnix, endUnix) {
   console.log(`VIAstudyWiz: starter kørsel (${new Date(startUnix * 1000).toISOString()} → ${new Date(endUnix * 1000).toISOString()})`);
+  runErrorCount = 0;
   const settings = await getSettings();
 
   const [tab] = await chrome.tabs.query({ url: "https://via.itslearning.com/*" });
@@ -145,13 +176,15 @@ async function collectAndDownload(startUnix, endUnix) {
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
   // ikke blokerer det der faktisk betyder noget.
   if (settings.enableCalendarSync) await syncCalendar(result);
+  let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
     const planNotesOk = await writePlanNotes(result.plans);
     // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
     // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
     const filesOk = planNotesOk && (await downloadFileElements(result.plans));
-    await setVaultPermissionWarning(!filesOk);
+    vaultPermissionMissing = !filesOk;
   }
+  await updateStatusBadge(vaultPermissionMissing);
 
   console.log("VIAstudyWiz: kørsel færdig");
 
@@ -372,23 +405,19 @@ async function writePlanNotes(plans) {
     } catch (err) {
       console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
+      recordError();
     }
   }
   return true;
 }
 
 // itslearning bruger separate typeNames pr. dokumenttype for samme
-// ViewLearningToolElement-URL-mønster, ikke kun "Fil" — bekræftet i gemte metadata-dumps
-// (~/ViaVault/_metadata/*.json) for "Microsoft Word". PowerPoint/Excel/PDF er ikke observeret
-// endnu, kun et kvalificeret gæt ud fra samme mønster — harmløst at have med (Set.has() på et
-// navn der aldrig dukker op koster intet), men ret det hvis et rigtigt eksempel viser noget andet.
-const DOWNLOADABLE_DOC_TYPE_NAMES = new Set([
-  "Fil",
-  "Microsoft Word",
-  "Microsoft PowerPoint",
-  "Microsoft Excel",
-  "PDF",
-]);
+// ViewLearningToolElement-URL-mønster ("Fil", "Microsoft Word", ... — bekræftet i gemte
+// metadata-dumps), og der dukker jævnligt uforudsete varianter op alt efter hvordan
+// underviseren har lagt materialet ind. En allowlist rammer altid kun de typeNames vi allerede
+// kender og springer nye stille over igen — denylist af de kendte ikke-fil-typer er robust
+// mod fremtidige varianter uden at kræve endnu en manuel rettelse.
+const NON_FILE_TYPE_NAMES = new Set(["Link", "Mappe", "Arbejdsopgave", "Afleveringsopgave"]);
 
 // Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
 async function downloadFileElements(plans) {
@@ -398,7 +427,7 @@ async function downloadFileElements(plans) {
     .filter(Boolean)
     .flatMap((plan) =>
       (plan.elements ?? [])
-        .filter((el) => DOWNLOADABLE_DOC_TYPE_NAMES.has(el.typeName))
+        .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName))
         .map((el) => ({
           courseName: plan.courseName ?? "ukendt-fag",
           weekFolder: weekFolderName(plan.start),
@@ -440,6 +469,7 @@ async function downloadFileElements(plans) {
         const extension = extractExtension(downloadUrl);
         if (!extension) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
+          recordError();
           continue;
         }
         filename = rawPath(courseName, weekFolder, element.title + extension);
@@ -449,6 +479,7 @@ async function downloadFileElements(plans) {
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
+      recordError();
     }
   }
   return true;
@@ -622,6 +653,7 @@ async function syncCalendar(result) {
       );
     } catch (err) {
       console.error(`VIAstudyWiz kalender-fejl (${body.summary}):`, err);
+      recordError();
     }
   }
 
@@ -664,6 +696,7 @@ async function runCollectAndDownload() {
     await collectAndDownload(start, end);
   } catch (err) {
     console.error("VIAstudyWiz fejl:", err);
+    notifyCriticalFailure(err);
   } finally {
     isRunning = false;
   }
