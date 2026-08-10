@@ -363,17 +363,21 @@ function watchForRequestFailure(urlPattern, timeoutMs) {
 // browser-download direkte fra den skjulte fane. Uden dette ville Chrome vise en "Gem som"-dialog
 // i baggrunden (hvis "spørg hvor filer skal gemmes" er slået til), og filen ville aldrig nå
 // vaulten. Vi annullerer og sletter den native download med det samme og bruger dens URL i
-// stedet, ligesom filecache-URL'en normalt bruges.
+// stedet, ligesom filecache-URL'en normalt bruges. Rejecter (ikke bare hænger) ved timeout, så
+// Promise.any nedenfor kan afgøre at *ingen* af de tre veje virkede.
 function watchForNativeDownload(timeoutMs) {
   let listener;
   let timeout;
-  const promise = new Promise((resolve) => {
+  const promise = new Promise((resolve, reject) => {
     listener = (item) => {
       cleanup();
       chrome.downloads.cancel(item.id, () => chrome.downloads.erase({ id: item.id }));
       resolve(item.finalUrl || item.url);
     };
-    timeout = setTimeout(cleanup, timeoutMs);
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Ingen native download opstod"));
+    }, timeoutMs);
     chrome.downloads.onCreated.addListener(listener);
   });
   function cleanup() {
@@ -383,48 +387,84 @@ function watchForNativeDownload(timeoutMs) {
   return { promise, cancel: cleanup };
 }
 
-// Mærker et promise-resultat med hvilken race-gren det kom fra, så Promise.race stadig kan
-// skelne når flere grene reelt kan vinde (fileView vs. native download, filecache vs. native).
-function tag(promise, label) {
-  return promise.then((value) => ({ label, value }));
+// itslearning genererer selv en WOPI access_token og poster den (sammen med WOPISrc) til
+// Microsofts Office Online-viewer via et skjult formular-POST — set direkte i devtools for et
+// dokument uden itslearning-cachet kopi (samme dokument som ovenfor). WOPI-protokollens
+// GetFile-endpoint ({WOPISrc}/contents?access_token=...) er en almindelig HTTP GET, så vi kan
+// hente indholdet selv uden nogensinde at røre Microsofts iframe — kræver kun at opsnappe
+// access_token fra POST-requesten, ikke at rendere den.
+const OFFICE_VIEWER_PATTERN = "*://*.officeapps.live.com/*";
+
+function watchForWopiAccessToken(timeoutMs) {
+  let listener;
+  let timeout;
+  const promise = new Promise((resolve, reject) => {
+    listener = (details) => {
+      const accessToken = details.requestBody?.formData?.access_token?.[0];
+      const wopiSrc = new URL(details.url).searchParams.get("WOPISrc");
+      if (!accessToken || !wopiSrc) return;
+      cleanup();
+      resolve(`${wopiSrc}/contents?access_token=${encodeURIComponent(accessToken)}`);
+    };
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Intet WOPI access_token opsnappet"));
+    }, timeoutMs);
+    chrome.webRequest.onBeforeRequest.addListener(listener, { urls: [OFFICE_VIEWER_PATTERN] }, ["requestBody"]);
+  });
+  function cleanup() {
+    clearTimeout(timeout);
+    chrome.webRequest.onBeforeRequest.removeListener(listener);
+  }
+  return { promise, cancel: cleanup };
+}
+
+// itslearnings egen fil-cache-vej (File/View.aspx → DownloadRedirect.ashx → filecache) — kan
+// kaste (fx 403), i hvilket tilfælde resolveOfficeDownloadUrl falder tilbage til native-download-
+// og WOPI-vejene i stedet for at give op med det samme.
+async function primaryFileChain(tabId, timeoutMs) {
+  const fileViewUrl = await waitForRequest(FILE_VIEW_PATTERN, timeoutMs);
+
+  const params = new URL(fileViewUrl).searchParams;
+  const learningObjectId = params.get("LearningObjectId");
+  const learningObjectInstanceId = params.get("LearningObjectInstanceId");
+  if (!learningObjectId || !learningObjectInstanceId) {
+    throw new Error(`Mangler LearningObjectId/LearningObjectInstanceId i ${fileViewUrl}`);
+  }
+
+  const filecachePromise = waitForRequest(FILECACHE_PATTERN, timeoutMs);
+  const redirectFailurePromise = watchForRequestFailure(DOWNLOAD_REDIRECT_PATTERN, timeoutMs);
+  filecachePromise.catch(() => {});
+  redirectFailurePromise.catch(() => {});
+  const downloadRedirectUrl = `https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${learningObjectId}&LearningObjectInstanceId=${learningObjectInstanceId}`;
+  await chrome.tabs.update(tabId, { url: downloadRedirectUrl });
+  return await Promise.race([filecachePromise, redirectFailurePromise]);
 }
 
 async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
   let tabId = null;
   const native = watchForNativeDownload(timeoutMs * 2);
+  const wopi = watchForWopiAccessToken(timeoutMs * 2);
   try {
-    const fileViewPromise = waitForRequest(FILE_VIEW_PATTERN, timeoutMs);
-    fileViewPromise.catch(() => {});
     const tab = await chrome.tabs.create({ url: `https://via.itslearning.com${elementUrl}`, active: false });
     tabId = tab.id;
-
-    const first = await Promise.race([tag(fileViewPromise, "fileView"), tag(native.promise, "native")]);
-    if (first.label === "native") return first.value;
-    const fileViewUrl = first.value;
-
-    const params = new URL(fileViewUrl).searchParams;
-    const learningObjectId = params.get("LearningObjectId");
-    const learningObjectInstanceId = params.get("LearningObjectInstanceId");
-    if (!learningObjectId || !learningObjectInstanceId) {
-      throw new Error(`Mangler LearningObjectId/LearningObjectInstanceId i ${fileViewUrl}`);
+    return await Promise.any([primaryFileChain(tabId, timeoutMs), native.promise, wopi.promise]);
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      // Foretræk itslearning-cache-fejlen (403 osv.) — den fortæller mest, de to andre er bare
+      // generiske "intet opsnappet"-timeouts.
+      throw err.errors.find((e) => !/^(Ingen native download|Intet WOPI)/.test(e.message)) ?? err.errors[0];
     }
-
-    const filecachePromise = waitForRequest(FILECACHE_PATTERN, timeoutMs);
-    const redirectFailurePromise = watchForRequestFailure(DOWNLOAD_REDIRECT_PATTERN, timeoutMs);
-    filecachePromise.catch(() => {});
-    redirectFailurePromise.catch(() => {});
-    const downloadRedirectUrl = `https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${learningObjectId}&LearningObjectInstanceId=${learningObjectInstanceId}`;
-    await chrome.tabs.update(tabId, { url: downloadRedirectUrl });
-    const second = await Promise.race([tag(filecachePromise, "filecache"), redirectFailurePromise, tag(native.promise, "native")]);
-    return second.value;
+    throw err;
   } finally {
     native.cancel();
+    wopi.cancel();
     if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
   }
 }
 
 // Ét retry — favoriserer robusthed over hastighed for de webRequest-timeouts der stadig kan
-// opstå (netværks-/session-hik), nu hvor 403/native-download-tilfældet er håndteret direkte.
+// opstå (netværks-/session-hik).
 async function withRetry(fn) {
   try {
     return await fn();

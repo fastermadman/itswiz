@@ -6,11 +6,8 @@
   "description": "Henter lektionsplaner og materialer fra via.itslearning.com programmatisk.",
   "permissions": ["offscreen", "scripting", "webRequest", "storage", "alarms", "identity", "notifications", "downloads"],
   "host_permissions": [
-    "https://via.itslearning.com/*",
-    "https://platform.itslearning.com/*",
-    "https://resource.itslearning.com/*",
-    "https://filerepository.itslearning.com/*",
-    "https://filecache.itslearning.com/*",
+    "https://*.itslearning.com/*",
+    "https://*.officeapps.live.com/*",
     "https://www.googleapis.com/*"
   ],
   "background": {
