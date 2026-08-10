@@ -248,6 +248,7 @@ async function collectAndDownload(startUnix, endUnix) {
 const PDF_VIEWER_PATTERN = "*://platform.itslearning.com/PdfViewer/Viewer.aspx*";
 const FILE_VIEW_PATTERN = "*://resource.itslearning.com/File/View.aspx*";
 const FILECACHE_PATTERN = "*://filecache.itslearning.com/*";
+const DOWNLOAD_REDIRECT_PATTERN = "*://resource.itslearning.com/Proxy/DownloadRedirect.ashx*";
 const OFFICE_EXTENSIONS = [".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"];
 
 // Diagnostik: logger alle hop i download-kæderne, så vi kan se hvor den går i stå ved timeouts
@@ -337,6 +338,26 @@ function waitForRequest(urlPattern, timeoutMs) {
   });
 }
 
+// Venter på et fejl-svar (4xx/5xx) fra urlPattern og afviser med det samme — uden denne må man
+// vente hele timeoutMs ud selvom fx et 403 på DownloadRedirect.ashx allerede fortæller at
+// filecache-kaldet aldrig kommer (set for et enkelt dokument, årsag ukendt/formentlig forbigående).
+function watchForRequestFailure(urlPattern, timeoutMs) {
+  return new Promise((_, reject) => {
+    function listener(details) {
+      if (details.statusCode >= 400) {
+        cleanup();
+        reject(new Error(`${urlPattern} afvist af itslearning (status ${details.statusCode})`));
+      }
+    }
+    function cleanup() {
+      clearTimeout(timeout);
+      chrome.webRequest.onCompleted.removeListener(listener);
+    }
+    const timeout = setTimeout(cleanup, timeoutMs);
+    chrome.webRequest.onCompleted.addListener(listener, { urls: [urlPattern] });
+  });
+}
+
 async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
   let tabId = null;
   try {
@@ -353,11 +374,24 @@ async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
     }
 
     const filecachePromise = waitForRequest(FILECACHE_PATTERN, timeoutMs);
+    const redirectFailurePromise = watchForRequestFailure(DOWNLOAD_REDIRECT_PATTERN, timeoutMs);
+    filecachePromise.catch(() => {});
+    redirectFailurePromise.catch(() => {});
     const downloadRedirectUrl = `https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${learningObjectId}&LearningObjectInstanceId=${learningObjectInstanceId}`;
     await chrome.tabs.update(tabId, { url: downloadRedirectUrl });
-    return await filecachePromise;
+    return await Promise.race([filecachePromise, redirectFailurePromise]);
   } finally {
     if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+// Ét retry — de observerede fejl (403 på DownloadRedirect.ashx, webRequest-timeout) ligner
+// forbigående session-/rate-limit-hik snarere end permanente fejl ved det specifikke dokument.
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch {
+    return await fn();
   }
 }
 
@@ -501,11 +535,11 @@ async function downloadFileElements(plans) {
       let filename;
       if (isPdf || isOffice) {
         downloadUrl = isPdf
-          ? await resolvePdfDownloadUrl(element.url)
-          : await resolveOfficeDownloadUrl(element.url);
+          ? await withRetry(() => resolvePdfDownloadUrl(element.url))
+          : await withRetry(() => resolveOfficeDownloadUrl(element.url));
         filename = rawPath(courseName, weekFolder, element.title);
       } else {
-        downloadUrl = await resolveDownloadUrlUnknownType(element.url);
+        downloadUrl = await withRetry(() => resolveDownloadUrlUnknownType(element.url));
         const extension = extractExtension(downloadUrl);
         if (!extension) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
