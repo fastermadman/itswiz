@@ -593,10 +593,14 @@ async function syncCalendar(result) {
     // Livsoplysning 17/8: event 08:15-15:45, plan.start/stop 10:00-15:00). Brug derfor plan-tiden
     // når den findes, fald tilbage til event-blokken ellers.
     const titlePart = stripWeekdayPrefix(event.PlanTitle ?? plan?.title) || event.title;
+    // plan.topic.name er samme strukturerede "Emne"-felt som nu står i ugemappe-navnet
+    // (weekFolderName ovenfor) — sat forrest i titlen så det er synligt uden at åbne eventet.
+    const topic = plan?.topic?.name?.trim();
+    const summaryTitle = topic ? `${topic} — ${titlePart}` : titlePart;
     const body = {
       status: "confirmed", // PATCH på et manuelt slettet (= "cancelled") event genopliver det ikke
       // automatisk medmindre status eksplicit sættes tilbage - Google bevarer ellers feltet.
-      summary: `${calendarName} — ${titlePart}`,
+      summary: `${calendarName} — ${summaryTitle}`,
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
       start: { dateTime: toGoogleDateTime(plan?.start ?? event.start), timeZone: TIME_ZONE },
