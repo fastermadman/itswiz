@@ -19,8 +19,21 @@ async function writeToVault(path, url) {
   await ensureOffscreenDocument();
   const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "writeFile", path, url });
   if (!response?.ok) {
-    throw new Error(response?.error ?? "Ukendt fejl ved filskrivning i offscreen-dokumentet");
+    throw Object.assign(new Error(response?.error ?? "Ukendt fejl ved filskrivning i offscreen-dokumentet"), {
+      code: response?.code,
+    });
   }
+}
+
+// Advarer via extension-ikonet når vault-tilladelsen mangler (sker typisk ved genstart af
+// browseren/extensionen — File System Access-tilladelser overlever ikke det pålideligt) —
+// ellers opdager man det først ved at læse service worker-loggen efter en kørsel der intet lavede.
+async function setVaultPermissionWarning(hasProblem) {
+  await chrome.action.setBadgeText({ text: hasProblem ? "!" : "" });
+  await chrome.action.setBadgeBackgroundColor({ color: "#d93025" });
+  await chrome.action.setTitle({
+    title: hasProblem ? "VIAstudyWiz — vault-adgang mangler, åbn indstillinger" : "VIAstudyWiz",
+  });
 }
 
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
@@ -133,8 +146,11 @@ async function collectAndDownload(startUnix, endUnix) {
   // ikke blokerer det der faktisk betyder noget.
   if (settings.enableCalendarSync) await syncCalendar(result);
   if (settings.enableFileDownloads) {
-    await writePlanNotes(result.plans);
-    await downloadFileElements(result.plans);
+    const planNotesOk = await writePlanNotes(result.plans);
+    // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
+    // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
+    const filesOk = planNotesOk && (await downloadFileElements(result.plans));
+    await setVaultPermissionWarning(!filesOk);
   }
 
   console.log("VIAstudyWiz: kørsel færdig");
@@ -319,6 +335,9 @@ function rawPath(courseName, weekFolder, title) {
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Skrives kun én gang:
 // senere ændringer fra underviseren hentes ikke ind igen, til gengæld overskrives egne noter aldrig.
+// Returnerer false hvis vault-tilladelsen manglede — kalderen bruger det til at springe resten
+// af kørslen over (tilladelsen kommer ikke tilbage af sig selv midt i et løb) og til at tænde
+// advarsels-badge'et.
 async function writePlanNotes(plans) {
   const written = await getDownloadedIds();
 
@@ -352,10 +371,13 @@ async function writePlanNotes(plans) {
       await markDownloaded(noteId);
     } catch (err) {
       console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
     }
   }
+  return true;
 }
 
+// Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
 async function downloadFileElements(plans) {
   const downloadedIds = await getDownloadedIds();
 
@@ -399,8 +421,10 @@ async function downloadFileElements(plans) {
       await markDownloaded(element.id);
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
     }
   }
+  return true;
 }
 
 // Kalender-sync: ét Google Calendar-event pr. lektion, i fagets egen kalender (allerede

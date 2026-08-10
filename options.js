@@ -25,6 +25,8 @@ document.getElementById("chooseVaultDir").addEventListener("click", async () => 
     const handle = await window.showDirectoryPicker({ id: "viastudywiz-vault", mode: "readwrite" });
     await fsSet(VAULT_HANDLE_KEY, handle);
     await refreshVaultDirStatus();
+    await chrome.action.setBadgeText({ text: "" });
+    await chrome.action.setTitle({ title: "VIAstudyWiz" });
   } catch (err) {
     if (err.name !== "AbortError") console.error("VIAstudyWiz vault-mappe-fejl:", err);
   }

@@ -37,6 +37,12 @@ uanset hvor mange nye undermapper der oprettes.
 direkte på din vault (fx `~/ViaVault`). Ingen `vaultFolderName`-indstilling
 længere — den fysiske mappe du vælger *er* vault-roden.
 
+Skrive-tilladelsen overlever ikke pålideligt en genstart af browseren eller
+extensionen (kendt FSA-begrænsning, ikke noget vi kan styre fra JS) — når det
+sker, viser extension-ikonet et rødt **!**-badge. Åbn indstillinger og vælg
+vault-mappen igen (samme mappe), så forsvinder badge'et og skrivning virker
+igen.
+
 ## Vault-struktur
 
 To grene pr. fag: `RAW/` er bytes til enheder (Boox/NeoReader browser bare

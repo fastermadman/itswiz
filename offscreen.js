@@ -1,14 +1,21 @@
 // Skriver filer til den vault-mappe brugeren har valgt via options.html. Kører i et
 // offscreen-dokument fordi File System Access API'ets håndtag (og fetch/Blob-skrivning) kræver
 // en document-kontekst, som service workeren ikke har.
+// code: "VAULT_PERMISSION" lader background.js skelne "tilladelse mangler" (badge, stop resten
+// af kørslens loop tidligt — den kommer ikke tilbage af sig selv) fra alle andre skrivefejl
+// (netværk, disk osv.), som bare skal logges og springes over for den ene fil.
+function vaultPermissionError(message) {
+  return Object.assign(new Error(message), { code: "VAULT_PERMISSION" });
+}
+
 async function getVaultHandle() {
   const handle = await fsGet(VAULT_HANDLE_KEY);
   if (!handle) {
-    throw new Error("Ingen vault-mappe valgt endnu — åbn indstillinger og vælg mappen.");
+    throw vaultPermissionError("Ingen vault-mappe valgt endnu — åbn indstillinger og vælg mappen.");
   }
   const permission = await handle.queryPermission({ mode: "readwrite" });
   if (permission !== "granted") {
-    throw new Error("Adgang til vault-mappen er ikke længere givet — åbn indstillinger og vælg mappen igen.");
+    throw vaultPermissionError("Adgang til vault-mappen er ikke længere givet — åbn indstillinger og vælg mappen igen.");
   }
   return handle;
 }
@@ -41,6 +48,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== "offscreen" || message.type !== "writeFile") return;
   writeFile(message.path, message.url)
     .then(() => sendResponse({ ok: true }))
-    .catch((err) => sendResponse({ ok: false, error: err.message }));
+    .catch((err) => sendResponse({ ok: false, error: err.message, code: err.code }));
   return true;
 });
