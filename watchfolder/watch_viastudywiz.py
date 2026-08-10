@@ -86,14 +86,46 @@ def to_wikilinks(markdown: str) -> str:
 # litteraturoversigter på tværs af uger uden at strukturen skal kunne kode alting. `kilde` er
 # Obsidian-alternativet til et symlink — hverken Obsidian (enkeltfiler) eller Syncthing-til-
 # Android håndterer symlinks, men en wikilink virker både på Mac og på Boox'en.
+def read_frontmatter_field(text: str, key: str) -> str | None:
+    match = re.search(rf'^{re.escape(key)}:\s*"?([^"\n]*?)"?\s*$', text, re.MULTILINE)
+    return match.group(1) if match and match.group(1) else None
+
+
+# Ugemappens navn er "W34tors" eller "W34tors - Skolens formål" (background.js's
+# weekFolderName()) — men selve lektionsplan-noten, skrevet direkte af extensionen med adgang
+# til den fulde plan, har det rigtige tidspunkt (start/stop) oveni emnet. Foretræk den når den
+# findes, fald tilbage til at parse emnet ud af mappenavnet ellers (fx hvis kalender-sync/
+# lektionsplan-noter er slået fra i indstillingerne).
+def enrich_from_plan_note(week_dir: Path) -> dict[str, str]:
+    notes = list(week_dir.glob("* lektionsplan.md"))
+    if not notes:
+        return {}
+    text = notes[0].read_text(encoding="utf-8")
+    fields = {}
+    for key in ("emne", "start", "stop"):
+        value = read_frontmatter_field(text, key)
+        if value:
+            fields[key] = value
+    return fields
+
+
 def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -> str:
     raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
+    uge, _, folder_emne = doc_path.parent.name.partition(" - ")
+    md_week_dir = raw_root.parent / MD_DIR_NAME / doc_path.parent.relative_to(raw_root)
+
+    fields = enrich_from_plan_note(md_week_dir)
+    emne = fields.get("emne") or folder_emne
+    extra_lines = [f'emne: "{emne}"\n'] if emne else []
+    extra_lines += [f'{key}: "{fields[key]}"\n' for key in ("start", "stop") if key in fields]
+
     return (
         "---\n"
         f"fag: {raw_root.parent.name}\n"
-        f"uge: {doc_path.parent.name}\n"
+        f"uge: {uge}\n"
         f"type: {note_type}\n"
         f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n'
+        f"{''.join(extra_lines)}"
         f"{extra}"
         "---\n\n"
     )
@@ -272,5 +304,41 @@ def main():
     observer.join()
 
 
+def selfcheck() -> int:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        raw_pdf = root / "Musik" / RAW_DIR_NAME / "W34tors - Når børn synger." / "Titel.pdf"
+        raw_pdf.parent.mkdir(parents=True)
+        raw_pdf.write_bytes(b"")
+
+        # Uden lektionsplan-note: emne genbruges fra mappenavnet, ingen start/stop.
+        global VAULT_ROOT
+        old_root, VAULT_ROOT = VAULT_ROOT, root
+        try:
+            fm = frontmatter(raw_pdf)
+            assert "uge: W34tors\n" in fm, fm
+            assert 'emne: "Når børn synger."' in fm, fm
+            assert "start:" not in fm, fm
+
+            # Med lektionsplan-note ved siden af: emne + start/stop kommer derfra i stedet.
+            md_dir = root / "Musik" / MD_DIR_NAME / "W34tors - Når børn synger."
+            md_dir.mkdir(parents=True)
+            (md_dir / "W34tors - Når børn synger. lektionsplan.md").write_text(
+                '---\nemne: "Når børn synger. (fra plan)"\nstart: "2026-08-20 08:15:00"\nstop: "2026-08-20 12:00:00"\n---\n',
+                encoding="utf-8",
+            )
+            fm = frontmatter(raw_pdf)
+            assert 'emne: "Når børn synger. (fra plan)"' in fm, fm
+            assert 'start: "2026-08-20 08:15:00"' in fm, fm
+            assert 'stop: "2026-08-20 12:00:00"' in fm, fm
+        finally:
+            VAULT_ROOT = old_root
+
+    print("selfcheck ok")
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(selfcheck() if "--selfcheck" in sys.argv else main())

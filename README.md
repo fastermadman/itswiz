@@ -64,21 +64,32 @@ Fag-mappen hedder det venlige navn fra `COURSE_DISPLAY_NAMES` i `background.js`
 (fx `Musik`), ikke itslearnings tekniske kursuskode — samme tabel som allerede
 bruges til kalendersyncen.
 
+Ugemappen hedder `W<uge><dag> - <emne>` (fx `W34tors - Skolens formål`) når
+planen har et `topic.name` — strukturerede data fra itslearning, bekræftet
+live, ikke fritekst-parsing. Kun tilføjet fremadrettet: ældre mapper i
+vaulten hedder stadig bare `W34tors` uden emne, ikke migreret retroaktivt.
+
 ```
 ViaVault/<fag>/
-  RAW/<uge>/<titel>.pdf                       ← extensionen skriver kun her
-  MD/<uge>/<uge> lektionsplan.md              ← lektionsplan + links til ugens materialer
-  MD/<uge>/<titel>.md                         ← watch-scriptets MinerU-output
-  MD/<uge>/_attachments/<titel>/<sha>.jpg     ← udtrukne billeder
+  RAW/<uge> - <emne>/<titel>.pdf                       ← extensionen skriver kun her
+  MD/<uge> - <emne>/<uge> - <emne> lektionsplan.md     ← lektionsplan + links til ugens materialer
+  MD/<uge> - <emne>/<titel>.md                         ← watch-scriptets MinerU-output
+  MD/<uge> - <emne>/_attachments/<titel>/<sha>.jpg     ← udtrukne billeder
 ```
 
-Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`), så `Litteratur.base`
-kan bygge overblik på tværs af uger. Billed-embeds er wikilinks (`![[<sha>.jpg]]`),
-ikke relative stier — de knækker på titler med parentes. Begrundelse og
-alternativer i ValdiVault: `10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
+Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`, og `emne`/`start`/`stop`
+når planen har dem), så `Litteratur.base` kan bygge overblik på tværs af uger
+og emner uden at strukturen skal kode alting. `uge` er den rene ugekode
+(`W34tors`), `emne` er sit eget felt — ikke gemt inde i mappenavnets streng.
+Billed-embeds er wikilinks (`![[<sha>.jpg]]`), ikke relative stier — de
+knækker på titler med parentes. Begrundelse og alternativer i ValdiVault:
+`10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
 
 Migrering af en gammel flad vault: `watchfolder/migrate_to_raw_md.py` (dry-run
 som standard, `--apply` udfører, `--selfcheck` kører de indbyggede tests).
+Samme mønster for retroaktiv emne-tilføjelse til ugemapper
+(`watchfolder/backfill_week_topics.py`) og frontmatter-berigelse af
+eksisterende noter (`watchfolder/enrich_existing_notes.py`).
 
 ## Sikkerhed
 
