@@ -394,17 +394,31 @@ const DOWNLOADABLE_DOC_TYPE_NAMES = new Set([
 async function downloadFileElements(plans) {
   const downloadedIds = await getDownloadedIds();
 
-  const fileElements = Object.values(plans)
+  const matchingElements = Object.values(plans)
     .filter(Boolean)
     .flatMap((plan) =>
       (plan.elements ?? [])
-        .filter((el) => DOWNLOADABLE_DOC_TYPE_NAMES.has(el.typeName) && !downloadedIds.has(el.id))
+        .filter((el) => DOWNLOADABLE_DOC_TYPE_NAMES.has(el.typeName))
         .map((el) => ({
           courseName: plan.courseName ?? "ukendt-fag",
           weekFolder: weekFolderName(plan.start),
           element: el,
         }))
     );
+
+  // Logget her (før dedup-filteret) betyder man kan teste filter-ændringer ved bare at
+  // genklikke extension-ikonet og læse service worker-konsollen, uden at skulle rydde
+  // downloadedElementIds i chrome.storage.local for at se hvad der matcher.
+  console.table(
+    matchingElements.map(({ element }) => ({
+      titel: element.title,
+      typeName: element.typeName,
+      id: element.id,
+      allerede_downloadet: downloadedIds.has(element.id),
+    }))
+  );
+
+  const fileElements = matchingElements.filter(({ element }) => !downloadedIds.has(element.id));
 
   console.log(`VIAstudyWiz: ${fileElements.length} nye fil-elementer at behandle (efter dedup)`);
 
