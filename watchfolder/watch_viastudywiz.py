@@ -281,7 +281,7 @@ def process_document(doc_path: Path) -> None:
 
 def scan_existing() -> None:
     """Fanger filer der allerede lå der før scriptet startede (watchdog ser kun nye events)."""
-    for doc_path in sorted(VAULT_ROOT.glob(f"*/{RAW_DIR_NAME}/**/*")):
+    for doc_path in sorted(VAULT_ROOT.glob(f"**/{RAW_DIR_NAME}/**/*")):
         if doc_path.is_file() and doc_path.suffix.lower() in SUPPORTED_SUFFIXES:
             process_document(doc_path)
 
