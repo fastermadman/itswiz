@@ -258,8 +258,12 @@ chrome.webRequest.onBeforeRequest.addListener(
   { urls: ["*://resource.itslearning.com/*", "*://filerepository.itslearning.com/*", "*://filecache.itslearning.com/*", "*://platform.itslearning.com/*"] }
 );
 
+// Afsluttende "." eller mellemrum afvises af Chromes File System Access API
+// (getDirectoryHandle/getFileHandle kaster "Name is not allowed") — en Windows-kompatibilitets-
+// regel i selve implementeringen, ikke kun i specifikationen. Rammer typisk forkortelser/
+// afsluttede sætninger i itslearnings emnenavne (fx "Når børn synger.").
 function sanitizeFilename(name) {
-  return name.replace(/[\\/:*?"<>|]/g, "_").trim();
+  return name.replace(/[\\/:*?"<>|]/g, "_").trim().replace(/[. ]+$/, "");
 }
 
 // Udleder filendelsen fra den endelige download-URL — bruges når element.title ikke selv har
