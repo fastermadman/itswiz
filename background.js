@@ -358,13 +358,49 @@ function watchForRequestFailure(urlPattern, timeoutMs) {
   });
 }
 
+// Nogle Office-dokumenter har ingen itslearning-cachet kopi at redirecte til (set som 403 fra
+// DownloadRedirect.ashx for et enkelt element) — i stedet trigger selve siden en almindelig
+// browser-download direkte fra den skjulte fane. Uden dette ville Chrome vise en "Gem som"-dialog
+// i baggrunden (hvis "spørg hvor filer skal gemmes" er slået til), og filen ville aldrig nå
+// vaulten. Vi annullerer og sletter den native download med det samme og bruger dens URL i
+// stedet, ligesom filecache-URL'en normalt bruges.
+function watchForNativeDownload(timeoutMs) {
+  let listener;
+  let timeout;
+  const promise = new Promise((resolve) => {
+    listener = (item) => {
+      cleanup();
+      chrome.downloads.cancel(item.id, () => chrome.downloads.erase({ id: item.id }));
+      resolve(item.finalUrl || item.url);
+    };
+    timeout = setTimeout(cleanup, timeoutMs);
+    chrome.downloads.onCreated.addListener(listener);
+  });
+  function cleanup() {
+    clearTimeout(timeout);
+    chrome.downloads.onCreated.removeListener(listener);
+  }
+  return { promise, cancel: cleanup };
+}
+
+// Mærker et promise-resultat med hvilken race-gren det kom fra, så Promise.race stadig kan
+// skelne når flere grene reelt kan vinde (fileView vs. native download, filecache vs. native).
+function tag(promise, label) {
+  return promise.then((value) => ({ label, value }));
+}
+
 async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
   let tabId = null;
+  const native = watchForNativeDownload(timeoutMs * 2);
   try {
     const fileViewPromise = waitForRequest(FILE_VIEW_PATTERN, timeoutMs);
+    fileViewPromise.catch(() => {});
     const tab = await chrome.tabs.create({ url: `https://via.itslearning.com${elementUrl}`, active: false });
     tabId = tab.id;
-    const fileViewUrl = await fileViewPromise;
+
+    const first = await Promise.race([tag(fileViewPromise, "fileView"), tag(native.promise, "native")]);
+    if (first.label === "native") return first.value;
+    const fileViewUrl = first.value;
 
     const params = new URL(fileViewUrl).searchParams;
     const learningObjectId = params.get("LearningObjectId");
@@ -379,14 +415,16 @@ async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
     redirectFailurePromise.catch(() => {});
     const downloadRedirectUrl = `https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${learningObjectId}&LearningObjectInstanceId=${learningObjectInstanceId}`;
     await chrome.tabs.update(tabId, { url: downloadRedirectUrl });
-    return await Promise.race([filecachePromise, redirectFailurePromise]);
+    const second = await Promise.race([tag(filecachePromise, "filecache"), redirectFailurePromise, tag(native.promise, "native")]);
+    return second.value;
   } finally {
+    native.cancel();
     if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
   }
 }
 
-// Ét retry — de observerede fejl (403 på DownloadRedirect.ashx, webRequest-timeout) ligner
-// forbigående session-/rate-limit-hik snarere end permanente fejl ved det specifikke dokument.
+// Ét retry — favoriserer robusthed over hastighed for de webRequest-timeouts der stadig kan
+// opstå (netværks-/session-hik), nu hvor 403/native-download-tilfældet er håndteret direkte.
 async function withRetry(fn) {
   try {
     return await fn();
