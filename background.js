@@ -520,9 +520,13 @@ function findExternalIframeSrc() {
     const src = iframe.src;
     if (!src) continue;
     try {
-      if (!new URL(src).hostname.endsWith("itslearning.com")) return src;
+      const parsed = new URL(src);
+      // Decoy-iframes med src="javascript:false;" findes på ViewLearningToolElement-siden —
+      // parsed.hostname for dem er "", som fejlagtigt IKKE ender på "itslearning.com".
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+      if (!parsed.hostname.endsWith("itslearning.com")) return src;
     } catch {
-      // ignorer ugyldige/relative src'er ("javascript:false;" o.lign.)
+      // ignorer ugyldige/relative src'er
     }
   }
   return null;
