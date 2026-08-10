@@ -29,11 +29,31 @@ async function writeToVault(path, url) {
 // aktuelle kørsel. Nulstilles i collectAndDownload. Uden denne var den slags fejl kun synlige i
 // service worker-konsollen — man skulle vide de skulle kigges efter for overhovedet at opdage dem.
 let runErrorCount = 0;
+let runErrorMessages = [];
 let runFilesDownloaded = 0;
 let runEventsSynced = 0;
 
-function recordError() {
+function recordError(message) {
   runErrorCount++;
+  runErrorMessages.push(message);
+}
+
+// Badge't viser kun et antal — uden dette skulle man åbne service worker-konsollen for
+// overhovedet at se hvad der fejlede, og et klik på extension-ikonet trigger jo bare en ny
+// kørsel i stedet for at vise noget. Kappet til 5 linjer så notifikationen ikke vokser
+// ubegrænset hvis fx et helt kursus er utilgængeligt.
+function notifyErrorsIfAny() {
+  if (runErrorCount === 0) return;
+  const shown = runErrorMessages.slice(0, 5);
+  const rest = runErrorMessages.length - shown.length;
+  const message = shown.join("\n") + (rest > 0 ? `\n+${rest} mere` : "");
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon128.png"),
+    title: `VIAstudyWiz — ${runErrorCount} element(er) fejlede`,
+    message,
+    requireInteraction: true,
+  });
 }
 
 // Vises kun hvis der faktisk skete noget (nye filer/events) — ellers ville den daglige alarm
@@ -61,7 +81,7 @@ async function updateStatusBadge(vaultPermissionMissing) {
     await chrome.action.setBadgeText({ text: String(runErrorCount) });
     await chrome.action.setBadgeBackgroundColor({ color: "#f9ab00" });
     await chrome.action.setTitle({
-      title: `VIAstudyWiz — ${runErrorCount} element(er) fejlede i seneste kørsel, se service worker-konsollen`,
+      title: `VIAstudyWiz — ${runErrorCount} element(er) fejlede i seneste kørsel, se notifikationen`,
     });
   } else {
     await chrome.action.setBadgeText({ text: "" });
@@ -171,6 +191,7 @@ async function collectRangeInPage(startUnix, endUnix) {
 async function collectAndDownload(startUnix, endUnix) {
   console.log(`VIAstudyWiz: starter kørsel (${new Date(startUnix * 1000).toISOString()} → ${new Date(endUnix * 1000).toISOString()})`);
   runErrorCount = 0;
+  runErrorMessages = [];
   runFilesDownloaded = 0;
   runEventsSynced = 0;
   const settings = await getSettings();
@@ -202,6 +223,7 @@ async function collectAndDownload(startUnix, endUnix) {
     vaultPermissionMissing = !filesOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
+  notifyErrorsIfAny();
   notifySuccessIfNoteworthy();
 
   console.log("VIAstudyWiz: kørsel færdig");
@@ -423,7 +445,7 @@ async function writePlanNotes(plans) {
     } catch (err) {
       console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
-      recordError();
+      recordError(`Lektionsplan (${weekFolder}): ${err.message}`);
     }
   }
   return true;
@@ -487,7 +509,7 @@ async function downloadFileElements(plans) {
         const extension = extractExtension(downloadUrl);
         if (!extension) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
-          recordError();
+          recordError(`${element.title}: kunne ikke udlede filendelse`);
           continue;
         }
         filename = rawPath(courseName, weekFolder, element.title + extension);
@@ -498,7 +520,7 @@ async function downloadFileElements(plans) {
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
-      recordError();
+      recordError(`${element.title}: ${err.message}`);
     }
   }
   return true;
@@ -676,7 +698,7 @@ async function syncCalendar(result) {
       if (wasNew) runEventsSynced++;
     } catch (err) {
       console.error(`VIAstudyWiz kalender-fejl (${body.summary}):`, err);
-      recordError();
+      recordError(`${body.summary}: ${err.message}`);
     }
   }
 
