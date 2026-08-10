@@ -219,7 +219,7 @@ async function collectAndDownload(startUnix, endUnix) {
     const planNotesOk = await writePlanNotes(result.plans);
     // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
     // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
-    const filesOk = planNotesOk && (await downloadFileElements(result.plans));
+    const filesOk = planNotesOk && (await downloadFileElements(result.plans, tab.id));
     vaultPermissionMissing = !filesOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
@@ -563,12 +563,16 @@ async function writePlanNotes(plans) {
     const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
     const courseName = plan.courseName ?? "ukendt-fag";
     // Links til MD-noten (navigations-graf), ikke RAW-filen — RAW er bytes til enheder, ikke
-    // noget man klikker sig videre til fra en note (issue #26). Link/Mappe/opgave-typer får
-    // aldrig en MD-modpart fra MinerU, så de udelades i stedet for at linke til en note der
-    // aldrig opstår.
+    // noget man klikker sig videre til fra en note (issue #26). Mappe/opgave-typer får aldrig en
+    // MD-modpart, så de udelades. Link-elementer nævnes som ren tekst (titlen er allerede synlig
+    // her) i stedet for en note — automatisk indholds-udtræk blev forsøgt og droppet igen, se #20.
     const materials = (plan.elements ?? [])
-      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName))
-      .map((el) => `- [[${mdPath(courseName, weekFolder, el.title)}]]`);
+      .filter((el) => el.typeName === "Link" || !NON_FILE_TYPE_NAMES.has(el.typeName))
+      .map((el) =>
+        el.typeName === "Link"
+          ? `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`
+          : `- [[${mdPath(courseName, weekFolder, el.title)}]]`
+      );
     const topic = plan.topic?.name?.trim();
     const note = [
       "---",
@@ -611,21 +615,74 @@ async function writePlanNotes(plans) {
 // mod fremtidige varianter uden at kræve endnu en manuel rettelse.
 const NON_FILE_TYPE_NAMES = new Set(["Link", "Mappe", "Arbejdsopgave", "Afleveringsopgave"]);
 
+// Kører i itslearning-sidens egen kontekst (se collectRangeInPage ovenfor for hvorfor — samme
+// Origin-begrænsning kan gælde). /Resources?FolderID=X returnerer en fuld HTML-side, men
+// indlejrer selve mappens indhold som ren JSON i et <script>-tag (window.Resources = {...}) —
+// langt simplere end fil-download-kæderne, ingen presigned URL'er eller webRequest-opsnapning
+// nødvendig, bekræftet live 2026-08-11 (issue #24).
+async function fetchFolderElementsInPage(folderUrl) {
+  const res = await fetch(folderUrl, { headers: { "x-requested-with": "XMLHttpRequest" } });
+  const text = await res.text();
+  const match = text.match(/window\.Resources = (\{.*?\});\s*<\/script>/s);
+  if (!match) return [];
+  const data = JSON.parse(match[1]);
+  return (data.currentFolder?.folderElements?.elements ?? []).map((el) => ({
+    id: el.elementId,
+    title: el.title,
+    typeName: el.isFolder ? "Mappe" : "Fil",
+    url: el.elementUrl,
+  }));
+}
+
+// Mapper kan i princippet indeholde undermapper — depth-grænsen er et sikkerhedsnet mod uendelig
+// rekursion (fx en fejlkonfigureret selv-reference), ikke en forventet dybde i praksis.
+async function expandFolderElement(tabId, element, depth = 0) {
+  if (depth > 5) {
+    console.warn(`VIAstudyWiz: Mappe "${element.title}" er over 5 niveauer dyb, stopper rekursion`);
+    return [];
+  }
+  const [{ result: children }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: fetchFolderElementsInPage,
+    args: [`https://via.itslearning.com${element.url}`],
+  });
+  const expanded = [];
+  for (const child of children ?? []) {
+    if (child.typeName === "Mappe") {
+      expanded.push(...(await expandFolderElement(tabId, child, depth + 1)));
+    } else {
+      expanded.push(child);
+    }
+  }
+  return expanded;
+}
+
 // Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
-async function downloadFileElements(plans) {
+async function downloadFileElements(plans, tabId) {
   const downloadedIds = await getDownloadedIds();
 
-  const matchingElements = Object.values(plans)
+  const baseElements = Object.values(plans)
     .filter(Boolean)
     .flatMap((plan) =>
-      (plan.elements ?? [])
-        .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName))
-        .map((el) => ({
-          courseName: plan.courseName ?? "ukendt-fag",
-          weekFolder: weekFolderName(plan),
-          element: el,
-        }))
+      (plan.elements ?? []).map((el) => ({
+        courseName: plan.courseName ?? "ukendt-fag",
+        weekFolder: weekFolderName(plan),
+        element: el,
+      }))
     );
+
+  // Mappe-elementer udpakkes til deres reelle indhold (issue #24) — resten af pipelinen
+  // (dedup, download, filnavne) ser bare almindelige fil-elementer bagefter, ingen skelnen
+  // nødvendig længere nede.
+  const matchingElements = [];
+  for (const { courseName, weekFolder, element } of baseElements) {
+    if (element.typeName === "Mappe") {
+      const children = await expandFolderElement(tabId, element);
+      for (const child of children) matchingElements.push({ courseName, weekFolder, element: child });
+    } else if (!NON_FILE_TYPE_NAMES.has(element.typeName)) {
+      matchingElements.push({ courseName, weekFolder, element });
+    }
+  }
 
   // Logget her (før dedup-filteret) betyder man kan teste filter-ændringer ved bare at
   // genklikke extension-ikonet og læse service worker-konsollen, uden at skulle rydde
