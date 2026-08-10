@@ -809,6 +809,17 @@ async function syncCalendar(result) {
 
     const planKey = (event.PlanIds ?? [])[0] ? `${event.courseId}:${event.PlanIds[0]}` : null;
     const plan = planKey ? result.plans[planKey] : null;
+    if (planKey && !plan) {
+      // planKey findes, men blev ikke i result.plans — fetchPlan fejlede stille, IKKE
+      // eventual-consistency (den ville have givet et tomt event.PlanIds, se issue #25).
+      console.warn(`VIAstudyWiz: plan ${planKey} manglede i result.plans selvom event.PlanIds havde den — fetchPlan fejlede for "${event.title}".`);
+    } else if (!planKey) {
+      console.log(`VIAstudyWiz: event "${event.title}" har tomt PlanIds (itslearnings myEvents er eventual consistent her) — bruger lokale-tid indtil en senere kørsel retter det.`);
+    }
+
+    // upsertCalendarEvent muterer eventMap, så "var det nyt" skal fanges før kaldet — ellers
+    // tæller vi hver PATCH af et allerede-synkroniseret event som "nyt" (kører hver kørsel).
+    const wasNew = !eventMap[event.id];
 
     // event.start/event.end er lokale-bookingen for hele blokken (fx 08:15-15:45), ikke
     // nødvendigvis selve lektionens tidspunkt — undervisere kan ændre det i selve planen uden at
@@ -816,7 +827,7 @@ async function syncCalendar(result) {
     // event-blokken 1:1 når intet er ændret (bekræftet live: samme værdier for en lektion uden
     // afvigelse), men afviger korrekt når underviseren har indsnævret tidspunktet i planen (fx
     // Livsoplysning 17/8: event 08:15-15:45, plan.start/stop 10:00-15:00). Brug derfor plan-tiden
-    // når den findes, fald tilbage til event-blokken ellers.
+    // når den findes.
     const titlePart = stripWeekdayPrefix(event.PlanTitle ?? plan?.title) || event.title;
     // plan.topic.name er samme strukturerede "Emne"-felt som nu står i ugemappe-navnet
     // (weekFolderName ovenfor) — sat forrest i titlen så det er synligt uden at åbne eventet.
@@ -828,13 +839,19 @@ async function syncCalendar(result) {
       summary: `${calendarName} — ${summaryTitle}`,
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
-      start: { dateTime: toGoogleDateTime(plan?.start ?? event.start), timeZone: TIME_ZONE },
-      end: { dateTime: toGoogleDateTime(plan?.stop ?? event.end), timeZone: TIME_ZONE },
     };
-
-    // upsertCalendarEvent muterer eventMap, så "var det nyt" skal fanges før kaldet — ellers
-    // tæller vi hver PATCH af et allerede-synkroniseret event som "nyt" (kører hver kørsel).
-    const wasNew = !eventMap[event.id];
+    if (plan) {
+      body.start = { dateTime: toGoogleDateTime(plan.start), timeZone: TIME_ZONE };
+      body.end = { dateTime: toGoogleDateTime(plan.stop), timeZone: TIME_ZONE };
+    } else if (wasNew) {
+      // Nyt event, ingen plan-tid endnu — brug lokale-blokken som startgæt. En senere kørsel
+      // retter tiden så snart PlanIds er udfyldt.
+      body.start = { dateTime: toGoogleDateTime(event.start), timeZone: TIME_ZONE };
+      body.end = { dateTime: toGoogleDateTime(event.end), timeZone: TIME_ZONE };
+    }
+    // else: eventet findes allerede i Google og vi har (endnu) ingen plan-tid — udelad start/end
+    // fra PATCH'en så den korrekte tid fra en tidligere kørsel ikke overskrives med lokale-blokken
+    // (roden til issue #25).
     try {
       const created = await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
       console.log(
