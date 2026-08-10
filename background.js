@@ -25,14 +25,79 @@ async function writeToVault(path, url) {
   }
 }
 
+// Tæller fejlede enkelt-elementer (fil-downloads, kalender-events, lektionsplan-noter) i den
+// aktuelle kørsel. Nulstilles i collectAndDownload. Uden denne var den slags fejl kun synlige i
+// service worker-konsollen — man skulle vide de skulle kigges efter for overhovedet at opdage dem.
+let runErrorCount = 0;
+let runErrorMessages = [];
+let runFilesDownloaded = 0;
+let runEventsSynced = 0;
+
+function recordError(message) {
+  runErrorCount++;
+  runErrorMessages.push(message);
+}
+
+// Badge't viser kun et antal — uden dette skulle man åbne service worker-konsollen for
+// overhovedet at se hvad der fejlede, og et klik på extension-ikonet trigger jo bare en ny
+// kørsel i stedet for at vise noget. Kappet til 5 linjer så notifikationen ikke vokser
+// ubegrænset hvis fx et helt kursus er utilgængeligt.
+function notifyErrorsIfAny() {
+  if (runErrorCount === 0) return;
+  const shown = runErrorMessages.slice(0, 5);
+  const rest = runErrorMessages.length - shown.length;
+  const message = shown.join("\n") + (rest > 0 ? `\n+${rest} mere` : "");
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon128.png"),
+    title: `VIAstudyWiz — ${runErrorCount} element(er) fejlede`,
+    message,
+    requireInteraction: true,
+  });
+}
+
+// Vises kun hvis der faktisk skete noget (nye filer/events) — ellers ville den daglige alarm
+// give en notifikation hver dag selv i det normale tilfælde, hvor der ikke er noget nyt.
+function notifySuccessIfNoteworthy() {
+  if (runFilesDownloaded === 0 && runEventsSynced === 0) return;
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon128.png"),
+    title: "VIAstudyWiz — kørsel færdig",
+    message: `${runFilesDownloaded} fil(er) hentet, ${runEventsSynced} kalender-event(s) synkroniseret.`,
+  });
+}
+
 // Advarer via extension-ikonet når vault-tilladelsen mangler (sker typisk ved genstart af
-// browseren/extensionen — File System Access-tilladelser overlever ikke det pålideligt) —
-// ellers opdager man det først ved at læse service worker-loggen efter en kørsel der intet lavede.
-async function setVaultPermissionWarning(hasProblem) {
-  await chrome.action.setBadgeText({ text: hasProblem ? "!" : "" });
-  await chrome.action.setBadgeBackgroundColor({ color: "#d93025" });
-  await chrome.action.setTitle({
-    title: hasProblem ? "VIAstudyWiz — vault-adgang mangler, åbn indstillinger" : "VIAstudyWiz",
+// browseren/extensionen — File System Access-tilladelser overlever ikke det pålideligt), eller
+// når enkelt-elementer fejlede i seneste kørsel. Vault-adgang har forrang i badge't, da det
+// blokerer alt indtil det rettes, mens enkelt-fejl typisk kun rammer ét dokument.
+async function updateStatusBadge(vaultPermissionMissing) {
+  if (vaultPermissionMissing) {
+    await chrome.action.setBadgeText({ text: "!" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#d93025" });
+    await chrome.action.setTitle({ title: "VIAstudyWiz — vault-adgang mangler, åbn indstillinger" });
+  } else if (runErrorCount > 0) {
+    await chrome.action.setBadgeText({ text: String(runErrorCount) });
+    await chrome.action.setBadgeBackgroundColor({ color: "#f9ab00" });
+    await chrome.action.setTitle({
+      title: `VIAstudyWiz — ${runErrorCount} element(er) fejlede i seneste kørsel, se notifikationen`,
+    });
+  } else {
+    await chrome.action.setBadgeText({ text: "" });
+    await chrome.action.setTitle({ title: "VIAstudyWiz" });
+  }
+}
+
+// Vises kun ved fejl der stopper hele kørslen (fx ingen åben itslearning-fane) — badge't alene
+// opdages typisk ikke før man selv klikker ind i extensionen, en notifikation ses med det samme.
+function notifyCriticalFailure(err) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon128.png"),
+    title: "VIAstudyWiz — kørsel fejlede",
+    message: err.message ?? String(err),
+    requireInteraction: true,
   });
 }
 
@@ -125,6 +190,10 @@ async function collectRangeInPage(startUnix, endUnix) {
 
 async function collectAndDownload(startUnix, endUnix) {
   console.log(`VIAstudyWiz: starter kørsel (${new Date(startUnix * 1000).toISOString()} → ${new Date(endUnix * 1000).toISOString()})`);
+  runErrorCount = 0;
+  runErrorMessages = [];
+  runFilesDownloaded = 0;
+  runEventsSynced = 0;
   const settings = await getSettings();
 
   const [tab] = await chrome.tabs.query({ url: "https://via.itslearning.com/*" });
@@ -145,13 +214,17 @@ async function collectAndDownload(startUnix, endUnix) {
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
   // ikke blokerer det der faktisk betyder noget.
   if (settings.enableCalendarSync) await syncCalendar(result);
+  let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
     const planNotesOk = await writePlanNotes(result.plans);
     // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
     // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
     const filesOk = planNotesOk && (await downloadFileElements(result.plans));
-    await setVaultPermissionWarning(!filesOk);
+    vaultPermissionMissing = !filesOk;
   }
+  await updateStatusBadge(vaultPermissionMissing);
+  notifyErrorsIfAny();
+  notifySuccessIfNoteworthy();
 
   console.log("VIAstudyWiz: kørsel færdig");
 
@@ -175,6 +248,7 @@ async function collectAndDownload(startUnix, endUnix) {
 const PDF_VIEWER_PATTERN = "*://platform.itslearning.com/PdfViewer/Viewer.aspx*";
 const FILE_VIEW_PATTERN = "*://resource.itslearning.com/File/View.aspx*";
 const FILECACHE_PATTERN = "*://filecache.itslearning.com/*";
+const DOWNLOAD_REDIRECT_PATTERN = "*://resource.itslearning.com/Proxy/DownloadRedirect.ashx*";
 const OFFICE_EXTENSIONS = [".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"];
 
 // Diagnostik: logger alle hop i download-kæderne, så vi kan se hvor den går i stå ved timeouts
@@ -264,27 +338,138 @@ function waitForRequest(urlPattern, timeoutMs) {
   });
 }
 
+// Venter på et fejl-svar (4xx/5xx) fra urlPattern og afviser med det samme — uden denne må man
+// vente hele timeoutMs ud selvom fx et 403 på DownloadRedirect.ashx allerede fortæller at
+// filecache-kaldet aldrig kommer (set for et enkelt dokument, årsag ukendt/formentlig forbigående).
+function watchForRequestFailure(urlPattern, timeoutMs) {
+  return new Promise((_, reject) => {
+    function listener(details) {
+      if (details.statusCode >= 400) {
+        cleanup();
+        reject(new Error(`${urlPattern} afvist af itslearning (status ${details.statusCode})`));
+      }
+    }
+    function cleanup() {
+      clearTimeout(timeout);
+      chrome.webRequest.onCompleted.removeListener(listener);
+    }
+    const timeout = setTimeout(cleanup, timeoutMs);
+    chrome.webRequest.onCompleted.addListener(listener, { urls: [urlPattern] });
+  });
+}
+
+// Nogle Office-dokumenter har ingen itslearning-cachet kopi at redirecte til (set som 403 fra
+// DownloadRedirect.ashx for et enkelt element) — i stedet trigger selve siden en almindelig
+// browser-download direkte fra den skjulte fane. Uden dette ville Chrome vise en "Gem som"-dialog
+// i baggrunden (hvis "spørg hvor filer skal gemmes" er slået til), og filen ville aldrig nå
+// vaulten. Vi annullerer og sletter den native download med det samme og bruger dens URL i
+// stedet, ligesom filecache-URL'en normalt bruges. Rejecter (ikke bare hænger) ved timeout, så
+// Promise.any nedenfor kan afgøre at *ingen* af de tre veje virkede.
+function watchForNativeDownload(timeoutMs) {
+  let listener;
+  let timeout;
+  const promise = new Promise((resolve, reject) => {
+    listener = (item) => {
+      cleanup();
+      chrome.downloads.cancel(item.id, () => chrome.downloads.erase({ id: item.id }));
+      resolve(item.finalUrl || item.url);
+    };
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Ingen native download opstod"));
+    }, timeoutMs);
+    chrome.downloads.onCreated.addListener(listener);
+  });
+  function cleanup() {
+    clearTimeout(timeout);
+    chrome.downloads.onCreated.removeListener(listener);
+  }
+  return { promise, cancel: cleanup };
+}
+
+// itslearning genererer selv en WOPI access_token og poster den (sammen med WOPISrc) til
+// Microsofts Office Online-viewer via et skjult formular-POST — set direkte i devtools for et
+// dokument uden itslearning-cachet kopi (samme dokument som ovenfor). WOPI-protokollens
+// GetFile-endpoint ({WOPISrc}/contents?access_token=...) er en almindelig HTTP GET, så vi kan
+// hente indholdet selv uden nogensinde at røre Microsofts iframe — kræver kun at opsnappe
+// access_token fra POST-requesten, ikke at rendere den.
+const OFFICE_VIEWER_PATTERN = "*://*.officeapps.live.com/*";
+
+function watchForWopiAccessToken(timeoutMs) {
+  let listener;
+  let timeout;
+  const promise = new Promise((resolve, reject) => {
+    listener = (details) => {
+      const accessToken = details.requestBody?.formData?.access_token?.[0];
+      const wopiSrc = new URL(details.url).searchParams.get("WOPISrc");
+      if (!accessToken || !wopiSrc) return;
+      cleanup();
+      resolve(`${wopiSrc}/contents?access_token=${encodeURIComponent(accessToken)}`);
+    };
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Intet WOPI access_token opsnappet"));
+    }, timeoutMs);
+    chrome.webRequest.onBeforeRequest.addListener(listener, { urls: [OFFICE_VIEWER_PATTERN] }, ["requestBody"]);
+  });
+  function cleanup() {
+    clearTimeout(timeout);
+    chrome.webRequest.onBeforeRequest.removeListener(listener);
+  }
+  return { promise, cancel: cleanup };
+}
+
+// itslearnings egen fil-cache-vej (File/View.aspx → DownloadRedirect.ashx → filecache) — kan
+// kaste (fx 403), i hvilket tilfælde resolveOfficeDownloadUrl falder tilbage til native-download-
+// og WOPI-vejene i stedet for at give op med det samme.
+async function primaryFileChain(tabId, timeoutMs) {
+  const fileViewUrl = await waitForRequest(FILE_VIEW_PATTERN, timeoutMs);
+
+  const params = new URL(fileViewUrl).searchParams;
+  const learningObjectId = params.get("LearningObjectId");
+  const learningObjectInstanceId = params.get("LearningObjectInstanceId");
+  if (!learningObjectId || !learningObjectInstanceId) {
+    throw new Error(`Mangler LearningObjectId/LearningObjectInstanceId i ${fileViewUrl}`);
+  }
+
+  const filecachePromise = waitForRequest(FILECACHE_PATTERN, timeoutMs);
+  const redirectFailurePromise = watchForRequestFailure(DOWNLOAD_REDIRECT_PATTERN, timeoutMs);
+  filecachePromise.catch(() => {});
+  redirectFailurePromise.catch(() => {});
+  const downloadRedirectUrl = `https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${learningObjectId}&LearningObjectInstanceId=${learningObjectInstanceId}`;
+  await chrome.tabs.update(tabId, { url: downloadRedirectUrl });
+  return await Promise.race([filecachePromise, redirectFailurePromise]);
+}
+
 async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
   let tabId = null;
+  const native = watchForNativeDownload(timeoutMs * 2);
+  const wopi = watchForWopiAccessToken(timeoutMs * 2);
   try {
-    const fileViewPromise = waitForRequest(FILE_VIEW_PATTERN, timeoutMs);
     const tab = await chrome.tabs.create({ url: `https://via.itslearning.com${elementUrl}`, active: false });
     tabId = tab.id;
-    const fileViewUrl = await fileViewPromise;
-
-    const params = new URL(fileViewUrl).searchParams;
-    const learningObjectId = params.get("LearningObjectId");
-    const learningObjectInstanceId = params.get("LearningObjectInstanceId");
-    if (!learningObjectId || !learningObjectInstanceId) {
-      throw new Error(`Mangler LearningObjectId/LearningObjectInstanceId i ${fileViewUrl}`);
+    return await Promise.any([primaryFileChain(tabId, timeoutMs), native.promise, wopi.promise]);
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      // Foretræk itslearning-cache-fejlen (403 osv.) — den fortæller mest, de to andre er bare
+      // generiske "intet opsnappet"-timeouts.
+      throw err.errors.find((e) => !/^(Ingen native download|Intet WOPI)/.test(e.message)) ?? err.errors[0];
     }
-
-    const filecachePromise = waitForRequest(FILECACHE_PATTERN, timeoutMs);
-    const downloadRedirectUrl = `https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${learningObjectId}&LearningObjectInstanceId=${learningObjectInstanceId}`;
-    await chrome.tabs.update(tabId, { url: downloadRedirectUrl });
-    return await filecachePromise;
+    throw err;
   } finally {
+    native.cancel();
+    wopi.cancel();
     if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+// Ét retry — favoriserer robusthed over hastighed for de webRequest-timeouts der stadig kan
+// opstå (netværks-/session-hik).
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch {
+    return await fn();
   }
 }
 
@@ -372,23 +557,19 @@ async function writePlanNotes(plans) {
     } catch (err) {
       console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
+      recordError(`Lektionsplan (${weekFolder}): ${err.message}`);
     }
   }
   return true;
 }
 
 // itslearning bruger separate typeNames pr. dokumenttype for samme
-// ViewLearningToolElement-URL-mønster, ikke kun "Fil" — bekræftet i gemte metadata-dumps
-// (~/ViaVault/_metadata/*.json) for "Microsoft Word". PowerPoint/Excel/PDF er ikke observeret
-// endnu, kun et kvalificeret gæt ud fra samme mønster — harmløst at have med (Set.has() på et
-// navn der aldrig dukker op koster intet), men ret det hvis et rigtigt eksempel viser noget andet.
-const DOWNLOADABLE_DOC_TYPE_NAMES = new Set([
-  "Fil",
-  "Microsoft Word",
-  "Microsoft PowerPoint",
-  "Microsoft Excel",
-  "PDF",
-]);
+// ViewLearningToolElement-URL-mønster ("Fil", "Microsoft Word", ... — bekræftet i gemte
+// metadata-dumps), og der dukker jævnligt uforudsete varianter op alt efter hvordan
+// underviseren har lagt materialet ind. En allowlist rammer altid kun de typeNames vi allerede
+// kender og springer nye stille over igen — denylist af de kendte ikke-fil-typer er robust
+// mod fremtidige varianter uden at kræve endnu en manuel rettelse.
+const NON_FILE_TYPE_NAMES = new Set(["Link", "Mappe", "Arbejdsopgave", "Afleveringsopgave"]);
 
 // Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
 async function downloadFileElements(plans) {
@@ -398,7 +579,7 @@ async function downloadFileElements(plans) {
     .filter(Boolean)
     .flatMap((plan) =>
       (plan.elements ?? [])
-        .filter((el) => DOWNLOADABLE_DOC_TYPE_NAMES.has(el.typeName))
+        .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName))
         .map((el) => ({
           courseName: plan.courseName ?? "ukendt-fag",
           weekFolder: weekFolderName(plan.start),
@@ -432,23 +613,26 @@ async function downloadFileElements(plans) {
       let filename;
       if (isPdf || isOffice) {
         downloadUrl = isPdf
-          ? await resolvePdfDownloadUrl(element.url)
-          : await resolveOfficeDownloadUrl(element.url);
+          ? await withRetry(() => resolvePdfDownloadUrl(element.url))
+          : await withRetry(() => resolveOfficeDownloadUrl(element.url));
         filename = rawPath(courseName, weekFolder, element.title);
       } else {
-        downloadUrl = await resolveDownloadUrlUnknownType(element.url);
+        downloadUrl = await withRetry(() => resolveDownloadUrlUnknownType(element.url));
         const extension = extractExtension(downloadUrl);
         if (!extension) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
+          recordError(`${element.title}: kunne ikke udlede filendelse`);
           continue;
         }
         filename = rawPath(courseName, weekFolder, element.title + extension);
       }
       await writeToVault(filename, downloadUrl);
       await markDownloaded(element.id);
+      runFilesDownloaded++;
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
+      recordError(`${element.title}: ${err.message}`);
     }
   }
   return true;
@@ -615,13 +799,18 @@ async function syncCalendar(result) {
       end: { dateTime: toGoogleDateTime(event.end), timeZone: TIME_ZONE },
     };
 
+    // upsertCalendarEvent muterer eventMap, så "var det nyt" skal fanges før kaldet — ellers
+    // tæller vi hver PATCH af et allerede-synkroniseret event som "nyt" (kører hver kørsel).
+    const wasNew = !eventMap[event.id];
     try {
       const created = await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
       console.log(
         `VIAstudyWiz: "${body.summary}" -> kalender-id ${calendarId}, event-link ${created.htmlLink}`
       );
+      if (wasNew) runEventsSynced++;
     } catch (err) {
       console.error(`VIAstudyWiz kalender-fejl (${body.summary}):`, err);
+      recordError(`${body.summary}: ${err.message}`);
     }
   }
 
@@ -664,6 +853,7 @@ async function runCollectAndDownload() {
     await collectAndDownload(start, end);
   } catch (err) {
     console.error("VIAstudyWiz fejl:", err);
+    notifyCriticalFailure(err);
   } finally {
     isRunning = false;
   }
