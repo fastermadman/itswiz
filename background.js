@@ -546,6 +546,24 @@ function mdPath(courseName, weekFolder, title) {
   return `${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
 }
 
+// "hentet:" i frontmatter — lokal væg-tid i samme tidszone som resten af extensionen (TIME_ZONE),
+// ikke maskinens egen, og samme "yyyy-MM-dd HH:mm"-format som start/stop-felterne ovenfor, for
+// konsistens (issue #34). Noter her skrives kun én gang (se writePlanNotes), så "opdateret:" giver
+// ikke mening endnu — tilføj det hvis en note-type nogensinde begynder at blive genskrevet.
+function formatNow() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((p) => p.type === type).value;
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Skrives kun én gang:
 // senere ændringer fra underviseren hentes ikke ind igen, til gengæld overskrives egne noter aldrig.
@@ -584,6 +602,7 @@ async function writePlanNotes(plans) {
       // for hvorfor plan.start/stop er den pålidelige kilde.
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
+      `hentet: "${formatNow()}"`,
       "type: lektionsplan",
       "---",
       "",

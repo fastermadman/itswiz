@@ -28,13 +28,16 @@ import sys
 import tempfile
 import time
 import zipfile
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+TIME_ZONE = ZoneInfo("Europe/Copenhagen")
 VAULT_ROOT = Path.home() / "ViaVault"
 RAW_DIR_NAME = "RAW"
 MD_DIR_NAME = "MD"
@@ -109,6 +112,13 @@ def enrich_from_plan_note(week_dir: Path) -> dict[str, str]:
     return fields
 
 
+# "hentet:" — lokal væg-tid i samme tidszone som extensionens egen formatNow() (TIME_ZONE), samme
+# "yyyy-MM-dd HH:mm"-format, for konsistens på tværs af begge kodebaser (issue #34). Noter her
+# skrives kun én gang (se already_converted()), så "opdateret:" giver ikke mening endnu.
+def format_now() -> str:
+    return datetime.now(TIME_ZONE).strftime("%Y-%m-%d %H:%M")
+
+
 def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -> str:
     raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
     uge, _, folder_emne = doc_path.parent.name.partition(" - ")
@@ -125,6 +135,7 @@ def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -
         f"uge: {uge}\n"
         f"type: {note_type}\n"
         f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n'
+        f'hentet: "{format_now()}"\n'
         f"{''.join(extra_lines)}"
         f"{extra}"
         "---\n\n"
