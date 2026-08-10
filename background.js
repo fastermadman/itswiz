@@ -220,7 +220,8 @@ async function collectAndDownload(startUnix, endUnix) {
     // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
     // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
     const filesOk = planNotesOk && (await downloadFileElements(result.plans));
-    vaultPermissionMissing = !filesOk;
+    const linksOk = filesOk && (await captureLinkElements(result.plans));
+    vaultPermissionMissing = !linksOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
   notifyErrorsIfAny();
@@ -502,6 +503,241 @@ async function resolveDownloadUrlUnknownType(elementUrl) {
   } catch {
     return await resolveOfficeDownloadUrl(elementUrl);
   }
+}
+
+// Link-elementer (typeName "Link") går gennem samme ViewLearningToolElement-viewer som
+// "Fil"-elementer (se issue #14), men vi ved endnu ikke om viewer'en navigerer direkte til den
+// eksterne URL i samme fane, eller åbner den i en ny fane — ingen af delene er bekræftet på et
+// rigtigt element endnu. Lytter efter begge: enten navigerer den skjulte fane selv væk fra
+// itslearning.com, eller også åbner den en ny fane med vores skjulte fane som opener.
+function resolveLinkTarget(elementUrl, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    let hiddenTabId = null;
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `Timeout: Link-elementet navigerede ikke væk fra itslearning inden for ${timeoutMs}ms — ` +
+            `kræver det et klik i UI'et i stedet for en automatisk redirect? Se issue #14.`
+        )
+      );
+    }, timeoutMs);
+
+    function isExternal(url) {
+      try {
+        return !new URL(url).hostname.endsWith("itslearning.com");
+      } catch {
+        return false;
+      }
+    }
+
+    function cleanup() {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onCreated.removeListener(onCreated);
+    }
+
+    function onUpdated(id, changeInfo) {
+      if (id !== hiddenTabId || !changeInfo.url || !isExternal(changeInfo.url)) return;
+      cleanup();
+      resolve({ url: changeInfo.url, landingTabId: hiddenTabId, extraTabId: null });
+    }
+
+    function onCreated(tab) {
+      if (tab.openerTabId !== hiddenTabId || !tab.url || !isExternal(tab.url)) return;
+      cleanup();
+      resolve({ url: tab.url, landingTabId: tab.id, extraTabId: hiddenTabId });
+    }
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onCreated.addListener(onCreated);
+    chrome.tabs.create({ url: `https://via.itslearning.com${elementUrl}`, active: false }).then((tab) => {
+      hiddenTabId = tab.id;
+    });
+  });
+}
+
+// Venter på at en fane bliver færdig med at loade — nødvendigt før content-scriptet i
+// extractReadablePage() kan læse en færdig-renderet DOM.
+function waitForTabComplete(tabId, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error(`Timeout: siden blev ikke færdig med at loade inden for ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    function done() {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }
+
+    function listener(id, changeInfo) {
+      if (id === tabId && changeInfo.status === "complete") done();
+    }
+
+    chrome.tabs.onUpdated.addListener(listener);
+    // Fanen kan allerede være færdig inden listeneren når at blive sat op.
+    chrome.tabs.get(tabId).then((tab) => {
+      if (tab.status === "complete") done();
+    });
+  });
+}
+
+// Kører i den linkede sides egen kontekst via chrome.scripting.executeScript — må derfor være
+// helt selvstændig (ingen closures over background.js's variabler).
+//
+// ponytail: håndskrevet i stedet for et vendored Readability.js/Turndown.js — undgår at hente og
+// indlejre tredjeparts-kode i en extension med brede host-permissions uden gennemsyn. Lavere
+// kvalitet end et modent bibliotek på svære layouts, men godt nok til almindelige artikel-sider.
+// Opgradér hvis kvaliteten viser sig utilstrækkelig i praksis.
+function extractReadablePage() {
+  const clone = document.cloneNode(true);
+  clone.querySelectorAll("script,style,nav,header,footer,aside,noscript,iframe,svg").forEach((el) => el.remove());
+
+  const candidates = [clone.querySelector("article"), clone.querySelector("main"), clone.body];
+  const root = candidates.find((el) => el && el.textContent.trim().length > 200) ?? clone.body;
+
+  function inline(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent.replace(/\s+/g, " ");
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const text = Array.from(node.childNodes).map(inline).join("");
+    switch (node.tagName) {
+      case "STRONG":
+      case "B":
+        return `**${text}**`;
+      case "EM":
+      case "I":
+        return `*${text}*`;
+      case "A": {
+        const href = node.getAttribute("href");
+        return href ? `[${text}](${new URL(href, document.baseURI).href})` : text;
+      }
+      case "IMG": {
+        const src = node.getAttribute("src");
+        return src ? `![${node.getAttribute("alt") ?? ""}](${new URL(src, document.baseURI).href})` : "";
+      }
+      case "BR":
+        return "\n";
+      default:
+        return text;
+    }
+  }
+
+  function block(node, lines) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent.replace(/\s+/g, " ").trim();
+      if (text) lines.push(text);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    switch (node.tagName) {
+      case "H1":
+      case "H2":
+      case "H3":
+      case "H4":
+      case "H5":
+      case "H6": {
+        const level = Number(node.tagName[1]);
+        const text = inline(node).trim();
+        if (text) lines.push(`${"#".repeat(level)} ${text}`);
+        return;
+      }
+      case "P":
+      case "DIV":
+      case "SECTION": {
+        const text = inline(node).trim();
+        if (text) lines.push(text);
+        else Array.from(node.childNodes).forEach((child) => block(child, lines));
+        return;
+      }
+      case "LI": {
+        const text = inline(node).trim();
+        if (text) lines.push(`- ${text}`);
+        return;
+      }
+      case "UL":
+      case "OL":
+        Array.from(node.children).forEach((child) => block(child, lines));
+        return;
+      case "IMG": {
+        const text = inline(node);
+        if (text) lines.push(text);
+        return;
+      }
+      default:
+        Array.from(node.childNodes).forEach((child) => block(child, lines));
+    }
+  }
+
+  const lines = [];
+  block(root, lines);
+  return { title: document.title, url: location.href, markdown: lines.filter(Boolean).join("\n\n") };
+}
+
+// Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
+//
+// UBEKRÆFTET på et rigtigt Link-element endnu (se issue #14) — resolveLinkTarget() er en
+// hypotese ud fra URL-mønsteret. Logger tydeligt ved timeout i stedet for at fejle stille, så
+// det er synligt i konsollen næste gang der køres live.
+async function captureLinkElements(plans) {
+  const downloadedIds = await getDownloadedIds();
+
+  const linkElements = Object.values(plans)
+    .filter(Boolean)
+    .flatMap((plan) =>
+      (plan.elements ?? [])
+        .filter((el) => el.typeName === "Link" && !downloadedIds.has(el.id))
+        .map((el) => ({
+          courseName: plan.courseName ?? "ukendt-fag",
+          weekFolder: weekFolderName(plan.start),
+          element: el,
+        }))
+    );
+
+  console.log(`VIAstudyWiz: ${linkElements.length} nye link-elementer at behandle (efter dedup)`);
+
+  for (const { courseName, weekFolder, element } of linkElements) {
+    let landingTabId = null;
+    let extraTabId = null;
+    try {
+      const target = await resolveLinkTarget(element.url);
+      landingTabId = target.landingTabId;
+      extraTabId = target.extraTabId;
+      await waitForTabComplete(landingTabId);
+
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: landingTabId },
+        func: extractReadablePage,
+      });
+
+      const fag = sanitizeFilename(courseFolderName(courseName));
+      const note = [
+        "---",
+        `fag: ${fag}`,
+        `uge: ${weekFolder}`,
+        "type: link",
+        `kilde: "${result.url}"`,
+        "---",
+        "",
+        `# ${result.title || element.title}`,
+        "",
+        result.markdown,
+        "",
+      ].join("\n");
+
+      const path = `${fag}/MD/${weekFolder}/${sanitizeFilename(element.title)}.md`;
+      await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
+      await markDownloaded(element.id);
+    } catch (err) {
+      console.error(`VIAstudyWiz link-fejl (${element.title}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
+    } finally {
+      if (extraTabId !== null) chrome.tabs.remove(extraTabId).catch(() => {});
+      if (landingTabId !== null) chrome.tabs.remove(landingTabId).catch(() => {});
+    }
+  }
+  return true;
 }
 
 // Undgår gendownload (og dermed Chromes "(1)"-duplikater) af elementer vi allerede har hentet —

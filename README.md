@@ -91,6 +91,13 @@ Samme mønster for retroaktiv emne-tilføjelse til ugemapper
 (`watchfolder/backfill_week_topics.py`) og frontmatter-berigelse af
 eksisterende noter (`watchfolder/enrich_existing_notes.py`).
 
+**Link-elementer** (`typeName === "Link"`, undervisere deler jævnligt links i
+stedet for filer) skrives som en `type: link`-note i `MD/<uge>/` — samme
+skjulte-fane-mønster som PDF/Office, men med en håndskrevet Readability-agtig
+indholds-udtrækning i stedet for en vendored tredjeparts-lib. **Ubekræftet i
+praksis endnu** (se issue #14) — hvordan Link-viewer'en faktisk navigerer til
+den eksterne side er en hypotese, ikke testet på et rigtigt element.
+
 ## Sikkerhed
 
 Ingen session-cookies, antiforgery-tokens eller andre secrets må committes.
