@@ -132,7 +132,10 @@ async function collectAndDownload(startUnix, endUnix) {
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
   // ikke blokerer det der faktisk betyder noget.
   if (settings.enableCalendarSync) await syncCalendar(result);
-  if (settings.enableFileDownloads) await downloadFileElements(result.plans);
+  if (settings.enableFileDownloads) {
+    await writePlanNotes(result.plans);
+    await downloadFileElements(result.plans);
+  }
 
   console.log("VIAstudyWiz: kørsel færdig");
 
@@ -296,6 +299,54 @@ async function markDownloaded(id) {
   await chrome.storage.local.set({ [DOWNLOADED_IDS_KEY]: [...ids] });
 }
 
+// To grene pr. fag: RAW/ er bytes til enheder (NeoReader browser bare filsystemet), MD/ er
+// noter til Obsidian (watch-scriptet skriver minerU-outputtet derover). Extensionen rører kun
+// RAW/ — den skriver aldrig ind i Obsidian-grenen. Se ValdiVault:
+// 10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md.
+function rawPath(courseName, weekFolder, title) {
+  return `${sanitizeFilename(courseName)}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
+}
+
+// Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
+// ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Skrives kun én gang:
+// senere ændringer fra underviseren hentes ikke ind igen, til gengæld overskrives egne noter aldrig.
+async function writePlanNotes(plans) {
+  const written = await getDownloadedIds();
+
+  for (const [planKey, plan] of Object.entries(plans)) {
+    const noteId = `plan:${planKey}`;
+    if (!plan || written.has(noteId)) continue;
+
+    const weekFolder = weekFolderName(plan.start);
+    const fag = sanitizeFilename(plan.courseName ?? "ukendt-fag");
+    const materials = (plan.elements ?? []).map(
+      (el) => `- [[${fag}/RAW/${weekFolder}/${sanitizeFilename(el.title)}]]`
+    );
+    const note = [
+      "---",
+      `fag: ${fag}`,
+      `uge: ${weekFolder}`,
+      `dato: ${(plan.start ?? "").slice(0, 10)}`,
+      "type: lektionsplan",
+      "---",
+      "",
+      `# ${plan.title ?? weekFolder}`,
+      "",
+      stripHtml(plan.description),
+      ...(materials.length ? ["", "## Materialer", ...materials] : []),
+      "",
+    ].join("\n");
+
+    const path = `${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
+    try {
+      await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
+      await markDownloaded(noteId);
+    } catch (err) {
+      console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
+    }
+  }
+}
+
 async function downloadFileElements(plans) {
   const downloadedIds = await getDownloadedIds();
 
@@ -325,7 +376,7 @@ async function downloadFileElements(plans) {
         downloadUrl = isPdf
           ? await resolvePdfDownloadUrl(element.url)
           : await resolveOfficeDownloadUrl(element.url);
-        filename = `${sanitizeFilename(courseName)}/${weekFolder} - ${sanitizeFilename(element.title)}`;
+        filename = rawPath(courseName, weekFolder, element.title);
       } else {
         downloadUrl = await resolveDownloadUrlUnknownType(element.url);
         const extension = extractExtension(downloadUrl);
@@ -333,7 +384,7 @@ async function downloadFileElements(plans) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
           continue;
         }
-        filename = `${sanitizeFilename(courseName)}/${weekFolder} - ${sanitizeFilename(element.title)}${extension}`;
+        filename = rawPath(courseName, weekFolder, element.title + extension);
       }
       await writeToVault(filename, downloadUrl);
       await markDownloaded(element.id);
