@@ -533,6 +533,15 @@ function rawPath(courseName, weekFolder, title) {
   return `${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
 }
 
+// watch_viastudywiz.py navngiver MD-noten efter RAW-filens stem (Path.stem, dvs. alt før sidste
+// "."), sanitized samme vej — se md_targets() i watchfolder/watch_viastudywiz.py. Title indeholder
+// typisk selve endelsen allerede (fx "Titel.docx"), så den skal strippes, ikke bare have .md
+// tilføjet oveni.
+function mdPath(courseName, weekFolder, title) {
+  const stem = sanitizeFilename(title).replace(/\.[^./]+$/, "");
+  return `${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Skrives kun én gang:
 // senere ændringer fra underviseren hentes ikke ind igen, til gengæld overskrives egne noter aldrig.
@@ -548,9 +557,14 @@ async function writePlanNotes(plans) {
 
     const weekFolder = weekFolderName(plan);
     const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
-    const materials = (plan.elements ?? []).map(
-      (el) => `- [[${fag}/RAW/${weekFolder}/${sanitizeFilename(el.title)}]]`
-    );
+    const courseName = plan.courseName ?? "ukendt-fag";
+    // Links til MD-noten (navigations-graf), ikke RAW-filen — RAW er bytes til enheder, ikke
+    // noget man klikker sig videre til fra en note (issue #26). Link/Mappe/opgave-typer får
+    // aldrig en MD-modpart fra MinerU, så de udelades i stedet for at linke til en note der
+    // aldrig opstår.
+    const materials = (plan.elements ?? [])
+      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName))
+      .map((el) => `- [[${mdPath(courseName, weekFolder, el.title)}]]`);
     const topic = plan.topic?.name?.trim();
     const note = [
       "---",
