@@ -11,4 +11,5 @@ Al kode-kommentar/dokumentation på dansk, medmindre det er extension-kildekode 
 ## Hvor tingene ligger
 
 Kontekst, research og arkitekturbeslutninger ligger i ValdiVault, ikke i dette repo:
-`~/ValdiVault/10_Projects/VIAstudyWiz/06-handover-frisk-chat.md` — start altid der.
+`~/ValdiVault/10_Projects/VIAstudyWiz/06-start-her.md` — start altid der. Ren pointer-note til
+GitHub issues/milestones og arkitekturnoter, ingen statusprosa der kan gå forældet.
