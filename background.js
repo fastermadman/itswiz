@@ -29,9 +29,23 @@ async function writeToVault(path, url) {
 // aktuelle kørsel. Nulstilles i collectAndDownload. Uden denne var den slags fejl kun synlige i
 // service worker-konsollen — man skulle vide de skulle kigges efter for overhovedet at opdage dem.
 let runErrorCount = 0;
+let runFilesDownloaded = 0;
+let runEventsSynced = 0;
 
 function recordError() {
   runErrorCount++;
+}
+
+// Vises kun hvis der faktisk skete noget (nye filer/events) — ellers ville den daglige alarm
+// give en notifikation hver dag selv i det normale tilfælde, hvor der ikke er noget nyt.
+function notifySuccessIfNoteworthy() {
+  if (runFilesDownloaded === 0 && runEventsSynced === 0) return;
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon128.png"),
+    title: "VIAstudyWiz — kørsel færdig",
+    message: `${runFilesDownloaded} fil(er) hentet, ${runEventsSynced} kalender-event(s) synkroniseret.`,
+  });
 }
 
 // Advarer via extension-ikonet når vault-tilladelsen mangler (sker typisk ved genstart af
@@ -157,6 +171,8 @@ async function collectRangeInPage(startUnix, endUnix) {
 async function collectAndDownload(startUnix, endUnix) {
   console.log(`VIAstudyWiz: starter kørsel (${new Date(startUnix * 1000).toISOString()} → ${new Date(endUnix * 1000).toISOString()})`);
   runErrorCount = 0;
+  runFilesDownloaded = 0;
+  runEventsSynced = 0;
   const settings = await getSettings();
 
   const [tab] = await chrome.tabs.query({ url: "https://via.itslearning.com/*" });
@@ -186,6 +202,7 @@ async function collectAndDownload(startUnix, endUnix) {
     vaultPermissionMissing = !filesOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
+  notifySuccessIfNoteworthy();
 
   console.log("VIAstudyWiz: kørsel færdig");
 
@@ -477,6 +494,7 @@ async function downloadFileElements(plans) {
       }
       await writeToVault(filename, downloadUrl);
       await markDownloaded(element.id);
+      runFilesDownloaded++;
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
@@ -647,11 +665,15 @@ async function syncCalendar(result) {
       end: { dateTime: toGoogleDateTime(event.end), timeZone: TIME_ZONE },
     };
 
+    // upsertCalendarEvent muterer eventMap, så "var det nyt" skal fanges før kaldet — ellers
+    // tæller vi hver PATCH af et allerede-synkroniseret event som "nyt" (kører hver kørsel).
+    const wasNew = !eventMap[event.id];
     try {
       const created = await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
       console.log(
         `VIAstudyWiz: "${body.summary}" -> kalender-id ${calendarId}, event-link ${created.htmlLink}`
       );
+      if (wasNew) runEventsSynced++;
     } catch (err) {
       console.error(`VIAstudyWiz kalender-fejl (${body.summary}):`, err);
       recordError();
