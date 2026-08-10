@@ -5,8 +5,8 @@ undervisningsmaterialer fra via.itslearning.com (VIA University College).
 
 Del af VIAstudyWiz-pipelinen. Kontekst, research og arkitekturbeslutninger
 ligger i ValdiVault:
-`10_Projects/VIAstudyWiz/06-handover-frisk-chat.md` (arbejdsdokument)
-`10_Projects/VIAstudyWiz/05-teknisk-research-itslearning-api.md` (fuld research-log)
+`10_Projects/VIAstudyWiz/06-handover-frisk-chat.md` (arbejdsdokument, start her)
+`10_Projects/VIAstudyWiz/05-api-reference.md` (aktuel teknisk reference)
 
 ## Status
 
@@ -42,6 +42,17 @@ extensionen (kendt FSA-begrænsning, ikke noget vi kan styre fra JS) — når de
 sker, viser extension-ikonet et rødt **!**-badge. Åbn indstillinger og vælg
 vault-mappen igen (samme mappe), så forsvinder badge'et og skrivning virker
 igen.
+
+## Fejl-synlighed
+
+Badge'et viser også et gult tal for antal fejlede fil-/kalender-elementer i
+seneste kørsel (vault-adgang-advarslen har forrang). `chrome.notifications`
+supplerer med en fejl-liste (titel + besked pr. element, kræver din
+bekræftelse for at forsvinde) og en kort success-notifikation når der faktisk
+blev hentet noget nyt. **macOS-forudsætning:** System Settings → Notifications
+→ Google Chrome skal have stilen sat til "Bannere" eller "Advarsler" — ellers
+vises intet, selvom koden virker fint. Se ValdiVault:
+`10_Projects/VIAstudyWiz/11-fejlsynlighed-og-download-robusthed.md`.
 
 ## Vault-struktur
 
