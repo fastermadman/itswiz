@@ -3,21 +3,32 @@
 VIAstudyWiz watch-folder-script.
 
 Overvåger ~/ViaVault (extensionen skriver direkte hertil via File System
-Access API, se 09-file-system-access-migration.md) for nye PDF'er, sender dem til MinerU's
+Access API, se 09-file-system-access-migration.md) for nye dokumenter, sender dem til MinerU's
 officielle REST API (mineru.net/api/v4, se ValdiVault:
-10_Projects/VIAstudyWiz/07-mineru-output-integration.md), og flytter/
-omdøber outputtet ind ved siden af den originale PDF.
+10_Projects/VIAstudyWiz/07-mineru-output-integration.md), og skriver outputtet
+over i fagets MD-gren:
+
+    <fag>/RAW/<uge>/<titel>.pdf
+      -> <fag>/MD/<uge>/<titel>.md
+      -> <fag>/MD/<uge>/_attachments/<titel>/<sha>.jpg
+
+MinerU har ingen indstilling for output-sti — API'et returnerer altid en zip med
+full.md + images/, så placeringen er og bliver vores egen efterbehandling her i
+integrate_output(). Kun filer under en RAW/-gren behandles; alt andet i vaulten er
+enten Obsidian-noter eller Valdemars eget indhold (se 10-filsystem-design-raw-md.md).
 
 Kræver MINERU_API_TOKEN i en .env-fil ved siden af dette script
 (gitignored, se mineru.net/apiManage/token for at hente et token).
 """
 
+import hashlib
 import re
 import shutil
 import sys
 import tempfile
 import time
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 
 import requests
@@ -25,13 +36,20 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 VAULT_ROOT = Path.home() / "ViaVault"
-IGNORED_DIR_NAMES = {"_metadata"}
+RAW_DIR_NAME = "RAW"
+MD_DIR_NAME = "MD"
+ATTACHMENTS_DIR_NAME = "_attachments"
 ENV_FILE = Path(__file__).parent / ".env"
 API_BASE = "https://mineru.net/api/v4"
+# MinerU v4 tager også Office-formater, ikke kun PDF (mineru.net/apiManage/docs) — så docx/pptx/
+# xlsx behandles ensartet med PDF'erne. Fjern dem herfra hvis Office-filer ikke skal koste kvote.
+SUPPORTED_SUFFIXES = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
 POLL_INTERVAL_S = 8
 POLL_TIMEOUT_S = 20 * 60
 
 
+# Læses først ved første API-kald (ikke ved import), så sti-logikken kan enhedstestes uden .env.
+@lru_cache(maxsize=1)
 def load_token() -> str:
     for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
         if line.startswith("MINERU_API_TOKEN="):
@@ -39,15 +57,12 @@ def load_token() -> str:
     raise RuntimeError(f"MINERU_API_TOKEN mangler i {ENV_FILE}")
 
 
-TOKEN = load_token()
-
-
 def api_request(method: str, path: str, body: dict | None = None) -> dict:
     resp = requests.request(
         method,
         f"{API_BASE}{path}",
         json=body,
-        headers={"Authorization": f"Bearer {TOKEN}"},
+        headers={"Authorization": f"Bearer {load_token()}"},
         timeout=30,
     )
     resp.raise_for_status()
@@ -58,25 +73,92 @@ def sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", name).strip()
 
 
-def error_marker_path(pdf_path: Path) -> Path:
-    return pdf_path.parent / f".{sanitize(pdf_path.stem)}.mineru-error.txt"
+# MinerU skriver ![](images/<sha256>.jpg). Relative markdown-links knækker på titler med
+# parentes ("Sange med kazoo (7)") — linket slutter ved den første ")". Billednavnene er
+# indholds-hashes og dermed unikke i hele vaulten, så Obsidian-wikilinks resolver uanset hvor
+# noten og _attachments-mappen ligger, og overlever at filer flyttes udenom Obsidian (Finder,
+# migrations-script, Syncthing).
+def to_wikilinks(markdown: str) -> str:
+    return re.sub(r"!\[[^\]]*\]\(images/([^)]+)\)", r"![[\1]]", markdown)
 
 
-def already_converted(pdf_path: Path) -> bool:
-    return (pdf_path.parent / f"{sanitize(pdf_path.stem)}.md").exists()
+# Egenskaber frem for mappe-struktur: fag/uge står i noten, så Obsidian Bases kan bygge
+# litteraturoversigter på tværs af uger uden at strukturen skal kunne kode alting. `kilde` er
+# Obsidian-alternativet til et symlink — hverken Obsidian (enkeltfiler) eller Syncthing-til-
+# Android håndterer symlinks, men en wikilink virker både på Mac og på Boox'en.
+def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -> str:
+    raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
+    return (
+        "---\n"
+        f"fag: {raw_root.parent.name}\n"
+        f"uge: {doc_path.parent.name}\n"
+        f"type: {note_type}\n"
+        f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n'
+        f"{extra}"
+        "---\n\n"
+    )
 
 
-def previously_failed(pdf_path: Path) -> bool:
+def md_targets(doc_path: Path) -> tuple[Path, Path]:
+    """<fag>/RAW/<uge>/<titel>.pdf -> (<fag>/MD/<uge>/<titel>.md, .../MD/<uge>/_attachments/<titel>/)"""
+    raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
+    md_dir = raw_root.parent / MD_DIR_NAME / doc_path.parent.relative_to(raw_root)
+    title = sanitize(doc_path.stem)
+    return md_dir / f"{title}.md", md_dir / ATTACHMENTS_DIR_NAME / title
+
+
+def in_raw_branch(path: Path) -> bool:
+    return RAW_DIR_NAME in {p.name for p in path.parents}
+
+
+# Samme dokument hænges tit på flere lektioner (fx "Sange med kazoo (7)" i både W34 og W35), så
+# det havner i to ugemapper med hver sit element-id. RAW-kopierne får lov at blive — e-readeren
+# skal kunne finde materialet i den uge det hører til — men MinerU skal kun betales én gang, og
+# vidensbasen skal kun have én note. Dubletten findes ved at hashe: ingen sidecar-database at
+# holde ved lige, og det selv-reparerer hvis noter slettes eller flyttes.
+def existing_conversion(doc_path: Path) -> Path | None:
+    raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
+    size = doc_path.stat().st_size
+    digest = hashlib.sha256(doc_path.read_bytes()).hexdigest()
+
+    for other in sorted(raw_root.rglob(f"*{doc_path.suffix}")):
+        if other == doc_path or other.stat().st_size != size:
+            continue
+        if hashlib.sha256(other.read_bytes()).hexdigest() != digest:
+            continue
+        other_md = md_targets(other)[0]
+        if other_md.exists():
+            return other_md
+    return None
+
+
+def write_duplicate_stub(doc_path: Path, original_md: Path) -> None:
+    dest_md = md_targets(doc_path)[0]
+    dest_md.parent.mkdir(parents=True, exist_ok=True)
+    link = original_md.relative_to(VAULT_ROOT).with_suffix("").as_posix()
+    head = frontmatter(doc_path, note_type="dublet", extra=f'note: "[[{link}]]"\n')
+    dest_md.write_text(f"{head}> Samme materiale som [[{link}]] — brugt igen i denne uge.\n", encoding="utf-8")
+
+
+def error_marker_path(doc_path: Path) -> Path:
+    return doc_path.parent / f".{sanitize(doc_path.stem)}.mineru-error.txt"
+
+
+def already_converted(doc_path: Path) -> bool:
+    return md_targets(doc_path)[0].exists()
+
+
+def previously_failed(doc_path: Path) -> bool:
     # Undgår at retry en fil for evigt ved hver script-genstart (fx en PDF over MinerU's
     # sidegrænse vil aldrig lykkes) - marker-filen fjernes manuelt hvis man vil prøve igen.
-    return error_marker_path(pdf_path).exists()
+    return error_marker_path(doc_path).exists()
 
 
-def submit(pdf_path: Path) -> str:
+def submit(doc_path: Path) -> str:
     resp = api_request(
         "POST",
         "/file-urls/batch",
-        {"files": [{"name": pdf_path.name, "data_id": sanitize(pdf_path.stem)}], "model_version": "vlm"},
+        {"files": [{"name": doc_path.name, "data_id": sanitize(doc_path.stem)}], "model_version": "vlm"},
     )
     if resp.get("code") != 0:
         raise RuntimeError(f"file-urls/batch fejlede: {resp}")
@@ -84,7 +166,7 @@ def submit(pdf_path: Path) -> str:
     batch_id = resp["data"]["batch_id"]
     upload_url = resp["data"]["file_urls"][0]
 
-    put_resp = requests.put(upload_url, data=pdf_path.read_bytes(), timeout=300)
+    put_resp = requests.put(upload_url, data=doc_path.read_bytes(), timeout=300)
     put_resp.raise_for_status()
 
     return batch_id
@@ -103,10 +185,9 @@ def poll(batch_id: str) -> dict:
     raise TimeoutError(f"Timeout efter {POLL_TIMEOUT_S}s")
 
 
-def integrate_output(pdf_path: Path, zip_url: str) -> None:
-    title = sanitize(pdf_path.stem)
-    dest_md = pdf_path.parent / f"{title}.md"
-    dest_images = pdf_path.parent / f"{title}-images"
+def integrate_output(doc_path: Path, zip_url: str) -> None:
+    dest_md, dest_images = md_targets(doc_path)
+    dest_md.parent.mkdir(parents=True, exist_ok=True)
 
     # Vigtigt: udpakkes UDENFOR den overvågede vault-mappe. Ellers ser watchdog ZIP'ens egen
     # "<uuid>_origin.pdf"-kopi som en ny fil og prøver at behandle den igen (selv-triggeret loop).
@@ -124,50 +205,55 @@ def integrate_output(pdf_path: Path, zip_url: str) -> None:
         full_md = tmp_dir / "full.md"
         images_dir = tmp_dir / "images"
 
-        text = full_md.read_text(encoding="utf-8")
-        text = text.replace("images/", f"{dest_images.name}/")
+        text = frontmatter(doc_path) + to_wikilinks(full_md.read_text(encoding="utf-8"))
         dest_md.write_text(text, encoding="utf-8")
 
         if images_dir.exists():
             if dest_images.exists():
                 shutil.rmtree(dest_images)
+            dest_images.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(images_dir), str(dest_images))
 
 
-def process_pdf(pdf_path: Path) -> None:
-    if already_converted(pdf_path) or previously_failed(pdf_path):
+def process_document(doc_path: Path) -> None:
+    if already_converted(doc_path) or previously_failed(doc_path):
         return
 
-    print(f"Uploader til MinerU: {pdf_path.name}", flush=True)
+    original_md = existing_conversion(doc_path)
+    if original_md:
+        write_duplicate_stub(doc_path, original_md)
+        print(f"Dublet af {original_md.name} — henviser i stedet for at konvertere igen", flush=True)
+        return
+
+    print(f"Uploader til MinerU: {doc_path.name}", flush=True)
     try:
-        batch_id = submit(pdf_path)
+        batch_id = submit(doc_path)
         result = poll(batch_id)
-        integrate_output(pdf_path, result["full_zip_url"])
-        print(f"Færdig: {pdf_path.name}", flush=True)
+        integrate_output(doc_path, result["full_zip_url"])
+        print(f"Færdig: {doc_path.name}", flush=True)
     except (requests.RequestException, RuntimeError, TimeoutError, OSError) as exc:
-        print(f"Fejl ved {pdf_path.name}: {exc}", file=sys.stderr, flush=True)
-        error_marker_path(pdf_path).write_text(str(exc), encoding="utf-8")
+        print(f"Fejl ved {doc_path.name}: {exc}", file=sys.stderr, flush=True)
+        error_marker_path(doc_path).write_text(str(exc), encoding="utf-8")
 
 
 def scan_existing() -> None:
-    """Fanger PDF'er der allerede lå der før scriptet startede (watchdog ser kun nye events)."""
-    for pdf_path in VAULT_ROOT.rglob("*.pdf"):
-        if IGNORED_DIR_NAMES & {p.name for p in pdf_path.parents}:
-            continue
-        process_pdf(pdf_path)
+    """Fanger filer der allerede lå der før scriptet startede (watchdog ser kun nye events)."""
+    for doc_path in sorted(VAULT_ROOT.glob(f"*/{RAW_DIR_NAME}/**/*")):
+        if doc_path.is_file() and doc_path.suffix.lower() in SUPPORTED_SUFFIXES:
+            process_document(doc_path)
 
 
-class PdfHandler(FileSystemEventHandler):
+class DocumentHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix.lower() != ".pdf":
+        if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             return
-        if IGNORED_DIR_NAMES & {p.name for p in path.parents}:
+        if not in_raw_branch(path):
             return
         time.sleep(2)  # lad downloadet blive helt færdigskrevet før vi rører den
-        process_pdf(path)
+        process_document(path)
 
 
 def main():
@@ -175,7 +261,7 @@ def main():
     scan_existing()
 
     observer = Observer()
-    observer.schedule(PdfHandler(), str(VAULT_ROOT), recursive=True)
+    observer.schedule(DocumentHandler(), str(VAULT_ROOT), recursive=True)
     observer.start()
     print(f"Overvåger {VAULT_ROOT} ...", flush=True)
     try:

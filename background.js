@@ -19,8 +19,21 @@ async function writeToVault(path, url) {
   await ensureOffscreenDocument();
   const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "writeFile", path, url });
   if (!response?.ok) {
-    throw new Error(response?.error ?? "Ukendt fejl ved filskrivning i offscreen-dokumentet");
+    throw Object.assign(new Error(response?.error ?? "Ukendt fejl ved filskrivning i offscreen-dokumentet"), {
+      code: response?.code,
+    });
   }
+}
+
+// Advarer via extension-ikonet når vault-tilladelsen mangler (sker typisk ved genstart af
+// browseren/extensionen — File System Access-tilladelser overlever ikke det pålideligt) —
+// ellers opdager man det først ved at læse service worker-loggen efter en kørsel der intet lavede.
+async function setVaultPermissionWarning(hasProblem) {
+  await chrome.action.setBadgeText({ text: hasProblem ? "!" : "" });
+  await chrome.action.setBadgeBackgroundColor({ color: "#d93025" });
+  await chrome.action.setTitle({
+    title: hasProblem ? "VIAstudyWiz — vault-adgang mangler, åbn indstillinger" : "VIAstudyWiz",
+  });
 }
 
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
@@ -132,7 +145,13 @@ async function collectAndDownload(startUnix, endUnix) {
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
   // ikke blokerer det der faktisk betyder noget.
   if (settings.enableCalendarSync) await syncCalendar(result);
-  if (settings.enableFileDownloads) await downloadFileElements(result.plans);
+  if (settings.enableFileDownloads) {
+    const planNotesOk = await writePlanNotes(result.plans);
+    // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
+    // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
+    const filesOk = planNotesOk && (await downloadFileElements(result.plans));
+    await setVaultPermissionWarning(!filesOk);
+  }
 
   console.log("VIAstudyWiz: kørsel færdig");
 
@@ -296,6 +315,69 @@ async function markDownloaded(id) {
   await chrome.storage.local.set({ [DOWNLOADED_IDS_KEY]: [...ids] });
 }
 
+// To grene pr. fag: RAW/ er bytes til enheder (NeoReader browser bare filsystemet), MD/ er
+// noter til Obsidian (watch-scriptet skriver minerU-outputtet derover). Extensionen rører kun
+// RAW/ — den skriver aldrig ind i Obsidian-grenen. Se ValdiVault:
+// 10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md.
+//
+// itslearnings API har et FriendlyName-felt på kurset, men det er altid null — det eneste
+// pæne navn der findes er COURSE_DISPLAY_NAMES, som Valdemar allerede vedligeholder i hånden
+// til kalendersyncen. Ukendte kursuskoder (nye fag, "Hjælp", "VIAs onlinekurser") falder
+// tilbage til den rå kode i stedet for at fejle.
+function courseFolderName(courseName) {
+  return COURSE_DISPLAY_NAMES[courseName] ?? courseName;
+}
+
+function rawPath(courseName, weekFolder, title) {
+  return `${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
+}
+
+// Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
+// ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Skrives kun én gang:
+// senere ændringer fra underviseren hentes ikke ind igen, til gengæld overskrives egne noter aldrig.
+// Returnerer false hvis vault-tilladelsen manglede — kalderen bruger det til at springe resten
+// af kørslen over (tilladelsen kommer ikke tilbage af sig selv midt i et løb) og til at tænde
+// advarsels-badge'et.
+async function writePlanNotes(plans) {
+  const written = await getDownloadedIds();
+
+  for (const [planKey, plan] of Object.entries(plans)) {
+    const noteId = `plan:${planKey}`;
+    if (!plan || written.has(noteId)) continue;
+
+    const weekFolder = weekFolderName(plan.start);
+    const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
+    const materials = (plan.elements ?? []).map(
+      (el) => `- [[${fag}/RAW/${weekFolder}/${sanitizeFilename(el.title)}]]`
+    );
+    const note = [
+      "---",
+      `fag: ${fag}`,
+      `uge: ${weekFolder}`,
+      `dato: ${(plan.start ?? "").slice(0, 10)}`,
+      "type: lektionsplan",
+      "---",
+      "",
+      `# ${plan.title ?? weekFolder}`,
+      "",
+      stripHtml(plan.description),
+      ...(materials.length ? ["", "## Materialer", ...materials] : []),
+      "",
+    ].join("\n");
+
+    const path = `${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
+    try {
+      await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
+      await markDownloaded(noteId);
+    } catch (err) {
+      console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
+    }
+  }
+  return true;
+}
+
+// Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
 async function downloadFileElements(plans) {
   const downloadedIds = await getDownloadedIds();
 
@@ -325,7 +407,7 @@ async function downloadFileElements(plans) {
         downloadUrl = isPdf
           ? await resolvePdfDownloadUrl(element.url)
           : await resolveOfficeDownloadUrl(element.url);
-        filename = `${sanitizeFilename(courseName)}/${weekFolder} - ${sanitizeFilename(element.title)}`;
+        filename = rawPath(courseName, weekFolder, element.title);
       } else {
         downloadUrl = await resolveDownloadUrlUnknownType(element.url);
         const extension = extractExtension(downloadUrl);
@@ -333,20 +415,22 @@ async function downloadFileElements(plans) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
           continue;
         }
-        filename = `${sanitizeFilename(courseName)}/${weekFolder} - ${sanitizeFilename(element.title)}${extension}`;
+        filename = rawPath(courseName, weekFolder, element.title + extension);
       }
       await writeToVault(filename, downloadUrl);
       await markDownloaded(element.id);
     } catch (err) {
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
     }
   }
+  return true;
 }
 
 // Kalender-sync: ét Google Calendar-event pr. lektion, i fagets egen kalender (allerede
 // oprettet manuelt af Valdemar i viawievaldi@gmail.com). Se ValdiVault:
 // 10_Projects/VIAstudyWiz/03-kalender-integration.md.
-const COURSE_CALENDAR_NAMES = {
+const COURSE_DISPLAY_NAMES = {
   "LSmu-2527": "Musik",
   "LSmu-ec2425": "Musik",
   "LSkr-2628": "Religion",
@@ -474,14 +558,14 @@ async function syncCalendar(result) {
   const calendarIds = await fetchCalendarIdMap(token);
   const eventMap = await getEventMap();
 
-  const matchable = result.events.filter((e) => COURSE_CALENDAR_NAMES[e.title]).length;
+  const matchable = result.events.filter((e) => COURSE_DISPLAY_NAMES[e.title]).length;
   console.log(
     `VIAstudyWiz: ${result.events.length} events hentet, ${matchable} matcher en kendt fag→kalender-mapping, ${Object.keys(calendarIds).length} Google-kalendere fundet:`,
     calendarIds
   );
 
   for (const event of result.events) {
-    const calendarName = COURSE_CALENDAR_NAMES[event.title];
+    const calendarName = COURSE_DISPLAY_NAMES[event.title];
     if (!calendarName) continue; // ukendt/afsluttet/ikke-mappet fag, spring over
 
     const calendarId = calendarIds[calendarName];

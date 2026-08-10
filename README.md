@@ -37,6 +37,38 @@ uanset hvor mange nye undermapper der oprettes.
 direkte på din vault (fx `~/ViaVault`). Ingen `vaultFolderName`-indstilling
 længere — den fysiske mappe du vælger *er* vault-roden.
 
+Skrive-tilladelsen overlever ikke pålideligt en genstart af browseren eller
+extensionen (kendt FSA-begrænsning, ikke noget vi kan styre fra JS) — når det
+sker, viser extension-ikonet et rødt **!**-badge. Åbn indstillinger og vælg
+vault-mappen igen (samme mappe), så forsvinder badge'et og skrivning virker
+igen.
+
+## Vault-struktur
+
+To grene pr. fag: `RAW/` er bytes til enheder (Boox/NeoReader browser bare
+filsystemet), `MD/` er noter til Obsidian. Alt nyt indhold falder i én af de to,
+så strukturen ikke skal lægges om igen.
+
+Fag-mappen hedder det venlige navn fra `COURSE_DISPLAY_NAMES` i `background.js`
+(fx `Musik`), ikke itslearnings tekniske kursuskode — samme tabel som allerede
+bruges til kalendersyncen.
+
+```
+ViaVault/<fag>/
+  RAW/<uge>/<titel>.pdf                       ← extensionen skriver kun her
+  MD/<uge>/<uge> lektionsplan.md              ← lektionsplan + links til ugens materialer
+  MD/<uge>/<titel>.md                         ← watch-scriptets MinerU-output
+  MD/<uge>/_attachments/<titel>/<sha>.jpg     ← udtrukne billeder
+```
+
+Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`), så `Litteratur.base`
+kan bygge overblik på tværs af uger. Billed-embeds er wikilinks (`![[<sha>.jpg]]`),
+ikke relative stier — de knækker på titler med parentes. Begrundelse og
+alternativer i ValdiVault: `10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
+
+Migrering af en gammel flad vault: `watchfolder/migrate_to_raw_md.py` (dry-run
+som standard, `--apply` udfører, `--selfcheck` kører de indbyggede tests).
+
 ## Sikkerhed
 
 Ingen session-cookies, antiforgery-tokens eller andre secrets må committes.
@@ -44,11 +76,13 @@ De skal læses dynamisk fra browserens egen session ved runtime.
 
 ## watchfolder/ — MinerU-integration
 
-Overvåger `~/ViaVault/` (extensionen skriver direkte hertil via File System
-Access API — se ovenfor) for nye PDF'er, sender dem til MinerU's officielle REST API
-(`mineru.net/api/v4`), og flytter/omdøber outputtet ind ved siden af den
-originale PDF. Se `10_Projects/VIAstudyWiz/07-mineru-output-integration.md`
-i ValdiVault.
+Overvåger `~/ViaVault/*/RAW/` (extensionen skriver direkte hertil via File System
+Access API — se ovenfor) for nye dokumenter — pdf, docx, pptx, xlsx — sender dem til
+MinerU's officielle REST API (`mineru.net/api/v4`), og skriver outputtet over i
+fagets MD-gren. MinerU har ingen output-sti-indstilling; placeringen er vores egen
+efterbehandling i `integrate_output()`. Samme dokument på flere lektioner
+konverteres kun én gang — de øvrige uger får en henvisningsnote. Se
+`10_Projects/VIAstudyWiz/07-mineru-output-integration.md` i ValdiVault.
 
 **Opsætning:**
 1. Hent et API-token på [mineru.net/apiManage/token](https://mineru.net/apiManage/token)
