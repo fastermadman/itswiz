@@ -804,6 +804,18 @@ async function upsertCalendarEvent(token, calendarId, itslearningEventId, body, 
   return data;
 }
 
+// itslearning koder "ingen specifik tid angivet" for en plan som 00:01–23:59 (næsten hele
+// døgnet), ikke null/undefined — bekræftet live for en Musik-lektion uden tidsangivelse (issue
+// #30, plan-id 1158094: start 00:01:00, stop 23:59:00, itslearnings egen UI viser ingen tid).
+// En rigtig lektion varer aldrig et helt døgn, så en varighed på 23+ timer er den pålidelige
+// detektor — mere robust end at matche de eksakte klokkeslæt, hvis itslearning bruger en anden
+// buffer et andet sted.
+function planHasSpecificTime(plan) {
+  if (!plan?.start || !plan?.stop) return false;
+  const durationHours = (new Date(plan.stop) - new Date(plan.start)) / 3600000;
+  return durationHours < 23;
+}
+
 async function syncCalendar(result) {
   const token = await getAuthToken();
   const calendarIds = await fetchCalendarIdMap(token);
@@ -858,18 +870,19 @@ async function syncCalendar(result) {
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
     };
-    if (plan) {
+    if (planHasSpecificTime(plan)) {
       body.start = { dateTime: toGoogleDateTime(plan.start), timeZone: TIME_ZONE };
       body.end = { dateTime: toGoogleDateTime(plan.stop), timeZone: TIME_ZONE };
-    } else if (wasNew) {
-      // Nyt event, ingen plan-tid endnu — brug lokale-blokken som startgæt. En senere kørsel
-      // retter tiden så snart PlanIds er udfyldt.
+    } else if (plan || wasNew) {
+      // To tilfælde deler samme fallback: (1) plan er hentet, men underviseren har ikke sat en
+      // specifik tid (sentinel-værdi, se planHasSpecificTime) — et bekræftet "ingen override"-svar,
+      // ikke en midlertidig manglende plan, så det er trygt at bruge lokale-blokken uanset om
+      // eventet er nyt. (2) intet plan endnu og eventet er nyt — lokale-blokken som startgæt.
       body.start = { dateTime: toGoogleDateTime(event.start), timeZone: TIME_ZONE };
       body.end = { dateTime: toGoogleDateTime(event.end), timeZone: TIME_ZONE };
     }
-    // else: eventet findes allerede i Google og vi har (endnu) ingen plan-tid — udelad start/end
-    // fra PATCH'en så den korrekte tid fra en tidligere kørsel ikke overskrives med lokale-blokken
-    // (roden til issue #25).
+    // else: intet plan endnu (og eventet findes allerede i Google) — udelad start/end fra PATCH'en
+    // så en tidligere korrekt plan-tid ikke overskrives med lokale-blokken (roden til issue #25).
     try {
       const created = await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
       console.log(
