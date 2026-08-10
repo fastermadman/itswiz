@@ -690,7 +690,7 @@ async function captureLinkElements(plans) {
         .filter((el) => el.typeName === "Link" && !downloadedIds.has(el.id))
         .map((el) => ({
           courseName: plan.courseName ?? "ukendt-fag",
-          weekFolder: weekFolderName(plan.start),
+          weekFolder: weekFolderName(plan),
           element: el,
         }))
     );
@@ -799,12 +799,16 @@ async function writePlanNotes(plans) {
     const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
     const courseName = plan.courseName ?? "ukendt-fag";
     // Links til MD-noten (navigations-graf), ikke RAW-filen — RAW er bytes til enheder, ikke
-    // noget man klikker sig videre til fra en note (issue #26). Link/Mappe/opgave-typer får
-    // aldrig en MD-modpart fra MinerU, så de udelades i stedet for at linke til en note der
-    // aldrig opstår.
+    // noget man klikker sig videre til fra en note (issue #26). Mappe/opgave-typer får aldrig en
+    // MD-modpart, så de udelades — Link har derimod sin egen MD-note (captureLinkElements, issue
+    // #14), skrevet uden extension at strippe (i modsætning til mdPath()'s fil-titler).
     const materials = (plan.elements ?? [])
-      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName))
-      .map((el) => `- [[${mdPath(courseName, weekFolder, el.title)}]]`);
+      .filter((el) => !NO_MD_COUNTERPART_TYPE_NAMES.has(el.typeName))
+      .map((el) =>
+        el.typeName === "Link"
+          ? `- [[${fag}/MD/${weekFolder}/${sanitizeFilename(el.title)}]]`
+          : `- [[${mdPath(courseName, weekFolder, el.title)}]]`
+      );
     const topic = plan.topic?.name?.trim();
     const note = [
       "---",
@@ -846,6 +850,10 @@ async function writePlanNotes(plans) {
 // kender og springer nye stille over igen — denylist af de kendte ikke-fil-typer er robust
 // mod fremtidige varianter uden at kræve endnu en manuel rettelse.
 const NON_FILE_TYPE_NAMES = new Set(["Link", "Mappe", "Arbejdsopgave", "Afleveringsopgave"]);
+
+// Link har (siden captureLinkElements()) sin egen MD-note, i modsætning til Mappe/opgave-typer —
+// skal derfor IKKE udelades fra lektionsplanens materialer-liste, kun fra RAW-download.
+const NO_MD_COUNTERPART_TYPE_NAMES = new Set(["Mappe", "Arbejdsopgave", "Afleveringsopgave"]);
 
 // Returnerer false hvis vault-tilladelsen manglede (se writePlanNotes ovenfor).
 async function downloadFileElements(plans) {
