@@ -63,6 +63,7 @@ function notifyCriticalFailure(err) {
     iconUrl: chrome.runtime.getURL("icon128.png"),
     title: "VIAstudyWiz — kørsel fejlede",
     message: err.message ?? String(err),
+    requireInteraction: true,
   });
 }
 
