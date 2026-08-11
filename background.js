@@ -286,6 +286,22 @@ function extractExtension(url) {
   return pathMatch ? pathMatch[0].toLowerCase() : "";
 }
 
+// watchForWopiAccessToken()'s URL (${wopiSrc}/contents?access_token=...) rammes når et
+// Office-dokument kun findes i Office-online-viseren, ikke i itslearnings egen filecache — den
+// har ingen filnavn/endelse noget sted, i modsætning til itslearnings egne URL'er. Bekræftet
+// live: elementet "Fælles pptx Klasseledelse i og med musik..." (titlen har intet .pptx-suffiks)
+// løste kun via WOPI-kæden, og extractExtension() fejlede på content-URL'en alene. WOPI-
+// protokollens CheckFileInfo-endpoint (samme URL uden /contents) er en almindelig GET der
+// returnerer JSON med BaseFileName — standard WOPI, ikke itslearning-specifikt.
+async function extractExtensionFromWopi(wopiContentsUrl) {
+  const checkFileInfoUrl = wopiContentsUrl.replace(/\/contents(\?|$)/, "$1");
+  const res = await fetch(checkFileInfoUrl);
+  if (!res.ok) return "";
+  const info = await res.json();
+  const match = (info.BaseFileName ?? "").match(/\.[a-z0-9]{2,5}$/i);
+  return match ? match[0].toLowerCase() : "";
+}
+
 // Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs"). Ren dato+ugedag —
 // intet fag-specifikt — så to forskellige lektioner i samme fag samme ugedag (fx Musik
 // formiddag/eftermiddag) ville ellers kollidere i weekFolderName() nedenfor, hvis ikke emnet
@@ -758,7 +774,9 @@ async function downloadFileElements(plans, tabId) {
         filename = rawPath(courseName, weekFolder, element.title);
       } else {
         downloadUrl = await withRetry(() => resolveDownloadUrlUnknownType(element.url));
-        const extension = extractExtension(downloadUrl);
+        const extension =
+          extractExtension(downloadUrl) ||
+          (downloadUrl.includes("/contents?access_token=") ? await extractExtensionFromWopi(downloadUrl) : "");
         if (!extension) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
           recordError(`${element.title}: kunne ikke udlede filendelse`);
