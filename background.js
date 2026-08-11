@@ -543,6 +543,13 @@ function planLiteratureText(plan) {
   return plan.fields?.find((f) => f.headingText?.startsWith("Tilhørende litteratur"))?.text?.trim() || null;
 }
 
+// YAML literal block scalar (|) — undgår escaping af anførselstegn/kolon/linjeskift i fritekst,
+// som en almindelig citeret streng ellers ville kræve. Obsidian viser det som flerlinjet tekst
+// i Properties-panelet.
+function yamlBlockLines(key, text) {
+  return [`${key}: |`, ...text.split("\n").map((line) => `  ${line}`)];
+}
+
 function rawPath(courseName, weekFolder, title) {
   return `FAG/${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
 }
@@ -615,13 +622,12 @@ async function writePlanNotes(plans) {
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
-      `litteratur: ${literature ? "true" : "false"}`,
+      ...(literature ? yamlBlockLines("litteratur", literature) : ["litteratur: false"]),
       "---",
       "",
       `# ${plan.title ?? weekFolder}`,
       "",
       stripHtml(plan.description),
-      ...(literature ? ["", "## Tilhørende litteratur", literature] : []),
       ...(materials.length ? ["", "## Materialer", ...materials] : []),
       "",
     ].join("\n");
