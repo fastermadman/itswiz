@@ -136,10 +136,13 @@ async function collectRangeInPage(startUnix, endUnix) {
     });
   }
 
+  // plans/selected/v1 (batch-endpointet) returnerer altid fields: null, uanset indhold —
+  // /v2-endpointet (samme ét-kald-pr-plan som her, bare enkelt-plan-siden) er det eneste der
+  // rent faktisk fylder plan.fields ud, herunder "Tilhørende litteratur"-feltet (issue-diskussion
+  // 2026-08-11). Bekræftet live ved at sammenligne begge endpoints for samme planId.
   async function fetchPlan(courseId, planId) {
-    const url = `${BASE}/restapi/personal/course/${courseId}/plans/selected/v1?ChildId=0&planIds=${planId}&viewForPersonId=0&PageIndex=0&PageSize=3`;
-    const data = await fetchJson(url);
-    return data?.plans?.entityArray?.[0] ?? null;
+    const url = `${BASE}/restapi/personal/course/${courseId}/plans/${planId}/v2?ChildId=0`;
+    return fetchJson(url);
   }
 
   // apiDescriptionPlainText har faste labels ("Lokale/Room:" osv.), ikke sprogafhængige.
@@ -533,6 +536,13 @@ function courseFolderName(courseName) {
   return COURSE_DISPLAY_NAMES[courseName] ?? courseName;
 }
 
+// Fritekstfelt underviseren selv udfylder — henviser ofte til grundbogssider, ikke kun vedhæftede
+// filer, så det kan ikke kobles til bestemte elementer. headingText starter altid med
+// "Tilhørende litteratur", men har varierende parentes-tilføjelser pr. underviser/kursus.
+function planLiteratureText(plan) {
+  return plan.fields?.find((f) => f.headingText?.startsWith("Tilhørende litteratur"))?.text?.trim() || null;
+}
+
 function rawPath(courseName, weekFolder, title) {
   return `FAG/${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
 }
@@ -592,6 +602,7 @@ async function writePlanNotes(plans) {
           : `- [[${mdPath(courseName, weekFolder, el.title)}]]`
       );
     const topic = plan.topic?.name?.trim();
+    const literature = planLiteratureText(plan);
     const note = [
       "---",
       `fag: ${fag}`,
@@ -604,11 +615,13 @@ async function writePlanNotes(plans) {
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
+      `litteratur: ${literature ? "true" : "false"}`,
       "---",
       "",
       `# ${plan.title ?? weekFolder}`,
       "",
       stripHtml(plan.description),
+      ...(literature ? ["", "## Tilhørende litteratur", literature] : []),
       ...(materials.length ? ["", "## Materialer", ...materials] : []),
       "",
     ].join("\n");
@@ -831,6 +844,10 @@ function stripWeekdayPrefix(title) {
 function buildEventDescription(plan) {
   if (!plan) return "";
   const lines = [plan.title ?? "", "", stripHtml(plan.description)];
+  const literature = planLiteratureText(plan);
+  if (literature) {
+    lines.push("", "Tilhørende litteratur:", literature);
+  }
   const elements = (plan.elements ?? []).map((el) => `- ${el.title}`);
   if (elements.length > 0) {
     lines.push("", "Materialer:", ...elements);
@@ -939,10 +956,13 @@ async function syncCalendar(result) {
     // (weekFolderName ovenfor) — sat forrest i titlen så det er synligt uden at åbne eventet.
     const topic = plan?.topic?.name?.trim();
     const summaryTitle = topic ? `${topic} — ${titlePart}` : titlePart;
+    // 📖 gør det synligt i kalenderoverblikket at der er noget at læse forud for lektionen, uden
+    // at fylde hele teksten ind i titlen — den fulde tekst står i beskrivelsen (buildEventDescription).
+    const literaturePrefix = plan && planLiteratureText(plan) ? "📖 " : "";
     const body = {
       status: "confirmed", // PATCH på et manuelt slettet (= "cancelled") event genopliver det ikke
       // automatisk medmindre status eksplicit sættes tilbage - Google bevarer ellers feltet.
-      summary: `${calendarName} — ${summaryTitle}`,
+      summary: `${literaturePrefix}${calendarName} — ${summaryTitle}`,
       location: event.parsedDescription?.room ?? "",
       description: buildEventDescription(plan),
     };
