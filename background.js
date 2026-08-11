@@ -627,7 +627,7 @@ async function writePlanNotes(plans) {
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
-      ...(literature ? yamlBlockLines("litteratur", literature) : ["litteratur: false"]),
+      ...(literature ? yamlBlockLines("litteratur", `📖 ${literature}`) : ["litteratur: false"]),
       "---",
       "",
       `# ${plan.title ?? weekFolder}`,
