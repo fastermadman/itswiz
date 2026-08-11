@@ -630,7 +630,7 @@ async function writePlanNotes(plans) {
       ...(literature ? yamlBlockLines("litteratur", literature) : ["litteratur: false"]),
       "---",
       "",
-      `# ${plan.title ?? weekFolder}`,
+      `# ${literature ? "📖 " : ""}${plan.title ?? weekFolder}`,
       "",
       stripHtml(plan.description),
       ...(materials.length ? ["", "## Materialer", ...materials] : []),
