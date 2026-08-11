@@ -852,7 +852,7 @@ function buildEventDescription(plan) {
   const lines = [plan.title ?? "", "", stripHtml(plan.description)];
   const literature = planLiteratureText(plan);
   if (literature) {
-    lines.push("", "Tilhørende litteratur:", literature);
+    lines.push("", "📖 Tilhørende litteratur:", literature);
   }
   const elements = (plan.elements ?? []).map((el) => `- ${el.title}`);
   if (elements.length > 0) {
