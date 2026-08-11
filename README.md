@@ -102,6 +102,13 @@ over — det er de samme "Forberedelse"-elementer der allerede står i
 lektionsplanerne. Noten skrives kun én gang (opgavemappen er dit eget
 skriveområde), mens kalendereventet opdateres hvis deadline flyttes.
 
+Forsøger desuden at hente opgavens vedhæftede opgavebeskrivelse (fx en PDF) via
+samme fil-download-kæde som almindelige materialer, og embedder den i noten
+(`![[NOTER/OPGAVER/<opgave>/<opgave>.pdf]]`) hvis det lykkes. **Uverificeret**
+— routen dertil går gennem cross-origin SSO-iframes der ikke kunne spores
+manuelt, kun via extensionens egen `chrome.webRequest`. Fejler blødt: ingen
+vedhæftning fundet er ikke en fejl, kun kilde-linket i noten er så det eneste.
+
 ## Sikkerhed
 
 Ingen session-cookies, antiforgery-tokens eller andre secrets må committes.

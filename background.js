@@ -707,6 +707,41 @@ function taskId(task) {
   return elementId ? `opgave:${elementId}` : `opgave:${task.CourseId}:${task.TaskTitle}`;
 }
 
+// Spekulativt, uverificeret: Afleveringsopgavers vedhæftede opgavebeskrivelse (fx en PDF) er aldrig
+// forsøgt downloadet før — den eneste grund den ikke var med er at "Afleveringsopgave" står i
+// NON_FILE_TYPE_NAMES, ikke at selve download-kæden ikke kan finde den. Genbruger derfor den
+// eksisterende formatafhængige kæde uændret: uanset om et element er "Fil" eller "Afleveringsopgave"
+// ender det rigtige indhold (en PDF her, bekræftet live 2026-08-12) formentlig stadig i itslearnings
+// delte PdfViewer/Office-visere, som resolveDownloadUrlUnknownType() allerede lytter efter via
+// chrome.webRequest — det eneste værktøj der kan følge kæden gennem de cross-origin SSO-iframes
+// (LoginSSO.aspx → LearningObjectInstance.aspx) opgavesiden selv bruger. Ikke live-testet: manuel
+// browser-inspektion kan ikke observere cross-origin iframe-navigation, kun webRequest kan (se
+// PR-diskussion #58). Fejler blødt — ingen vedhæftning fundet er den forventede norm, ikke en fejl.
+async function downloadTaskAttachment(task) {
+  if (!task.TaskUrl) return null;
+  const taskUrl = new URL(task.TaskUrl);
+  const elementUrl = `${taskUrl.pathname}${taskUrl.search}`;
+
+  let downloadUrl;
+  try {
+    downloadUrl = await withRetry(() => resolveDownloadUrlUnknownType(elementUrl));
+  } catch (err) {
+    console.warn(`VIAstudyWiz: ingen vedhæftning fundet for opgaven "${task.TaskTitle}":`, err);
+    return null;
+  }
+
+  const extension =
+    extractExtension(downloadUrl) ||
+    (downloadUrl.includes("/contents?access_token=") ? await extractExtensionFromWopi(downloadUrl) : "");
+  if (!extension) return null;
+
+  const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
+  const path = `NOTER/OPGAVER/${folder}/${folder}${extension}`;
+  await writeToVault(path, downloadUrl); // VAULT_PERMISSION propagerer til kalderen
+  runFilesDownloaded++;
+  return path;
+}
+
 // NOTER/OPGAVER/<opgave>/ er opgavens egen mappe (kladde, uddrag, aflevering) — jf. ValdiVault
 // 12-notestruktur-egne-noter.md §2. Noten her er kun indgangen: deadline + link til itslearning.
 // Skrives én gang og aldrig igen, netop fordi mappen er Valdemars eget skriveområde — en
@@ -721,6 +756,16 @@ async function writeTaskNotes(tasks) {
 
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
     const fag = sanitizeFilename(courseFolderName(task.CourseTitle ?? "ukendt-fag"));
+
+    let attachmentPath = null;
+    try {
+      attachmentPath = await downloadTaskAttachment(task);
+    } catch (err) {
+      console.error(`VIAstudyWiz opgave-vedhæftning-fejl (${folder}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
+      recordError(`Opgave-vedhæftning (${folder}): ${err.message}`);
+    }
+
     const note = [
       "---",
       "type: opgave",
@@ -734,6 +779,7 @@ async function writeTaskNotes(tasks) {
       "",
       `Deadline: ${task.DeadlineDisplayTime ?? task.Deadline}`,
       ...(task.TaskUrl ? ["", `[Åbn opgaven i itslearning](${task.TaskUrl})`] : []),
+      ...(attachmentPath ? ["", "## Opgavebeskrivelse", `![[${attachmentPath}]]`] : []),
       "",
     ].join("\n");
 
