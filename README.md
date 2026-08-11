@@ -103,11 +103,13 @@ lektionsplanerne. Noten skrives kun én gang (opgavemappen er dit eget
 skriveområde), mens kalendereventet opdateres hvis deadline flyttes.
 
 Forsøger desuden at hente opgavens vedhæftede opgavebeskrivelse (fx en PDF) via
-samme fil-download-kæde som almindelige materialer, og embedder den i noten
-(`![[NOTER/OPGAVER/<opgave>/<opgave>.pdf]]`) hvis det lykkes. **Uverificeret**
-— routen dertil går gennem cross-origin SSO-iframes der ikke kunne spores
-manuelt, kun via extensionens egen `chrome.webRequest`. Fejler blødt: ingen
-vedhæftning fundet er ikke en fejl, kun kilde-linket i noten er så det eneste.
+samme fil-download-kæde som almindelige materialer. Landér i
+`NOTER/OPGAVER/<opgave>/RAW/`, samme RAW/MD-mønster som `FAG/` — watchfolderen
+konverterer den til `.../MD/<opgave>.md`, og noten linker dertil (ikke til
+RAW-filen, samme regel som issue #26). **Uverificeret** — routen dertil går
+gennem cross-origin SSO-iframes der ikke kunne spores manuelt, kun via
+extensionens egen `chrome.webRequest`. Fejler blødt: ingen vedhæftning fundet
+er ikke en fejl, kun kilde-linket i noten er så det eneste.
 
 ## Sikkerhed
 

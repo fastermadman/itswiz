@@ -736,10 +736,14 @@ async function downloadTaskAttachment(task) {
   if (!extension) return null;
 
   const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
-  const path = `NOTER/OPGAVER/${folder}/${folder}${extension}`;
-  await writeToVault(path, downloadUrl); // VAULT_PERMISSION propagerer til kalderen
+  // Samme RAW/MD-gren som FAG/ (10-filsystem-design-raw-md.md) — watch_viastudywiz.py er ikke
+  // bundet til FAG/, den konverterer enhver RAW/-gren i vaulten (glob **/RAW/**/*). Skriv derfor
+  // bytes til RAW/ og lad watchfolderen selv producere MD'en, i stedet for at lægge PDF'en direkte
+  // i opgavemappen — noten skal linke til MD (læselaget), ikke RAW (bytes), samme regel som
+  // lektionsplan-noternes materialer-liste (issue #26).
+  await writeToVault(`NOTER/OPGAVER/${folder}/RAW/${folder}${extension}`, downloadUrl); // VAULT_PERMISSION propagerer til kalderen
   runFilesDownloaded++;
-  return path;
+  return `NOTER/OPGAVER/${folder}/MD/${folder}.md`;
 }
 
 // NOTER/OPGAVER/<opgave>/ er opgavens egen mappe (kladde, uddrag, aflevering) — jf. ValdiVault
@@ -779,7 +783,9 @@ async function writeTaskNotes(tasks) {
       "",
       `Deadline: ${task.DeadlineDisplayTime ?? task.Deadline}`,
       ...(task.TaskUrl ? ["", `[Åbn opgaven i itslearning](${task.TaskUrl})`] : []),
-      ...(attachmentPath ? ["", "## Opgavebeskrivelse", `![[${attachmentPath}]]`] : []),
+      // Link til MD-noten, ikke RAW-filen — samme regel som lektionsplan-noternes
+      // materialer-liste (issue #26), af samme grund: MD er læselaget.
+      ...(attachmentPath ? ["", "## Opgavebeskrivelse", `- [[${attachmentPath}]]`] : []),
       "",
     ].join("\n");
 
