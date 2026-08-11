@@ -179,9 +179,11 @@ async function collectRangeInPage(startUnix, endUnix) {
     for (const course of courses) {
       try {
         const data = await fetchJson(`${BASE}/restapi/personal/tasklistdailyworkflow/${course.CourseId}/v1`);
-        // ponytail: endpointets ydre form er ikke verificeret på tværs af varianter, kun indholdet
-        // af ét svar — de tre former dækker det itslearnings restapi ellers bruger.
-        const list = Array.isArray(data) ? data : (data.EntityArray ?? data.Tasks ?? []);
+        // Svaret er grupperet i sektioner ("Afleveringsfrist senere", "Der er ikke nogen deadline",
+        // ...) — data.EntityArray er sektionerne, ikke opgaverne selv. De faktiske opgaver ligger
+        // ét niveau dybere i hver sektions TaskDailyWorkflow.EntityArray. Bekræftet live 2026-08-12
+        // mod kursus 36016 (Musik).
+        const list = (data.EntityArray ?? []).flatMap((section) => section.TaskDailyWorkflow?.EntityArray ?? []);
         for (const task of list) {
           if (!task.Deadline || task.Deadline.startsWith("9999")) continue;
           // Endpointet er ikke bundet til tidsrummet som myEvents er — uden denne grænse ville
