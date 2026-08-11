@@ -167,9 +167,40 @@ async function collectRangeInPage(startUnix, endUnix) {
     return result;
   }
 
+  // Afleveringsopgavers deadline findes ikke i plan.elements (de Arbejdsopgave-elementer der ligger
+  // dér har ingen deadline overhovedet) — den kommer fra dette kursus-niveau-endpoint, ét kald pr.
+  // kursus, som returnerer alle opgaver for hele kurset uanset lektionsplan (issue #45,
+  // live-inspektion på tværs af alle 12 rum). Endpointet blander opgavetyper: opgaver uden reel
+  // deadline bærer sentinel-værdien 9999-12-31 og er de samme "Forberedelse"-elementer der allerede
+  // vises i lektionsplanerne — uden filteret ville Kristendomskundskab alene give 13 tomme
+  // duplikat-noter. Ét fag der fejler må ikke vælte resten af kørslen, derfor try/catch pr. kursus.
+  async function fetchTasks(courses) {
+    const tasks = [];
+    for (const course of courses) {
+      try {
+        const data = await fetchJson(`${BASE}/restapi/personal/tasklistdailyworkflow/${course.CourseId}/v1`);
+        // ponytail: endpointets ydre form er ikke verificeret på tværs af varianter, kun indholdet
+        // af ét svar — de tre former dækker det itslearnings restapi ellers bruger.
+        const list = Array.isArray(data) ? data : (data.EntityArray ?? data.Tasks ?? []);
+        for (const task of list) {
+          if (!task.Deadline || task.Deadline.startsWith("9999")) continue;
+          // Endpointet er ikke bundet til tidsrummet som myEvents er — uden denne grænse ville
+          // hele kursets afleveringshistorik blive til noter og kalenderevents bagud i tiden.
+          // Kun nedre grænse: en deadline længere ude end daysForward er stadig relevant at kende.
+          if (new Date(task.Deadline).getTime() < startUnix * 1000) continue;
+          tasks.push(task);
+        }
+      } catch (err) {
+        console.warn(`VIAstudyWiz: kunne ikke hente opgaveliste for ${course.CourseId}:`, err);
+      }
+    }
+    return tasks;
+  }
+
   const courses = await fetchCourses();
   const courseIds = courses.map((c) => c.CourseId);
   const events = await fetchMyEvents(courseIds, startUnix, endUnix);
+  const tasks = await fetchTasks(courses);
 
   const planKeys = new Set();
   for (const event of events) {
@@ -188,6 +219,7 @@ async function collectRangeInPage(startUnix, endUnix) {
     courses,
     events: events.map((e) => ({ ...e, parsedDescription: parseDescription(e.apiDescriptionPlainText ?? "") })),
     plans,
+    tasks,
   };
 }
 
@@ -211,7 +243,7 @@ async function collectAndDownload(startUnix, endUnix) {
   });
 
   console.log(
-    `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer`
+    `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer, ${(result.tasks ?? []).length} opgaver med deadline`
   );
 
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
@@ -219,10 +251,10 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
-    const planNotesOk = await writePlanNotes(result.plans);
+    const notesOk = (await writePlanNotes(result.plans)) && (await writeTaskNotes(result.tasks ?? []));
     // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
     // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
-    const filesOk = planNotesOk && (await downloadFileElements(result.plans, tab.id));
+    const filesOk = notesOk && (await downloadFileElements(result.plans, tab.id));
     vaultPermissionMissing = !filesOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
@@ -666,6 +698,56 @@ async function writePlanNotes(plans) {
   return true;
 }
 
+// Stabilt id pr. opgave: ElementID fra TaskUrl (fx main.aspx?CourseID=36016&ElementID=4831051&...).
+// Falder tilbage til kursus+titel hvis URL'en mangler/ser anderledes ud, så dedup stadig virker.
+function taskId(task) {
+  const elementId = task.TaskUrl ? new URL(task.TaskUrl).searchParams.get("ElementID") : null;
+  return elementId ? `opgave:${elementId}` : `opgave:${task.CourseId}:${task.TaskTitle}`;
+}
+
+// NOTER/OPGAVER/<opgave>/ er opgavens egen mappe (kladde, uddrag, aflevering) — jf. ValdiVault
+// 12-notestruktur-egne-noter.md §2. Noten her er kun indgangen: deadline + link til itslearning.
+// Skrives én gang og aldrig igen, netop fordi mappen er Valdemars eget skriveområde — en
+// gensynkronisering må ikke overskrive det han selv har skrevet i noten (samme regel som
+// lektionsplan-noterne, af en stærkere grund).
+async function writeTaskNotes(tasks) {
+  const written = await getDownloadedIds();
+
+  for (const task of tasks) {
+    const noteId = `note:${taskId(task)}`;
+    if (written.has(noteId)) continue;
+
+    const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
+    const fag = sanitizeFilename(courseFolderName(task.CourseTitle ?? "ukendt-fag"));
+    const note = [
+      "---",
+      "type: opgave",
+      `fag: ${fag}`,
+      `deadline: "${toGoogleDateTime(task.Deadline).replace("T", " ")}"`,
+      ...(task.TaskUrl ? [`kilde: "${task.TaskUrl}"`] : []),
+      `hentet: "${formatNow()}"`,
+      "---",
+      "",
+      `# ${task.TaskTitle ?? folder}`,
+      "",
+      `Deadline: ${task.DeadlineDisplayTime ?? task.Deadline}`,
+      ...(task.TaskUrl ? ["", `[Åbn opgaven i itslearning](${task.TaskUrl})`] : []),
+      "",
+    ].join("\n");
+
+    const path = `NOTER/OPGAVER/${folder}/${folder}.md`;
+    try {
+      await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
+      await markDownloaded(noteId);
+    } catch (err) {
+      console.error(`VIAstudyWiz opgave-note-fejl (${path}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
+      recordError(`Opgave (${folder}): ${err.message}`);
+    }
+  }
+  return true;
+}
+
 // itslearning bruger separate typeNames pr. dokumenttype for samme
 // ViewLearningToolElement-URL-mønster ("Fil", "Microsoft Word", ... — bekræftet i gemte
 // metadata-dumps), og der dukker jævnligt uforudsete varianter op alt efter hvordan
@@ -938,6 +1020,48 @@ function planHasSpecificTime(plan) {
   return durationHours < 23;
 }
 
+// Afleveringsopgaver får deres eget event på selve deadline-tidspunktet, adskilt fra
+// lektionsplan-events (issue #58). Deadline er et punkt, ikke et interval — Google kræver en
+// slutning, så eventet lægges som den sidste halve time op til deadline. Til forskel fra
+// opgave-noten opdateres eventet ved hver kørsel (upsert): flytter underviseren deadline, skal
+// kalenderen følge med.
+const TASK_EVENT_DURATION_MINUTES = 30;
+
+async function syncTaskDeadlines(tasks, token, calendarIds, eventMap) {
+  for (const task of tasks) {
+    const calendarName = COURSE_DISPLAY_NAMES[task.CourseTitle];
+    if (!calendarName) continue; // ukendt/ikke-mappet fag, samme regel som lektions-events
+    const calendarId = calendarIds[calendarName];
+    if (!calendarId) {
+      console.warn(`VIAstudyWiz: ingen Google-kalender fundet ved navn "${calendarName}"`);
+      continue;
+    }
+
+    const deadline = toGoogleDateTime(task.Deadline);
+    // Regnes som UTC begge veje ("...Z" ind, .toISOString() ud) så det er ren væg-tids-aritmetik:
+    // maskinens egen tidszone må ikke forskyde tidspunktet, timeZone-feltet nedenfor bestemmer det.
+    const start = new Date(new Date(`${deadline}Z`).getTime() - TASK_EVENT_DURATION_MINUTES * 60000)
+      .toISOString()
+      .slice(0, 19);
+    const eventId = taskId(task);
+    const wasNew = !eventMap[eventId];
+    const body = {
+      status: "confirmed",
+      summary: `⏰ ${calendarName} — aflevering: ${task.TaskTitle ?? ""}`,
+      description: [`Deadline: ${task.DeadlineDisplayTime ?? deadline}`, task.TaskUrl ?? ""].join("\n").trim(),
+      start: { dateTime: start, timeZone: TIME_ZONE },
+      end: { dateTime: deadline, timeZone: TIME_ZONE },
+    };
+    try {
+      await upsertCalendarEvent(token, calendarId, eventId, body, eventMap);
+      if (wasNew) runEventsSynced++;
+    } catch (err) {
+      console.error(`VIAstudyWiz opgave-kalender-fejl (${body.summary}):`, err);
+      recordError(`${body.summary}: ${err.message}`);
+    }
+  }
+}
+
 async function syncCalendar(result) {
   const token = await getAuthToken();
   const calendarIds = await fetchCalendarIdMap(token);
@@ -1019,6 +1143,8 @@ async function syncCalendar(result) {
       recordError(`${body.summary}: ${err.message}`);
     }
   }
+
+  await syncTaskDeadlines(result.tasks ?? [], token, calendarIds, eventMap);
 
   await saveEventMap(eventMap);
 }

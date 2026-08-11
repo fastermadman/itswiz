@@ -91,6 +91,17 @@ Samme mønster for retroaktiv emne-tilføjelse til ugemapper
 (`watchfolder/backfill_week_topics.py`) og frontmatter-berigelse af
 eksisterende noter (`watchfolder/enrich_existing_notes.py`).
 
+## Afleveringsopgaver
+
+Afleveringsopgaver med en reel deadline (fra
+`restapi/personal/tasklistdailyworkflow/{courseId}/v1`, ét kald pr. kursus)
+bliver til en note i `NOTER/OPGAVER/<opgave>/<opgave>.md` med `type: opgave`
+plus et kalenderevent på selve deadline-tidspunktet, adskilt fra
+lektionsplan-events. Opgaver uden deadline (sentinel `9999-12-31`) springes
+over — det er de samme "Forberedelse"-elementer der allerede står i
+lektionsplanerne. Noten skrives kun én gang (opgavemappen er dit eget
+skriveområde), mens kalendereventet opdateres hvis deadline flyttes.
+
 ## Sikkerhed
 
 Ingen session-cookies, antiforgery-tokens eller andre secrets må committes.
