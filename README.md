@@ -102,14 +102,13 @@ over — det er de samme "Forberedelse"-elementer der allerede står i
 lektionsplanerne. Noten skrives kun én gang (opgavemappen er dit eget
 skriveområde), mens kalendereventet opdateres hvis deadline flyttes.
 
-Forsøger desuden at hente opgavens vedhæftede opgavebeskrivelse (fx en PDF) via
-samme fil-download-kæde som almindelige materialer. Landér i
-`NOTER/OPGAVER/<opgave>/RAW/`, samme RAW/MD-mønster som `FAG/` — watchfolderen
-konverterer den til `.../MD/<opgave>.md`, og noten linker dertil (ikke til
-RAW-filen, samme regel som issue #26). **Uverificeret** — routen dertil går
-gennem cross-origin SSO-iframes der ikke kunne spores manuelt, kun via
-extensionens egen `chrome.webRequest`. Fejler blødt: ingen vedhæftning fundet
-er ikke en fejl, kun kilde-linket i noten er så det eneste.
+Opgavens vedhæftede opgavebeskrivelse (fx en PDF) hentes bevidst ikke — afprøvet
+og afvist 2026-08-12: den ligger hverken i plan.elements eller i Ressourcer, kun
+i selve Afleveringsopgave-værktøjet bag en cross-origin SSO-iframe
+(`assignment.itslearning.com/Annotations/AnnotationApp.aspx`), og selv den
+underliggende fils direkte download-URL gav 403 Forbidden. Bevidst
+adgangskontrol fra itslearnings side, ikke et uudforsket mønster. Noten får
+kun deadline + link til opgaven i itslearning.
 
 ## Sikkerhed
 

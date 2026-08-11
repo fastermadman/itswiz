@@ -707,44 +707,14 @@ function taskId(task) {
   return elementId ? `opgave:${elementId}` : `opgave:${task.CourseId}:${task.TaskTitle}`;
 }
 
-// Spekulativt, uverificeret: Afleveringsopgavers vedhæftede opgavebeskrivelse (fx en PDF) er aldrig
-// forsøgt downloadet før — den eneste grund den ikke var med er at "Afleveringsopgave" står i
-// NON_FILE_TYPE_NAMES, ikke at selve download-kæden ikke kan finde den. Genbruger derfor den
-// eksisterende formatafhængige kæde uændret: uanset om et element er "Fil" eller "Afleveringsopgave"
-// ender det rigtige indhold (en PDF her, bekræftet live 2026-08-12) formentlig stadig i itslearnings
-// delte PdfViewer/Office-visere, som resolveDownloadUrlUnknownType() allerede lytter efter via
-// chrome.webRequest — det eneste værktøj der kan følge kæden gennem de cross-origin SSO-iframes
-// (LoginSSO.aspx → LearningObjectInstance.aspx) opgavesiden selv bruger. Ikke live-testet: manuel
-// browser-inspektion kan ikke observere cross-origin iframe-navigation, kun webRequest kan (se
-// PR-diskussion #58). Fejler blødt — ingen vedhæftning fundet er den forventede norm, ikke en fejl.
-async function downloadTaskAttachment(task) {
-  if (!task.TaskUrl) return null;
-  const taskUrl = new URL(task.TaskUrl);
-  const elementUrl = `${taskUrl.pathname}${taskUrl.search}`;
-
-  let downloadUrl;
-  try {
-    downloadUrl = await withRetry(() => resolveDownloadUrlUnknownType(elementUrl));
-  } catch (err) {
-    console.warn(`VIAstudyWiz: ingen vedhæftning fundet for opgaven "${task.TaskTitle}":`, err);
-    return null;
-  }
-
-  const extension =
-    extractExtension(downloadUrl) ||
-    (downloadUrl.includes("/contents?access_token=") ? await extractExtensionFromWopi(downloadUrl) : "");
-  if (!extension) return null;
-
-  const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
-  // Samme RAW/MD-gren som FAG/ (10-filsystem-design-raw-md.md) — watch_viastudywiz.py er ikke
-  // bundet til FAG/, den konverterer enhver RAW/-gren i vaulten (glob **/RAW/**/*). Skriv derfor
-  // bytes til RAW/ og lad watchfolderen selv producere MD'en, i stedet for at lægge PDF'en direkte
-  // i opgavemappen — noten skal linke til MD (læselaget), ikke RAW (bytes), samme regel som
-  // lektionsplan-noternes materialer-liste (issue #26).
-  await writeToVault(`NOTER/OPGAVER/${folder}/RAW/${folder}${extension}`, downloadUrl); // VAULT_PERMISSION propagerer til kalderen
-  runFilesDownloaded++;
-  return `NOTER/OPGAVER/${folder}/MD/${folder}.md`;
-}
+// Afleveringsopgavers vedhæftede opgavebeskrivelse er bevidst IKKE forsøgt downloadet (afprøvet og
+// afvist 2026-08-12, se PR-diskussion #58): den ligger hverken i plan.elements eller i Ressourcer —
+// kun inde i selve Afleveringsopgave-værktøjet, nået via en cross-origin SSO-iframe
+// (assignment.itslearning.com/Annotations/AnnotationApp.aspx) som ikke kan observeres udefra, og
+// den underliggende fil (fundet via LearningObjectId, ikke elementets eget id) gav 403 Forbidden på
+// den ellers fungerende DownloadRedirect.ashx-kæde. Adgangskontrollen er altså bevidst fra
+// itslearnings side, ikke bare et uudforsket mønster — endnu et forsøg ville koste 20-40s spildtid
+// pr. opgave, hver kørsel, uden udsigt til at lykkes.
 
 // NOTER/OPGAVER/<opgave>/ er opgavens egen mappe (kladde, uddrag, aflevering) — jf. ValdiVault
 // 12-notestruktur-egne-noter.md §2. Noten her er kun indgangen: deadline + link til itslearning.
@@ -761,15 +731,6 @@ async function writeTaskNotes(tasks) {
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
     const fag = sanitizeFilename(courseFolderName(task.CourseTitle ?? "ukendt-fag"));
 
-    let attachmentPath = null;
-    try {
-      attachmentPath = await downloadTaskAttachment(task);
-    } catch (err) {
-      console.error(`VIAstudyWiz opgave-vedhæftning-fejl (${folder}):`, err);
-      if (err.code === "VAULT_PERMISSION") return false;
-      recordError(`Opgave-vedhæftning (${folder}): ${err.message}`);
-    }
-
     const note = [
       "---",
       "type: opgave",
@@ -783,9 +744,6 @@ async function writeTaskNotes(tasks) {
       "",
       `Deadline: ${task.DeadlineDisplayTime ?? task.Deadline}`,
       ...(task.TaskUrl ? ["", `[Åbn opgaven i itslearning](${task.TaskUrl})`] : []),
-      // Link til MD-noten, ikke RAW-filen — samme regel som lektionsplan-noternes
-      // materialer-liste (issue #26), af samme grund: MD er læselaget.
-      ...(attachmentPath ? ["", "## Opgavebeskrivelse", `- [[${attachmentPath}]]`] : []),
       "",
     ].join("\n");
 
