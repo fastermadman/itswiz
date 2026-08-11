@@ -539,8 +539,13 @@ function courseFolderName(courseName) {
 // Fritekstfelt underviseren selv udfylder — henviser ofte til grundbogssider, ikke kun vedhæftede
 // filer, så det kan ikke kobles til bestemte elementer. headingText starter altid med
 // "Tilhørende litteratur", men har varierende parentes-tilføjelser pr. underviser/kursus.
+// field.text er kun rent tekst når isPlainText er sat — nogle undervisere bruger rig tekst i
+// feltet, hvor text i stedet indeholder rå HTML (bekræftet live, fx "<p><span
+// style=...>...</span></p>" for et Musikforståelse-felt). stripHtml() bruges derfor altid, den
+// er et no-op på allerede rent tekst.
 function planLiteratureText(plan) {
-  return plan.fields?.find((f) => f.headingText?.startsWith("Tilhørende litteratur"))?.text?.trim() || null;
+  const text = plan.fields?.find((f) => f.headingText?.startsWith("Tilhørende litteratur"))?.text;
+  return text ? stripHtml(text) || null : null;
 }
 
 // YAML literal block scalar (|) — undgår escaping af anførselstegn/kolon/linjeskift i fritekst,
