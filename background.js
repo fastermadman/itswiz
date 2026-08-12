@@ -690,6 +690,46 @@ function mdPath(courseName, weekFolder, title) {
   return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
 }
 
+// § FAG/<fag>/NOTER/<uge>/ — søskende til RAW/MD, ikke en separat NOTER-rod (issue #65 §11:
+// Valdemar har ADHD og har brug for ét sted pr. fag at kigge, ikke tre rødder at huske).
+function noteStubPath(courseName, weekFolder) {
+  return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/NOTER/${weekFolder}/${weekFolder} note.md`;
+}
+
+// Skriver kun hvis filen ikke findes i forvejen — modsat lektionsplan-noten (som genskrives når
+// planen ændrer sig), er denne stub udelukkende til at give Valdemar et sted at skrive: findes
+// den allerede, er den hans, og røres aldrig igen. Et rigtigt exists-tjek (readFromVault),
+// ikke written.has(noteId) (muterbar download-log) — samme klasse beskyttelse som
+// already_converted() i watch_viastudywiz.py, se 12-notestruktur-egne-noter.md §6.
+// Returnerer false hvis vault-tilladelsen mangler, ellers true (fejl på selve stubben er ikke
+// kritiske nok til at stoppe resten af kørslen — kun logges via recordError).
+async function writeLectureNoteStub(courseName, weekFolder, weekBase, topic, lektionsplanPath) {
+  const path = noteStubPath(courseName, weekFolder);
+  try {
+    const existing = await readFromVault(path);
+    if (existing != null) return true;
+    const kildeStem = lektionsplanPath.slice(lektionsplanPath.lastIndexOf("/") + 1).replace(/\.md$/, "");
+    const frontmatter = [
+      "---",
+      "type: note",
+      `fag: ${courseDisplayName(courseName)}`,
+      `uge: ${weekBase}`,
+      ...(topic ? [`emne: "${topic}"`] : []),
+      `kilde: "[[${kildeStem}]]"`,
+      "tags: []",
+      "---",
+      "",
+    ].join("\n");
+    await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(frontmatter)}`);
+    return true;
+  } catch (err) {
+    console.error(`VIAstudyWiz forelæsningsnote-stub-fejl (${path}):`, err);
+    if (err.code === "VAULT_PERMISSION") return false;
+    recordError(`Forelæsningsnote (${weekFolder}): ${err.message}`);
+    return true;
+  }
+}
+
 // "hentet:" i frontmatter — lokal væg-tid i samme tidszone som resten af extensionen (TIME_ZONE),
 // ikke maskinens egen, og samme "yyyy-MM-dd HH:mm"-format som start/stop-felterne ovenfor, for
 // konsistens (issue #34). Opdateres hver gang AUTO-sektionen i en lektionsplan-note regenereres
@@ -760,6 +800,12 @@ async function writePlanNotes(plans) {
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
 
+    // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
+    // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
+    const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
+    const stubOk = await writeLectureNoteStub(courseName, weekFolder, weekFolderBase(plan), topic, lektionsplanPath);
+    if (!stubOk) return false;
+
     const autoContent = [
       `# ${plan.title ?? weekFolder}`,
       "",
@@ -791,7 +837,7 @@ async function writePlanNotes(plans) {
       "",
     ].join("\n");
 
-    const path = `${FAG_ROOT}/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
+    const path = lektionsplanPath;
     try {
       const existingText = await readFromVault(path);
       const existingBody = existingText ? existingText.replace(/^---\n[\s\S]*?\n---\n\n?/, "") : null;
