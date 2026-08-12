@@ -5,7 +5,7 @@ undervisningsmaterialer fra via.itslearning.com (VIA University College).
 
 Del af VIAstudyWiz-pipelinen. Kontekst, research og arkitekturbeslutninger
 ligger i ValdiVault:
-`10_Projects/VIAstudyWiz/06-handover-frisk-chat.md` (arbejdsdokument, start her)
+`10_Projects/VIAstudyWiz/06-start-her.md` (ren pointer-samling, start her)
 `10_Projects/VIAstudyWiz/05-api-reference.md` (aktuel teknisk reference)
 
 ## Status
@@ -56,13 +56,18 @@ vises intet, selvom koden virker fint. Se ValdiVault:
 
 ## Vault-struktur
 
-To grene pr. fag: `RAW/` er bytes til enheder (Boox/NeoReader browser bare
-filsystemet), `MD/` er noter til Obsidian. Alt nyt indhold falder i én af de to,
-så strukturen ikke skal lægges om igen.
+Alt maskinskrevet indhold ligger under `§ FAG/` (`FAG_ROOT` i `background.js`,
+låst — se issue #29). Tre grene pr. fag: `RAW/` er bytes til enheder
+(Boox/NeoReader browser bare filsystemet), `MD/` er noter til Obsidian, og
+`NOTER/` er en fjerde, **manuelt ejet** gren (se nedenfor). Alt nyt maskinelt
+indhold falder i `RAW/`/`MD/`, så strukturen ikke skal lægges om igen.
 
-Fag-mappen hedder det venlige navn fra `COURSE_DISPLAY_NAMES` i `background.js`
-(fx `Musik`), ikke itslearnings tekniske kursuskode — samme tabel som allerede
-bruges til kalendersyncen.
+Fag-mappen har et fag-symbol foran det venlige navn fra `COURSE_DISPLAY_NAMES`
+(`courseFolderName()`, fx `♪ Musik`) — symbolerne er kun i selve mappestien
+(og Google Calendar-navnet), aldrig i `fag:`-frontmatter-feltet, som
+`Litteratur.base` filtrerer eksakt på (`fag == "Musik"`). Symbol-ordbogen
+holdes i `⚙ META/Symbol-konvention.md` i selve vaulten, ikke her — ret begge
+steder hvis et symbol ændres.
 
 Ugemappen hedder `W<uge><dag> - <emne>` (fx `W34tors - Skolens formål`) når
 planen har et `topic.name` — strukturerede data fra itslearning, bekræftet
@@ -70,11 +75,12 @@ live, ikke fritekst-parsing. Kun tilføjet fremadrettet: ældre mapper i
 vaulten hedder stadig bare `W34tors` uden emne, ikke migreret retroaktivt.
 
 ```
-ViaVault/<fag>/
+ViaVault/§ FAG/<symbol> <fag>/
   RAW/<uge> - <emne>/<titel>.pdf                       ← extensionen skriver kun her
   MD/<uge> - <emne>/<uge> - <emne> lektionsplan.md     ← lektionsplan + links til ugens materialer
   MD/<uge> - <emne>/<titel>.md                         ← watch-scriptets MinerU-output
   MD/<uge> - <emne>/_attachments/<titel>/<sha>.jpg     ← udtrukne billeder
+  NOTER/<uge> - <emne>/<uge> - <emne> note.md          ← forelæsningsnote-STUB, se nedenfor
 ```
 
 Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`, og `emne`/`start`/`stop`
@@ -84,6 +90,31 @@ og emner uden at strukturen skal kode alting. `uge` er den rene ugekode
 Billed-embeds er wikilinks (`![[<sha>.jpg]]`), ikke relative stier — de
 knækker på titler med parentes. Begrundelse og alternativer i ValdiVault:
 `10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
+
+### `NOTER/` — forelæsningsnote-stub (issue #68)
+
+`writePlanNotes` skriver, i samme kørsel som lektionsplanen, en tom
+forelæsningsnote-stub i `§ FAG/<fag>/NOTER/<uge>/` med `fag`/`uge`/`emne`/
+`kilde:` allerede udfyldt fra itslearning-data — ingen manuel oprettelse,
+intet frontmatter i hånden. **Create-if-not-exists** via et rigtigt fil-tjek
+(`readFromVault`), kørt uafhængigt af lektionsplan-hashet: stubben skrives
+selv når lektionsplanen ikke ændrer sig, og findes den allerede, røres den
+aldrig igen — det er brugerens skriveflade.
+
+`NOTER/` er søskende til `RAW/`+`MD/`, ikke en separat top-rod — se
+`12-notestruktur-egne-noter.md` §11 i ValdiVault for hvorfor (kort version:
+ét sted pr. fag i stedet for flere rødder at huske, besluttet efter
+ADHD-hensyn i issue #65).
+
+### Egne noter, Obsidian-siden
+
+`VIDEN/` (permanente noter + EMR-genererede literature-noter),
+`✎ NOTER/OPGAVER/` (opgaver) og `Egne noter.base` er ren vault-struktur uden
+kode-afhængighed — rørt af Obsidian/QuickAdd, ikke af denne extension. Se
+`⚙ META/Guides/` i selve vaulten (`00 - Kom i gang.md`,
+`01 - QuickAdd-genveje.md`, `02 - Symboler og struktur.md`) for
+brugsvejledning, og `12-notestruktur-egne-noter.md` i ValdiVault for
+arkitekturbegrundelsen.
 
 Migrering af en gammel flad vault: `watchfolder/migrate_to_raw_md.py` (dry-run
 som standard, `--apply` udfører, `--selfcheck` kører de indbyggede tests).
@@ -95,7 +126,7 @@ eksisterende noter (`watchfolder/enrich_existing_notes.py`).
 
 Afleveringsopgaver med en reel deadline (fra
 `restapi/personal/tasklistdailyworkflow/{courseId}/v1`, ét kald pr. kursus)
-bliver til en note i `NOTER/OPGAVER/<opgave>/<opgave>.md` med `type: opgave`
+bliver til en note i `✎ NOTER/OPGAVER/<opgave>/<opgave>.md` med `type: opgave`
 plus et kalenderevent på selve deadline-tidspunktet, adskilt fra
 lektionsplan-events. Opgaver uden deadline (sentinel `9999-12-31`) springes
 over — det er de samme "Forberedelse"-elementer der allerede står i
@@ -109,8 +140,8 @@ egen SSO-handshake (session-cookie scopet til det domæne — en direkte
 download-URL uden handshaket giver 403). En skjult fane gennemfører derfor
 handshaket rigtigt (samme teknik som Office/WOPI-kæden), og filens rigtige
 download-URL læses ud af sidens `fileListControl.initialize(...)`-data
-bagefter. Lander i `NOTER/OPGAVER/<opgave>/RAW/`, samme RAW/MD-mønster som
-`FAG/` — watchfolderen konverterer den til `.../MD/<filnavn>.md`, og noten
+bagefter. Lander i `✎ NOTER/OPGAVER/<opgave>/RAW/`, samme RAW/MD-mønster som
+`§ FAG/` — watchfolderen konverterer den til `.../MD/<filnavn>.md`, og noten
 linker dertil (ikke til RAW-filen, samme regel som issue #26). Fejler blødt:
 ingen vedhæftning fundet er ikke en fejl, kun kilde-linket er så det eneste.
 Kører kun én gang pr. opgave (samme dedup som selve noten), ikke ved hver
@@ -123,7 +154,8 @@ De skal læses dynamisk fra browserens egen session ved runtime.
 
 ## watchfolder/ — MinerU-integration
 
-Overvåger `~/ViaVault/*/RAW/` (extensionen skriver direkte hertil via File System
+Overvåger `~/ViaVault/**/RAW/` rekursivt — sti-agnostisk, ikke hardcodet til
+`§ FAG/` (extensionen skriver direkte hertil via File System
 Access API — se ovenfor) for nye dokumenter — pdf, docx, pptx, xlsx — sender dem til
 MinerU's officielle REST API (`mineru.net/api/v4`), og skriver outputtet over i
 fagets MD-gren. MinerU har ingen output-sti-indstilling; placeringen er vores egen
