@@ -699,7 +699,7 @@ function courseDisplayName(courseName) {
 
 // Kun til vault-mappestier og Google Calendar-navne (begge er steder man navigerer visuelt hen —
 // Valdemar har omdøbt de faktiske kalendere til at matche, fx "♪ Musik"). IKKE til
-// fag:-frontmatter-feltet (courseDisplayName ovenfor), som Litteratur.base filtrerer eksakt på
+// fag:-frontmatter-feltet (courseDisplayName ovenfor), som Seminarium.base filtrerer eksakt på
 // (`fag == "Musik"`) — et symbol blandet ind der ville splitte eksisterende og nye noter i to
 // grupper i stedet for at være rent kosmetisk (issue #63).
 // LivsOplysning bruger ⚖︎ (U+2696 + U+FE0E, tekst-variationsselector) i stedet for bare ⚖ — uden
@@ -819,7 +819,7 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
       `uge: ${weekFolderBase(plan)}`,
       ...(topic ? [`emne: "${topic}"`] : []),
       // uge (W33fre) sorterer alfabetisk og scrambler ugedagene — start er den universelle,
-      // kronologiske nøgle, samme lærepenge som Litteratur.base's sorteringsfejl i issue #65.
+      // kronologiske nøgle, samme lærepenge som Seminarium.base's sorteringsfejl i issue #65.
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
       `kilde: "[[${kildeStem}]]"`,
       "tags: []",
@@ -908,7 +908,7 @@ async function writePlanNotes(plans) {
     const weekFolder = weekFolderName(plan);
     const courseName = plan.courseName ?? "ukendt-fag";
     // Symbol-navnet er kun til selve mappestien — fag:-feltet nedenfor skal blive ved den rene
-    // værdi (courseDisplayName), da Litteratur.base filtrerer eksakt på den (issue #63).
+    // værdi (courseDisplayName), da Seminarium.base filtrerer eksakt på den (issue #63).
     const fag = sanitizeFilename(courseFolderName(courseName));
     const fagField = courseDisplayName(courseName);
     // Links til MD-noten (navigations-graf), ikke RAW-filen — RAW er bytes til enheder, ikke
@@ -969,7 +969,7 @@ async function writePlanNotes(plans) {
     // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
-    const FRONTMATTER_VERSION = 2; // 2 = forberedelse-feltet, issue #59
+    const FRONTMATTER_VERSION = 3; // 2 = forberedelse-feltet (#59), 3 = fjernet redundant dato:-felt
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (hashes[noteId] === currentHash) continue;
 
@@ -978,7 +978,9 @@ async function writePlanNotes(plans) {
       `fag: ${fagField}`,
       `uge: ${weekFolderBase(plan)}`,
       ...(topic ? [`emne: "${topic}"`] : []),
-      `dato: ${(plan.start ?? "").slice(0, 10)}`,
+      // Intet separat dato:-felt — det var bare start's første 10 tegn, kun til stede på
+      // lektionsplan-noter (materiale-noter fra watchfolderen har ingen dato:, men har altid
+      // start:). Basens visdato-formel læser start direkte og virker derfor på alle rækketyper.
       // Lektionens rigtige tidspunkt (ikke lokale-bookingens) — se toGoogleDateTime/syncCalendar
       // for hvorfor plan.start/stop er den pålidelige kilde.
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
