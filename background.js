@@ -786,7 +786,7 @@ async function writePlanNotes(plans) {
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
-      ...(literature ? yamlBlockLines("litteratur", `📖 ${literature}`) : ["litteratur: false"]),
+      ...(literature ? yamlBlockLines("litteratur", `▤ ${literature}`) : ["litteratur: false"]),
       "---",
       "",
     ].join("\n");
@@ -1185,7 +1185,7 @@ function buildEventDescription(plan) {
   const lines = [plan.title ?? "", "", stripHtml(plan.description)];
   const literature = planLiteratureText(plan);
   if (literature) {
-    lines.push("", "📖 Tilhørende litteratur:", literature);
+    lines.push("", "▤ Tilhørende litteratur:", literature);
   }
   const elements = (plan.elements ?? []).map((el) => `- ${el.title}`);
   if (elements.length > 0) {
@@ -1337,9 +1337,9 @@ async function syncCalendar(result) {
     // (weekFolderName ovenfor) — sat forrest i titlen så det er synligt uden at åbne eventet.
     const topic = plan?.topic?.name?.trim();
     const summaryTitle = topic ? `${topic} — ${titlePart}` : titlePart;
-    // 📖 gør det synligt i kalenderoverblikket at der er noget at læse forud for lektionen, uden
+    // ▤ gør det synligt i kalenderoverblikket at der er noget at læse forud for lektionen, uden
     // at fylde hele teksten ind i titlen — den fulde tekst står i beskrivelsen (buildEventDescription).
-    const literaturePrefix = plan && planLiteratureText(plan) ? "📖 " : "";
+    const literaturePrefix = plan && planLiteratureText(plan) ? "▤ " : "";
     const body = {
       status: "confirmed", // PATCH på et manuelt slettet (= "cancelled") event genopliver det ikke
       // automatisk medmindre status eksplicit sættes tilbage - Google bevarer ellers feltet.
