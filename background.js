@@ -707,14 +707,67 @@ function taskId(task) {
   return elementId ? `opgave:${elementId}` : `opgave:${task.CourseId}:${task.TaskTitle}`;
 }
 
-// Afleveringsopgavers vedhæftede opgavebeskrivelse er bevidst IKKE forsøgt downloadet (afprøvet og
-// afvist 2026-08-12, se PR-diskussion #58): den ligger hverken i plan.elements eller i Ressourcer —
-// kun inde i selve Afleveringsopgave-værktøjet, nået via en cross-origin SSO-iframe
-// (assignment.itslearning.com/Annotations/AnnotationApp.aspx) som ikke kan observeres udefra, og
-// den underliggende fil (fundet via LearningObjectId, ikke elementets eget id) gav 403 Forbidden på
-// den ellers fungerende DownloadRedirect.ashx-kæde. Adgangskontrollen er altså bevidst fra
-// itslearnings side, ikke bare et uudforsket mønster — endnu et forsøg ville koste 20-40s spildtid
-// pr. opgave, hver kørsel, uden udsigt til at lykkes.
+// Afleveringsopgavers vedhæftede opgavebeskrivelse ligger i selve Afleveringsopgave-værktøjet
+// (assignment.itslearning.com), ikke i plan.elements eller Ressourcer — nået via en cross-origin
+// SSO-handshake (LoginSSO.aspx → assignment.itslearning.com/view.aspx) der sætter en session-cookie
+// scopet til DET domæne. En direkte DownloadRedirect.ashx-URL uden den handshake giver 403 (afprøvet
+// 2026-08-12). Løsningen: lad en rigtig fane gennemføre handshaket selv (samme teknik som
+// resolveOfficeDownloadUrl), og læs filens rigtige download-URL ud af siden bagefter — den ligger som
+// klartekst i sidens fileListControl.initialize([...])-konfiguration (Knockout, ikke server-rendret
+// før JS kører, så det skal læses fra den FÆRDIGT indlæste side, ikke fra et rent HTML-fetch).
+const ASSIGNMENT_TOOL_PATTERN = "*://assignment.itslearning.com/*";
+
+// Balanceret parentes-scan i stedet for en grådig regex — "DownloadEndpointUrl" og
+// "signedFileRepoId" er flade strengfelter og trygge at matche direkte, men selve filens navn kan i
+// princippet indeholde citationstegn, så vi henter det fra samme JSON i stedet for en løsrevet regex.
+function extractAssignmentFile(html) {
+  const downloadUrlMatch = html.match(/"DownloadEndpointUrl":"([^"]+)"/);
+  const fileRepoIdMatch = html.match(/"signedFileRepoId":"([^"]+)"/);
+  const nameMatch = html.match(/"Name":"((?:[^"\\]|\\.)*)"/);
+  if (!downloadUrlMatch || !fileRepoIdMatch || !nameMatch) return null;
+  const downloadUrl = downloadUrlMatch[1]
+    .replace(/\\u0026/g, "&")
+    .replace("{fileRepoId}", encodeURIComponent(fileRepoIdMatch[1]));
+  return {
+    name: JSON.parse(`"${nameMatch[1]}"`),
+    url: new URL(downloadUrl, "https://assignment.itslearning.com").toString(),
+  };
+}
+
+async function downloadTaskAttachment(task) {
+  if (!task.TaskUrl) return null;
+
+  let tabId = null;
+  try {
+    const landedUrlPromise = waitForRequest(ASSIGNMENT_TOOL_PATTERN, 20000);
+    const tab = await chrome.tabs.create({ url: task.TaskUrl, active: false });
+    tabId = tab.id;
+    await landedUrlPromise; // bekræfter SSO-handshaket er gennemført og cookien sat
+
+    const [{ result: html }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => document.documentElement.outerHTML,
+    });
+    const file = extractAssignmentFile(html);
+    if (!file) return null;
+
+    const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
+    const rawName = sanitizeFilename(file.name);
+    const stem = rawName.replace(/\.[^./]+$/, "");
+    // Samme RAW/MD-gren som FAG/ (10-filsystem-design-raw-md.md) — watch_viastudywiz.py er ikke
+    // bundet til FAG/, den konverterer enhver RAW/-gren i vaulten. Noten linker til MD (læselaget),
+    // ikke RAW (bytes), samme regel som lektionsplan-noternes materialer-liste (issue #26).
+    await writeToVault(`NOTER/OPGAVER/${folder}/RAW/${rawName}`, file.url); // VAULT_PERMISSION propagerer til kalderen
+    runFilesDownloaded++;
+    return `NOTER/OPGAVER/${folder}/MD/${stem}.md`;
+  } catch (err) {
+    if (err.code === "VAULT_PERMISSION") throw err; // propagerer til kalderen, samme regel som ellers
+    console.warn(`VIAstudyWiz: ingen vedhæftning fundet for opgaven "${task.TaskTitle}":`, err);
+    return null;
+  } finally {
+    if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
 
 // NOTER/OPGAVER/<opgave>/ er opgavens egen mappe (kladde, uddrag, aflevering) — jf. ValdiVault
 // 12-notestruktur-egne-noter.md §2. Noten her er kun indgangen: deadline + link til itslearning.
@@ -731,6 +784,15 @@ async function writeTaskNotes(tasks) {
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
     const fag = sanitizeFilename(courseFolderName(task.CourseTitle ?? "ukendt-fag"));
 
+    let attachmentPath = null;
+    try {
+      attachmentPath = await downloadTaskAttachment(task);
+    } catch (err) {
+      console.error(`VIAstudyWiz opgave-vedhæftning-fejl (${folder}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
+      recordError(`Opgave-vedhæftning (${folder}): ${err.message}`);
+    }
+
     const note = [
       "---",
       "type: opgave",
@@ -744,6 +806,9 @@ async function writeTaskNotes(tasks) {
       "",
       `Deadline: ${task.DeadlineDisplayTime ?? task.Deadline}`,
       ...(task.TaskUrl ? ["", `[Åbn opgaven i itslearning](${task.TaskUrl})`] : []),
+      // Link til MD-noten, ikke RAW-filen — samme regel som lektionsplan-noternes
+      // materialer-liste (issue #26), af samme grund: MD er læselaget.
+      ...(attachmentPath ? ["", "## Opgavebeskrivelse", `- [[${attachmentPath}]]`] : []),
       "",
     ].join("\n");
 
