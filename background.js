@@ -25,6 +25,19 @@ async function writeToVault(path, url) {
   }
 }
 
+// Returnerer null hvis filen ikke findes endnu — bruges af writePlanNotes til at afgøre om en
+// note skrives for første gang eller skal splejses (se spliceAutoSection).
+async function readFromVault(path) {
+  await ensureOffscreenDocument();
+  const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "readFile", path });
+  if (!response?.ok) {
+    throw Object.assign(new Error(response?.error ?? "Ukendt fejl ved fillæsning i offscreen-dokumentet"), {
+      code: response?.code,
+    });
+  }
+  return response.text;
+}
+
 // Tæller fejlede enkelt-elementer (fil-downloads, kalender-events, lektionsplan-noter) i den
 // aktuelle kørsel. Nulstilles i collectAndDownload. Uden denne var den slags fejl kun synlige i
 // service worker-konsollen — man skulle vide de skulle kigges efter for overhovedet at opdage dem.
@@ -573,6 +586,33 @@ async function markDownloaded(id) {
   await chrome.storage.local.set({ [DOWNLOADED_IDS_KEY]: [...ids] });
 }
 
+// Separat fra downloadedElementIds: dén er en simpel tilstedeværelse-Set (fil/opgave enten
+// hentet eller ej), men lektionsplan-noter skal opdages som "ændret" så underviserens rettelser
+// til beskrivelsen ikke drifter væk fra noten (issue #61) — derfor gemmes et indholds-hash pr.
+// plan i stedet for bare et boolean. Ikke-kryptografisk (planKollisions-risiko er irrelevant
+// her, vi skal bare opdage "ændrede sig teksten") — undgår at skulle awaite Web Crypto for noget
+// der kører synkront i en loop over alle ugens planer.
+const PLAN_NOTE_HASHES_KEY = "planNoteContentHashes";
+
+async function getPlanNoteHashes() {
+  const { [PLAN_NOTE_HASHES_KEY]: hashes } = await chrome.storage.local.get(PLAN_NOTE_HASHES_KEY);
+  return hashes ?? {};
+}
+
+async function savePlanNoteHash(noteId, hash) {
+  const hashes = await getPlanNoteHashes();
+  hashes[noteId] = hash;
+  await chrome.storage.local.set({ [PLAN_NOTE_HASHES_KEY]: hashes });
+}
+
+function simpleHash(text) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (Math.imul(hash, 31) + text.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
+}
+
 // To grene pr. fag: RAW/ er bytes til enheder (NeoReader browser bare filsystemet), MD/ er
 // noter til Obsidian (watch-scriptet skriver minerU-outputtet derover). Extensionen rører kun
 // RAW/ — den skriver aldrig ind i Obsidian-grenen. Se ValdiVault:
@@ -620,8 +660,8 @@ function mdPath(courseName, weekFolder, title) {
 
 // "hentet:" i frontmatter — lokal væg-tid i samme tidszone som resten af extensionen (TIME_ZONE),
 // ikke maskinens egen, og samme "yyyy-MM-dd HH:mm"-format som start/stop-felterne ovenfor, for
-// konsistens (issue #34). Noter her skrives kun én gang (se writePlanNotes), så "opdateret:" giver
-// ikke mening endnu — tilføj det hvis en note-type nogensinde begynder at blive genskrevet.
+// konsistens (issue #34). Opdateres hver gang AUTO-sektionen i en lektionsplan-note regenereres
+// (issue #61), ikke kun ved første hentning — fungerer derfor reelt som et "sidst opdateret".
 function formatNow() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: TIME_ZONE,
@@ -636,18 +676,37 @@ function formatNow() {
   return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
 }
 
+const AUTO_START = "<!-- AUTO:START -->";
+const AUTO_END = "<!-- AUTO:END -->";
+const AUTO_BLOCK_RE = new RegExp(`${AUTO_START}[\\s\\S]*?${AUTO_END}`);
+
+// Lektionsplan-noten har to zoner: frontmatter + AUTO-sektionen er 100% maskin-ejet og
+// genskrives hver gang planens indhold ændrer sig (issue #61) — alt uden for AUTO-markørerne er
+// Valdemars eget og røres aldrig. Findes markørerne ikke i en eksisterende fil (en note skrevet
+// før denne splejsning fandtes), regnes hele det gamle indhold som hans eget og bevares under
+// den nye AUTO-sektion i stedet for at gætte på hvor den gamle grænse gik.
+function spliceAutoSection(existingBody, autoContent) {
+  const autoBlock = `${AUTO_START}\n${autoContent}\n${AUTO_END}`;
+  if (existingBody == null) return autoBlock;
+  if (AUTO_BLOCK_RE.test(existingBody)) return existingBody.replace(AUTO_BLOCK_RE, autoBlock);
+  return `${autoBlock}\n\n${existingBody}`;
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
-// ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Skrives kun én gang:
-// senere ændringer fra underviseren hentes ikke ind igen, til gengæld overskrives egne noter aldrig.
+// ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
+// AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
+// sporet via et content-hash pr. plan (getPlanNoteHashes), ikke bare "er filen skrevet før", så
+// underviserens rettelser ikke drifter væk fra noten (issue #61). Alt Valdemar selv skriver i
+// filen uden for AUTO-markørerne bevares uanset, se spliceAutoSection.
 // Returnerer false hvis vault-tilladelsen manglede — kalderen bruger det til at springe resten
 // af kørslen over (tilladelsen kommer ikke tilbage af sig selv midt i et løb) og til at tænde
 // advarsels-badge'et.
 async function writePlanNotes(plans) {
-  const written = await getDownloadedIds();
+  const hashes = await getPlanNoteHashes();
 
   for (const [planKey, plan] of Object.entries(plans)) {
     const noteId = `plan:${planKey}`;
-    if (!plan || written.has(noteId)) continue;
+    if (!plan) continue;
 
     const weekFolder = weekFolderName(plan);
     const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
@@ -665,7 +724,22 @@ async function writePlanNotes(plans) {
       );
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
-    const note = [
+
+    const autoContent = [
+      `# ${plan.title ?? weekFolder}`,
+      "",
+      stripHtml(plan.description),
+      ...(materials.length ? ["", "## Materialer", ...materials] : []),
+    ].join("\n");
+
+    // Hashet dækker kun det maskin-genererede indhold (autoContent), ikke frontmatter — ellers
+    // ville "hentet:"-tidsstemplet i frontmatter gøre hashet forskelligt ved hver kørsel uanset
+    // om planen reelt ændrede sig, og hele pointen med at undgå unødvendige genskrivninger ville
+    // forsvinde.
+    const currentHash = simpleHash(autoContent);
+    if (hashes[noteId] === currentHash) continue;
+
+    const frontmatter = [
       "---",
       `fag: ${fag}`,
       `uge: ${weekFolderBase(plan)}`,
@@ -680,17 +754,15 @@ async function writePlanNotes(plans) {
       ...(literature ? yamlBlockLines("litteratur", `📖 ${literature}`) : ["litteratur: false"]),
       "---",
       "",
-      `# ${plan.title ?? weekFolder}`,
-      "",
-      stripHtml(plan.description),
-      ...(materials.length ? ["", "## Materialer", ...materials] : []),
-      "",
     ].join("\n");
 
     const path = `FAG/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
     try {
+      const existingText = await readFromVault(path);
+      const existingBody = existingText ? existingText.replace(/^---\n[\s\S]*?\n---\n\n?/, "") : null;
+      const note = frontmatter + spliceAutoSection(existingBody, autoContent) + "\n";
       await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
-      await markDownloaded(noteId);
+      await savePlanNoteHash(noteId, currentHash);
     } catch (err) {
       console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
