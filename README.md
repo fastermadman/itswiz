@@ -65,7 +65,7 @@ indhold falder i `RAW/`/`MD/`, så strukturen ikke skal lægges om igen.
 Fag-mappen har et fag-symbol foran det venlige navn fra `COURSE_DISPLAY_NAMES`
 (`courseFolderName()`, fx `♪ Musik`) — symbolerne er kun i selve mappestien
 (og Google Calendar-navnet), aldrig i `fag:`-frontmatter-feltet, som
-`Litteratur.base` filtrerer eksakt på (`fag == "Musik"`). Symbol-ordbogen
+`Seminarium.base` filtrerer eksakt på (`fag == "Musik"`). Symbol-ordbogen
 holdes i `⚙ META/Symbol-konvention.md` i selve vaulten, ikke her — ret begge
 steder hvis et symbol ændres.
 
@@ -84,7 +84,7 @@ ViaVault/§ FAG/<symbol> <fag>/
 ```
 
 Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`, og `emne`/`start`/`stop`
-når planen har dem), så `Litteratur.base` kan bygge overblik på tværs af uger
+når planen har dem), så `Seminarium.base` kan bygge overblik på tværs af uger
 og emner uden at strukturen skal kode alting. `uge` er den rene ugekode
 (`W34tors`), `emne` er sit eget felt — ikke gemt inde i mappenavnets streng.
 Billed-embeds er wikilinks (`![[<sha>.jpg]]`), ikke relative stier — de
@@ -120,7 +120,7 @@ ville `stripHtml` fjerne dem helt.
 Resultatet lander **to steder med hver sit job**:
 
 - **Lektionsplan-noten** (`MD/`): `forberedelse:` i frontmatter (`false` når
-  der ikke er noget) driver `Litteratur.base`s ⚒-kolonne, og en
+  der ikke er noget) driver `Seminarium.base`s ⚒-kolonne, og en
   `## ⚒ Forberedelse`-sektion i AUTO-blokken har det fulde indhold med
   klikbare markdown-links. Maskin-ejet, så underviserens rettelser følger med.
 - **Forelæsningsnote-stubben** (`NOTER/`): `- [ ] ⚒ <titel>` pr. element.
