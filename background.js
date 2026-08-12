@@ -5,7 +5,7 @@
 // "FAG"/"NOTER"-mapper ved siden af de rigtige, og fremtidigt indhold ville splittes over to
 // steder (issue #63). Ret navnene her, ét sted, hvis rødderne nogensinde omdøbes igen.
 const FAG_ROOT = "§ FAG";
-const NOTER_ROOT = "📝 NOTER";
+const NOTER_ROOT = "✎ NOTER";
 
 // chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
 // hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
@@ -1275,7 +1275,7 @@ async function syncTaskDeadlines(tasks, token, calendarIds, eventMap) {
     const wasNew = !eventMap[eventId];
     const body = {
       status: "confirmed",
-      summary: `⏰ ${calendarName} — aflevering: ${task.TaskTitle ?? ""}`,
+      summary: `⚑ ${calendarName} — aflevering: ${task.TaskTitle ?? ""}`,
       description: [`Deadline: ${task.DeadlineDisplayTime ?? deadline}`, task.TaskUrl ?? ""].join("\n").trim(),
       start: { dateTime: start, timeZone: TIME_ZONE },
       end: { dateTime: deadline, timeZone: TIME_ZONE },
