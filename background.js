@@ -679,7 +679,11 @@ function courseDisplayName(courseName) {
 // fag:-frontmatter-feltet (courseDisplayName ovenfor), som Litteratur.base filtrerer eksakt på
 // (`fag == "Musik"`) — et symbol blandet ind der ville splitte eksisterende og nye noter i to
 // grupper i stedet for at være rent kosmetisk (issue #63).
-const FOLDER_SYMBOLS = { Musik: "♪", Religion: "♱", LivsOplysning: "⚖" };
+// LivsOplysning bruger ⚖︎ (U+2696 + U+FE0E, tekst-variationsselector) i stedet for bare ⚖ — uden
+// den render macOS/Apples emoji-font symbolet farvet, selvom Unicode-standarden angiver monokrom
+// som default presentation (bekræftet 2026-08-12). ♪/♱ har ingen emoji-variant og rammer altid
+// monokromt uden selektoren.
+const FOLDER_SYMBOLS = { Musik: "♪", Religion: "♱", LivsOplysning: "⚖︎" };
 
 function courseFolderName(courseName) {
   const display = courseDisplayName(courseName);
