@@ -717,37 +717,41 @@ function taskId(task) {
 // før JS kører, så det skal læses fra den FÆRDIGT indlæste side, ikke fra et rent HTML-fetch).
 const ASSIGNMENT_TOOL_HOST = "assignment.itslearning.com";
 
-// SSO-kæden lander ikke direkte på siden med fileListControl.initialize(...) — den går gennem en
-// signeret mellemside (fx assignment.itslearning.com/view.aspx) der selv navigerer videre til den
-// rigtige StudentView.aspx. Et enkelt "første gang tabId rammer domænet"-tjek (afprøvet 2026-08-12)
-// læser derfor ofte mellemsidens HTML, ikke den færdige. Denne venter i stedet på ro: hver
-// 'complete'-status på domænet nulstiller en kort ventetimer, så vi kun læser DOM'en efter den
-// SIDSTE interne navigation, uanset hvor mange mellemsider der er.
-function waitForTabToSettle(tabId, urlSubstring, timeoutMs, quietMs = 1500) {
+// Hele SSO-kæden (LoginSSO.aspx -> ... -> assignment.itslearning.com) foregår inde i indlejrede
+// iframes, aldrig i selve fanens topframe — bekræftet live 2026-08-12: en chrome.tabs.onUpdated-
+// baseret ventefunktion (der kun ser tab.url, altså topframen) timede ud efter 20s, selvom
+// kæde-hop-loggeren tidligere havde vist at kaldene rent faktisk skete. chrome.webRequest ser
+// derimod alle frames uanset origin, som den eksisterende diagnostik allerede beviser. Bruger
+// derfor webRequest igen, men venter på RO (ingen nyt kald i quietMs) i stedet for det første
+// kald, så vi rammer den sidste interne navigation, ikke en signeret mellemside undervejs — og
+// gemmer requestens frameId, så vi bagefter kan injicere scriptet i den RIGTIGE (indlejrede,
+// cross-origin) iframe, ikke fanens topframe, hvor JSON'en aldrig ville findes.
+function waitForFrameToSettle(tabId, urlPattern, timeoutMs, quietMs = 1500) {
   return new Promise((resolve, reject) => {
     let quietTimer = null;
+    let lastFrameId = null;
     const overallTimeout = setTimeout(() => {
       cleanup();
-      reject(new Error(`Timeout: fanen nåede aldrig en stabil side med "${urlSubstring}" inden for ${timeoutMs}ms`));
+      reject(new Error(`Timeout: intet kald matcher ${urlPattern} inden for ${timeoutMs}ms`));
     }, timeoutMs);
 
     function cleanup() {
       clearTimeout(overallTimeout);
       clearTimeout(quietTimer);
-      chrome.tabs.onUpdated.removeListener(listener);
+      chrome.webRequest.onBeforeRequest.removeListener(listener);
     }
 
-    function listener(updatedTabId, changeInfo, tab) {
-      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-      if (!tab.url || !tab.url.includes(urlSubstring)) return;
+    function listener(details) {
+      if (details.tabId !== tabId) return;
+      lastFrameId = details.frameId;
       clearTimeout(quietTimer);
       quietTimer = setTimeout(() => {
         cleanup();
-        resolve(tab.url);
+        resolve(lastFrameId);
       }, quietMs);
     }
 
-    chrome.tabs.onUpdated.addListener(listener);
+    chrome.webRequest.onBeforeRequest.addListener(listener, { urls: [urlPattern] });
   });
 }
 
@@ -775,10 +779,10 @@ async function downloadTaskAttachment(task) {
   try {
     const tab = await chrome.tabs.create({ url: task.TaskUrl, active: false });
     tabId = tab.id;
-    await waitForTabToSettle(tabId, ASSIGNMENT_TOOL_HOST, 20000);
+    const frameId = await waitForFrameToSettle(tabId, `*://${ASSIGNMENT_TOOL_HOST}/*`, 20000);
 
     const [{ result: html }] = await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, frameIds: [frameId] },
       func: () => document.documentElement.outerHTML,
     });
     const file = extractAssignmentFile(html);
