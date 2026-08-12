@@ -411,13 +411,24 @@ function extractExtension(url) {
 // løste kun via WOPI-kæden, og extractExtension() fejlede på content-URL'en alene. WOPI-
 // protokollens CheckFileInfo-endpoint (samme URL uden /contents) er en almindelig GET der
 // returnerer JSON med BaseFileName — standard WOPI, ikke itslearning-specifikt.
+// Begge grene logger, fordi fallbacken ellers er usynlig når den virker — uden log-linjen kan man
+// ikke se forskel på "fallbacken reddede filen" og "URL'en havde endelsen hele tiden", og så kan
+// #57's manglende end-to-end-test aldrig krydses af (issue #80).
 async function extractExtensionFromWopi(wopiContentsUrl) {
   const checkFileInfoUrl = wopiContentsUrl.replace(/\/contents(\?|$)/, "$1");
-  const res = await fetch(checkFileInfoUrl);
-  if (!res.ok) return "";
-  const info = await res.json();
-  const match = (info.BaseFileName ?? "").match(/\.[a-z0-9]{2,5}$/i);
-  return match ? match[0].toLowerCase() : "";
+  try {
+    const res = await fetch(checkFileInfoUrl);
+    if (!res.ok) throw new Error(`CheckFileInfo svarede ${res.status}`);
+    const { BaseFileName } = await res.json();
+    const match = (BaseFileName ?? "").match(/\.[a-z0-9]{2,5}$/i);
+    console.log(`VIAstudyWiz: WOPI CheckFileInfo → BaseFileName "${BaseFileName}", endelse "${match?.[0] ?? "(ingen)"}"`);
+    return match ? match[0].toLowerCase() : "";
+  } catch (err) {
+    // Fanget frem for at boble op: kalderens "kunne ikke udlede filendelse"-warn er en bedre
+    // besked på elementet end en rå fetch/JSON-parse-fejl, og den her linje har detaljerne.
+    console.warn(`VIAstudyWiz: WOPI CheckFileInfo fejlede (${checkFileInfoUrl}):`, err);
+    return "";
+  }
 }
 
 // Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs"). Ren dato+ugedag —
