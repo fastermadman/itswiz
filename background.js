@@ -1,3 +1,12 @@
+// Vaultens to rodmapper hedder faktisk "🎓 FAG" og "📝 NOTER" (omdøbt manuelt i Finder for at
+// gøre dem nemmere at få øje på), men var tidligere hardcodet som literal "FAG"/"NOTER" i hver
+// enkelt sti-byggende funktion. getDirectoryHandle(navn, {create:true}) opretter en NY mappe hvis
+// navnet ikke matcher præcis — uden disse konstanter ville næste kørsel altså have oprettet tomme
+// "FAG"/"NOTER"-mapper ved siden af de rigtige, og fremtidigt indhold ville splittes over to
+// steder (issue #63). Ret navnene her, ét sted, hvis rødderne nogensinde omdøbes igen.
+const FAG_ROOT = "§ FAG";
+const NOTER_ROOT = "📝 NOTER";
+
 // chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
 // hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
 // fra JS (issues.chromium.org/issues/40359474). File System Access API omgår det helt: brugeren
@@ -622,8 +631,31 @@ function simpleHash(text) {
 // pæne navn der findes er COURSE_DISPLAY_NAMES, som Valdemar allerede vedligeholder i hånden
 // til kalendersyncen. Ukendte kursuskoder (nye fag, "Hjælp", "VIAs onlinekurser") falder
 // tilbage til den rå kode i stedet for at fejle.
-function courseFolderName(courseName) {
+function courseDisplayName(courseName) {
   return COURSE_DISPLAY_NAMES[courseName] ?? courseName;
+}
+
+// Kun til vault-mappestier og Google Calendar-navne (begge er steder man navigerer visuelt hen —
+// Valdemar har omdøbt de faktiske kalendere til at matche, fx "♪ Musik"). IKKE til
+// fag:-frontmatter-feltet (courseDisplayName ovenfor), som Litteratur.base filtrerer eksakt på
+// (`fag == "Musik"`) — et symbol blandet ind der ville splitte eksisterende og nye noter i to
+// grupper i stedet for at være rent kosmetisk (issue #63).
+const FOLDER_SYMBOLS = { Musik: "♪", Religion: "♱", LivsOplysning: "⚖" };
+
+function courseFolderName(courseName) {
+  const display = courseDisplayName(courseName);
+  const symbol = FOLDER_SYMBOLS[display];
+  return symbol ? `${symbol} ${display}` : display;
+}
+
+// Samme symbol-logik som courseFolderName, men bevarer courseFolderName/COURSE_DISPLAY_NAMES'
+// oprindelige "undefined for ukendt kursus"-kontrakt — kaldere bruger `if (!calendarName)
+// continue` til at springe ukendte/ikke-mappede kurser stille over, og skal blive ved med det.
+function courseCalendarName(courseName) {
+  const display = COURSE_DISPLAY_NAMES[courseName];
+  if (!display) return undefined;
+  const symbol = FOLDER_SYMBOLS[display];
+  return symbol ? `${symbol} ${display}` : display;
 }
 
 // Fritekstfelt underviseren selv udfylder — henviser ofte til grundbogssider, ikke kun vedhæftede
@@ -646,7 +678,7 @@ function yamlBlockLines(key, text) {
 }
 
 function rawPath(courseName, weekFolder, title) {
-  return `FAG/${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
+  return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/RAW/${weekFolder}/${sanitizeFilename(title)}`;
 }
 
 // watch_viastudywiz.py navngiver MD-noten efter RAW-filens stem (Path.stem, dvs. alt før sidste
@@ -655,7 +687,7 @@ function rawPath(courseName, weekFolder, title) {
 // tilføjet oveni.
 function mdPath(courseName, weekFolder, title) {
   const stem = sanitizeFilename(title).replace(/\.[^./]+$/, "");
-  return `FAG/${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
+  return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
 }
 
 // "hentet:" i frontmatter — lokal væg-tid i samme tidszone som resten af extensionen (TIME_ZONE),
@@ -709,8 +741,11 @@ async function writePlanNotes(plans) {
     if (!plan) continue;
 
     const weekFolder = weekFolderName(plan);
-    const fag = sanitizeFilename(courseFolderName(plan.courseName ?? "ukendt-fag"));
     const courseName = plan.courseName ?? "ukendt-fag";
+    // Symbol-navnet er kun til selve mappestien — fag:-feltet nedenfor skal blive ved den rene
+    // værdi (courseDisplayName), da Litteratur.base filtrerer eksakt på den (issue #63).
+    const fag = sanitizeFilename(courseFolderName(courseName));
+    const fagField = courseDisplayName(courseName);
     // Links til MD-noten (navigations-graf), ikke RAW-filen — RAW er bytes til enheder, ikke
     // noget man klikker sig videre til fra en note (issue #26). Mappe/opgave-typer får aldrig en
     // MD-modpart, så de udelades. Link-elementer nævnes som ren tekst (titlen er allerede synlig
@@ -741,7 +776,7 @@ async function writePlanNotes(plans) {
 
     const frontmatter = [
       "---",
-      `fag: ${fag}`,
+      `fag: ${fagField}`,
       `uge: ${weekFolderBase(plan)}`,
       ...(topic ? [`emne: "${topic}"`] : []),
       `dato: ${(plan.start ?? "").slice(0, 10)}`,
@@ -751,12 +786,12 @@ async function writePlanNotes(plans) {
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
-      ...(literature ? yamlBlockLines("litteratur", `📖 ${literature}`) : ["litteratur: false"]),
+      ...(literature ? yamlBlockLines("litteratur", `▤ ${literature}`) : ["litteratur: false"]),
       "---",
       "",
     ].join("\n");
 
-    const path = `FAG/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
+    const path = `${FAG_ROOT}/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
     try {
       const existingText = await readFromVault(path);
       const existingBody = existingText ? existingText.replace(/^---\n[\s\S]*?\n---\n\n?/, "") : null;
@@ -871,9 +906,9 @@ async function downloadTaskAttachment(task) {
     // Samme RAW/MD-gren som FAG/ (10-filsystem-design-raw-md.md) — watch_viastudywiz.py er ikke
     // bundet til FAG/, den konverterer enhver RAW/-gren i vaulten. Noten linker til MD (læselaget),
     // ikke RAW (bytes), samme regel som lektionsplan-noternes materialer-liste (issue #26).
-    await writeToVault(`NOTER/OPGAVER/${folder}/RAW/${rawName}`, file.url); // VAULT_PERMISSION propagerer til kalderen
+    await writeToVault(`${NOTER_ROOT}/OPGAVER/${folder}/RAW/${rawName}`, file.url); // VAULT_PERMISSION propagerer til kalderen
     runFilesDownloaded++;
-    return `NOTER/OPGAVER/${folder}/MD/${stem}.md`;
+    return `${NOTER_ROOT}/OPGAVER/${folder}/MD/${stem}.md`;
   } catch (err) {
     if (err.code === "VAULT_PERMISSION") throw err; // propagerer til kalderen, samme regel som ellers
     console.warn(`VIAstudyWiz: ingen vedhæftning fundet for opgaven "${task.TaskTitle}":`, err);
@@ -896,7 +931,9 @@ async function writeTaskNotes(tasks) {
     if (written.has(noteId)) continue;
 
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
-    const fag = sanitizeFilename(courseFolderName(task.CourseTitle ?? "ukendt-fag"));
+    // OPGAVER/<opgave>/ har ingen fag-undermappe (issue #37 §2) — fag bruges kun i frontmatter
+    // her, så det rene navn (courseDisplayName), ikke symbol-varianten (courseFolderName).
+    const fag = courseDisplayName(task.CourseTitle ?? "ukendt-fag");
 
     let attachmentPath = null;
     try {
@@ -926,7 +963,7 @@ async function writeTaskNotes(tasks) {
       "",
     ].join("\n");
 
-    const path = `NOTER/OPGAVER/${folder}/${folder}.md`;
+    const path = `${NOTER_ROOT}/OPGAVER/${folder}/${folder}.md`;
     try {
       await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
       await markDownloaded(noteId);
@@ -1148,7 +1185,7 @@ function buildEventDescription(plan) {
   const lines = [plan.title ?? "", "", stripHtml(plan.description)];
   const literature = planLiteratureText(plan);
   if (literature) {
-    lines.push("", "📖 Tilhørende litteratur:", literature);
+    lines.push("", "▤ Tilhørende litteratur:", literature);
   }
   const elements = (plan.elements ?? []).map((el) => `- ${el.title}`);
   if (elements.length > 0) {
@@ -1220,7 +1257,7 @@ const TASK_EVENT_DURATION_MINUTES = 30;
 
 async function syncTaskDeadlines(tasks, token, calendarIds, eventMap) {
   for (const task of tasks) {
-    const calendarName = COURSE_DISPLAY_NAMES[task.CourseTitle];
+    const calendarName = courseCalendarName(task.CourseTitle);
     if (!calendarName) continue; // ukendt/ikke-mappet fag, samme regel som lektions-events
     const calendarId = calendarIds[calendarName];
     if (!calendarId) {
@@ -1265,7 +1302,7 @@ async function syncCalendar(result) {
   );
 
   for (const event of result.events) {
-    const calendarName = COURSE_DISPLAY_NAMES[event.title];
+    const calendarName = courseCalendarName(event.title);
     if (!calendarName) continue; // ukendt/afsluttet/ikke-mappet fag, spring over
 
     const calendarId = calendarIds[calendarName];
@@ -1300,9 +1337,9 @@ async function syncCalendar(result) {
     // (weekFolderName ovenfor) — sat forrest i titlen så det er synligt uden at åbne eventet.
     const topic = plan?.topic?.name?.trim();
     const summaryTitle = topic ? `${topic} — ${titlePart}` : titlePart;
-    // 📖 gør det synligt i kalenderoverblikket at der er noget at læse forud for lektionen, uden
+    // ▤ gør det synligt i kalenderoverblikket at der er noget at læse forud for lektionen, uden
     // at fylde hele teksten ind i titlen — den fulde tekst står i beskrivelsen (buildEventDescription).
-    const literaturePrefix = plan && planLiteratureText(plan) ? "📖 " : "";
+    const literaturePrefix = plan && planLiteratureText(plan) ? "▤ " : "";
     const body = {
       status: "confirmed", // PATCH på et manuelt slettet (= "cancelled") event genopliver det ikke
       // automatisk medmindre status eksplicit sættes tilbage - Google bevarer ellers feltet.
