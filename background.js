@@ -870,12 +870,16 @@ async function writePlanNotes(plans) {
     // noget man klikker sig videre til fra en note (issue #26). Mappe/opgave-typer får aldrig en
     // MD-modpart, så de udelades. Link-elementer nævnes som ren tekst (titlen er allerede synlig
     // her) i stedet for en note — automatisk indholds-udtræk blev forsøgt og droppet igen, se #20.
+    // Suffikset til itslearning (issue #73) er en nødvendig vej tilbage til ORIGINALEN, ikke bare
+    // en genvej: viser et fil-element sig at være en skabelon man selv skal skrive i og aflevere
+    // (samme klasse som Forberedelse-elementernes SharePoint-links, issue #59), er MinerU-
+    // renderingen ubrugelig til det, og RAW-filen findes kun på disken, ikke i noten.
     const materials = (plan.elements ?? [])
       .filter((el) => el.typeName === "Link" || !NON_FILE_TYPE_NAMES.has(el.typeName))
       .map((el) =>
         el.typeName === "Link"
           ? `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`
-          : `- [[${mdPath(courseName, weekFolder, el.title)}]]`
+          : `- [[${mdPath(courseName, weekFolder, el.title)}]] · [itslearning](https://via.itslearning.com${el.url})`
       );
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
@@ -918,6 +922,8 @@ async function writePlanNotes(plans) {
     // genskrivning af alle lektionsplan-noter når skemaet ændrer sig, og koster ingenting bagefter.
     // Bump den når frontmatter får nye felter. (Valdemars eget indhold uden for AUTO-markørerne
     // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
+    // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
+    // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
     const FRONTMATTER_VERSION = 2; // 2 = forberedelse-feltet, issue #59
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (hashes[noteId] === currentHash) continue;
