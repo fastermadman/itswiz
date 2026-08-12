@@ -715,7 +715,41 @@ function taskId(task) {
 // resolveOfficeDownloadUrl), og læs filens rigtige download-URL ud af siden bagefter — den ligger som
 // klartekst i sidens fileListControl.initialize([...])-konfiguration (Knockout, ikke server-rendret
 // før JS kører, så det skal læses fra den FÆRDIGT indlæste side, ikke fra et rent HTML-fetch).
-const ASSIGNMENT_TOOL_PATTERN = "*://assignment.itslearning.com/*";
+const ASSIGNMENT_TOOL_HOST = "assignment.itslearning.com";
+
+// SSO-kæden lander ikke direkte på siden med fileListControl.initialize(...) — den går gennem en
+// signeret mellemside (fx assignment.itslearning.com/view.aspx) der selv navigerer videre til den
+// rigtige StudentView.aspx. Et enkelt "første gang tabId rammer domænet"-tjek (afprøvet 2026-08-12)
+// læser derfor ofte mellemsidens HTML, ikke den færdige. Denne venter i stedet på ro: hver
+// 'complete'-status på domænet nulstiller en kort ventetimer, så vi kun læser DOM'en efter den
+// SIDSTE interne navigation, uanset hvor mange mellemsider der er.
+function waitForTabToSettle(tabId, urlSubstring, timeoutMs, quietMs = 1500) {
+  return new Promise((resolve, reject) => {
+    let quietTimer = null;
+    const overallTimeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timeout: fanen nåede aldrig en stabil side med "${urlSubstring}" inden for ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    function cleanup() {
+      clearTimeout(overallTimeout);
+      clearTimeout(quietTimer);
+      chrome.tabs.onUpdated.removeListener(listener);
+    }
+
+    function listener(updatedTabId, changeInfo, tab) {
+      if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+      if (!tab.url || !tab.url.includes(urlSubstring)) return;
+      clearTimeout(quietTimer);
+      quietTimer = setTimeout(() => {
+        cleanup();
+        resolve(tab.url);
+      }, quietMs);
+    }
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
 
 // Balanceret parentes-scan i stedet for en grådig regex — "DownloadEndpointUrl" og
 // "signedFileRepoId" er flade strengfelter og trygge at matche direkte, men selve filens navn kan i
@@ -739,17 +773,21 @@ async function downloadTaskAttachment(task) {
 
   let tabId = null;
   try {
-    const landedUrlPromise = waitForRequest(ASSIGNMENT_TOOL_PATTERN, 20000);
     const tab = await chrome.tabs.create({ url: task.TaskUrl, active: false });
     tabId = tab.id;
-    await landedUrlPromise; // bekræfter SSO-handshaket er gennemført og cookien sat
+    await waitForTabToSettle(tabId, ASSIGNMENT_TOOL_HOST, 20000);
 
     const [{ result: html }] = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => document.documentElement.outerHTML,
     });
     const file = extractAssignmentFile(html);
-    if (!file) return null;
+    if (!file) {
+      console.warn(
+        `VIAstudyWiz: siden landede for opgaven "${task.TaskTitle}", men fileListControl-data blev ikke fundet i HTML'en`
+      );
+      return null;
+    }
 
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
     const rawName = sanitizeFilename(file.name);
