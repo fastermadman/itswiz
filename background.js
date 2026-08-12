@@ -54,11 +54,20 @@ let runErrorCount = 0;
 let runErrorMessages = [];
 let runFilesDownloaded = 0;
 let runEventsSynced = 0;
+// Korte, menneskelæsbare linjer om HVAD der ændrede sig i eksisterende lektionsplan-noter (issue
+// #74) — adskilt fra runFilesDownloaded/runEventsSynced, som kun tæller. Fyldes af writePlanNotes.
+let runChangedNotes = [];
 
 function recordError(message) {
   runErrorCount++;
   runErrorMessages.push(message);
 }
+
+// Notifikationens "settings"-tandhjul er macOS/Chromes egen kontrol af om appen må vise
+// notifikationer — ikke noget extensionen tegner eller kan reagere på et klik fra, og det leder
+// ingen steder hen mod options.html (issue #74). Denne knap er den rigtige vej: et rigtigt
+// notifications-API-buttons-array, fanget af onButtonClicked nederst i filen.
+const OPEN_SETTINGS_BUTTON = { title: "Åbn indstillinger" };
 
 // Badge't viser kun et antal — uden dette skulle man åbne service worker-konsollen for
 // overhovedet at se hvad der fejlede, og et klik på extension-ikonet trigger jo bare en ny
@@ -75,18 +84,31 @@ function notifyErrorsIfAny() {
     title: `VIAstudyWiz — ${runErrorCount} element(er) fejlede`,
     message,
     requireInteraction: true,
+    // VAULT_PERMISSION-fejl er den hyppigste årsag til at elementer fejler (README: tilladelsen
+    // overlever ikke pålideligt en genstart) — "åbn indstillinger og vælg vault-mappen igen" er
+    // allerede den dokumenterede løsning, så knappen dækker det almindelige tilfælde selvom ikke
+    // alle fejl reelt er tilladelses-relaterede.
+    buttons: [OPEN_SETTINGS_BUTTON],
   });
 }
 
-// Vises kun hvis der faktisk skete noget (nye filer/events) — ellers ville den daglige alarm
-// give en notifikation hver dag selv i det normale tilfælde, hvor der ikke er noget nyt.
+// Vises kun hvis der faktisk skete noget (nye filer/events/ændret indhold) — ellers ville den
+// daglige alarm give en notifikation hver dag selv i det normale tilfælde, hvor der ikke er noget
+// nyt. Ændringslisten (issue #74) er kappet ligesom fejllisten ovenfor, af samme grund: mange
+// samtidigt ændrede lektioner (fx en underviser der retter en hel uges planer) må ikke give en
+// notifikation der vokser ubegrænset.
 function notifySuccessIfNoteworthy() {
-  if (runFilesDownloaded === 0 && runEventsSynced === 0) return;
+  if (runFilesDownloaded === 0 && runEventsSynced === 0 && runChangedNotes.length === 0) return;
+  const shown = runChangedNotes.slice(0, 5);
+  const rest = runChangedNotes.length - shown.length;
+  const changedBlock = shown.length
+    ? `\n\nÆndret:\n${shown.join("\n")}` + (rest > 0 ? `\n+${rest} note(r) mere` : "")
+    : "";
   chrome.notifications.create({
     type: "basic",
     iconUrl: chrome.runtime.getURL("icon128.png"),
     title: "VIAstudyWiz — kørsel færdig",
-    message: `${runFilesDownloaded} fil(er) hentet, ${runEventsSynced} kalender-event(s) synkroniseret.`,
+    message: `${runFilesDownloaded} fil(er) hentet, ${runEventsSynced} kalender-event(s) synkroniseret.${changedBlock}`,
   });
 }
 
@@ -292,6 +314,7 @@ async function collectAndDownload(startUnix, endUnix) {
   runErrorMessages = [];
   runFilesDownloaded = 0;
   runEventsSynced = 0;
+  runChangedNotes = [];
   const settings = await getSettings();
 
   const [tab] = await chrome.tabs.query({ url: "https://via.itslearning.com/*" });
@@ -844,6 +867,24 @@ function spliceAutoSection(existingBody, autoContent) {
   return `${autoBlock}\n\n${existingBody}`;
 }
 
+// Kort resumé af HVAD der ændrede sig i AUTO-blokken, til succes-notifikationen (issue #74) — ikke
+// en rigtig diff-algoritme, kun en linje-baseret mængdeforskel. Nok til at vise "der kom en ny
+// linje materiale/Forberedelse ind", for meget for en notifikation ville selve den fulde tekst
+// være. Returnerer null hvis der ikke er noget at sammenligne med (ny note) eller intet ændrede sig.
+// ponytail: viser kun den FØRSTE tilføjede linje, ikke alle — en fuld linje-diff er overkill for en
+// notifikation man alligevel bare klikker væk. Opgraderingsvej: en rigtig linjediff hvis én linje
+// viser sig for sparsom i praksis.
+function summarizeAutoChange(oldAutoContent, newAutoContent) {
+  if (oldAutoContent == null || oldAutoContent === newAutoContent) return null;
+  const oldLines = new Set(oldAutoContent.split("\n").map((l) => l.trim()).filter(Boolean));
+  const addedLine = newAutoContent
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l && !oldLines.has(l));
+  if (!addedLine) return "indhold fjernet eller omformuleret";
+  return addedLine.length > 80 ? `${addedLine.slice(0, 80)}…` : addedLine;
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
 // AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
@@ -956,6 +997,15 @@ async function writePlanNotes(plans) {
     try {
       const existingText = await readFromVault(path);
       const existingBody = existingText ? existingText.replace(/^---\n[\s\S]*?\n---\n\n?/, "") : null;
+      // Kun et resumé når noten reelt fandtes FØR (hashes[noteId] !== undefined) — ellers ville
+      // enhver nyoprettet note (en plan der lige kom ind i tidsvinduet) fejlagtigt blive rapporteret
+      // som "ændret", i stedet for at det bare er første gang den skrives.
+      if (hashes[noteId] !== undefined) {
+        const oldAutoMatch = existingBody?.match(AUTO_BLOCK_RE)?.[0];
+        const oldAutoContent = oldAutoMatch ? oldAutoMatch.slice(AUTO_START.length, -AUTO_END.length).trim() : null;
+        const changeSummary = summarizeAutoChange(oldAutoContent, autoContent);
+        if (changeSummary) runChangedNotes.push(`${weekFolder} (${fagField}): ${changeSummary}`);
+      }
       const note = frontmatter + spliceAutoSection(existingBody, autoContent) + "\n";
       await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
       await savePlanNoteHash(noteId, currentHash);
@@ -1590,6 +1640,14 @@ async function runCollectAndDownload() {
 }
 
 chrome.action.onClicked.addListener(runCollectAndDownload);
+
+// Fanger klik på OPEN_SETTINGS_BUTTON i fejl-notifikationen (issue #74) — buttonIndex 0, da
+// notifikationen kun har den ene knap. chrome.runtime.openOptionsPage() er den rigtige API til at
+// åbne options.html, i modsætning til macOS/Chromes eget tandhjul på notifikationen, som ikke er
+// bundet til extensionen overhovedet.
+chrome.notifications.onButtonClicked.addListener((_notificationId, buttonIndex) => {
+  if (buttonIndex === 0) chrome.runtime.openOptionsPage();
+});
 
 // Kører automatisk uden manuelt klik — kræver en åben, logget-ind via.itslearning.com-fane.
 const DAILY_ALARM = "viastudywiz-daily-fetch";
