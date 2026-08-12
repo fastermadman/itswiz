@@ -91,6 +91,31 @@ Samme mønster for retroaktiv emne-tilføjelse til ugemapper
 (`watchfolder/backfill_week_topics.py`) og frontmatter-berigelse af
 eksisterende noter (`watchfolder/enrich_existing_notes.py`).
 
+## Afleveringsopgaver
+
+Afleveringsopgaver med en reel deadline (fra
+`restapi/personal/tasklistdailyworkflow/{courseId}/v1`, ét kald pr. kursus)
+bliver til en note i `NOTER/OPGAVER/<opgave>/<opgave>.md` med `type: opgave`
+plus et kalenderevent på selve deadline-tidspunktet, adskilt fra
+lektionsplan-events. Opgaver uden deadline (sentinel `9999-12-31`) springes
+over — det er de samme "Forberedelse"-elementer der allerede står i
+lektionsplanerne. Noten skrives kun én gang (opgavemappen er dit eget
+skriveområde), mens kalendereventet opdateres hvis deadline flyttes.
+
+Opgavens vedhæftede opgavebeskrivelse (fx en PDF) forsøges også hentet.
+Filen ligger hverken i plan.elements eller i Ressourcer, kun i selve
+Afleveringsopgave-værktøjet (`assignment.itslearning.com`), som kræver sin
+egen SSO-handshake (session-cookie scopet til det domæne — en direkte
+download-URL uden handshaket giver 403). En skjult fane gennemfører derfor
+handshaket rigtigt (samme teknik som Office/WOPI-kæden), og filens rigtige
+download-URL læses ud af sidens `fileListControl.initialize(...)`-data
+bagefter. Lander i `NOTER/OPGAVER/<opgave>/RAW/`, samme RAW/MD-mønster som
+`FAG/` — watchfolderen konverterer den til `.../MD/<filnavn>.md`, og noten
+linker dertil (ikke til RAW-filen, samme regel som issue #26). Fejler blødt:
+ingen vedhæftning fundet er ikke en fejl, kun kilde-linket er så det eneste.
+Kører kun én gang pr. opgave (samme dedup som selve noten), ikke ved hver
+kørsel.
+
 ## Sikkerhed
 
 Ingen session-cookies, antiforgery-tokens eller andre secrets må committes.

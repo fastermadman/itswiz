@@ -167,9 +167,42 @@ async function collectRangeInPage(startUnix, endUnix) {
     return result;
   }
 
+  // Afleveringsopgavers deadline findes ikke i plan.elements (de Arbejdsopgave-elementer der ligger
+  // dér har ingen deadline overhovedet) — den kommer fra dette kursus-niveau-endpoint, ét kald pr.
+  // kursus, som returnerer alle opgaver for hele kurset uanset lektionsplan (issue #45,
+  // live-inspektion på tværs af alle 12 rum). Endpointet blander opgavetyper: opgaver uden reel
+  // deadline bærer sentinel-værdien 9999-12-31 og er de samme "Forberedelse"-elementer der allerede
+  // vises i lektionsplanerne — uden filteret ville Kristendomskundskab alene give 13 tomme
+  // duplikat-noter. Ét fag der fejler må ikke vælte resten af kørslen, derfor try/catch pr. kursus.
+  async function fetchTasks(courses) {
+    const tasks = [];
+    for (const course of courses) {
+      try {
+        const data = await fetchJson(`${BASE}/restapi/personal/tasklistdailyworkflow/${course.CourseId}/v1`);
+        // Svaret er grupperet i sektioner ("Afleveringsfrist senere", "Der er ikke nogen deadline",
+        // ...) — data.EntityArray er sektionerne, ikke opgaverne selv. De faktiske opgaver ligger
+        // ét niveau dybere i hver sektions TaskDailyWorkflow.EntityArray. Bekræftet live 2026-08-12
+        // mod kursus 36016 (Musik).
+        const list = (data.EntityArray ?? []).flatMap((section) => section.TaskDailyWorkflow?.EntityArray ?? []);
+        for (const task of list) {
+          if (!task.Deadline || task.Deadline.startsWith("9999")) continue;
+          // Endpointet er ikke bundet til tidsrummet som myEvents er — uden denne grænse ville
+          // hele kursets afleveringshistorik blive til noter og kalenderevents bagud i tiden.
+          // Kun nedre grænse: en deadline længere ude end daysForward er stadig relevant at kende.
+          if (new Date(task.Deadline).getTime() < startUnix * 1000) continue;
+          tasks.push(task);
+        }
+      } catch (err) {
+        console.warn(`VIAstudyWiz: kunne ikke hente opgaveliste for ${course.CourseId}:`, err);
+      }
+    }
+    return tasks;
+  }
+
   const courses = await fetchCourses();
   const courseIds = courses.map((c) => c.CourseId);
   const events = await fetchMyEvents(courseIds, startUnix, endUnix);
+  const tasks = await fetchTasks(courses);
 
   const planKeys = new Set();
   for (const event of events) {
@@ -188,6 +221,7 @@ async function collectRangeInPage(startUnix, endUnix) {
     courses,
     events: events.map((e) => ({ ...e, parsedDescription: parseDescription(e.apiDescriptionPlainText ?? "") })),
     plans,
+    tasks,
   };
 }
 
@@ -211,7 +245,7 @@ async function collectAndDownload(startUnix, endUnix) {
   });
 
   console.log(
-    `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer`
+    `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer, ${(result.tasks ?? []).length} opgaver med deadline`
   );
 
   // Kalender + filer først — så en evt. hængende gem-dialog for JSON-metadata (se nedenfor)
@@ -219,10 +253,10 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
-    const planNotesOk = await writePlanNotes(result.plans);
+    const notesOk = (await writePlanNotes(result.plans)) && (await writeTaskNotes(result.tasks ?? []));
     // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
     // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
-    const filesOk = planNotesOk && (await downloadFileElements(result.plans, tab.id));
+    const filesOk = notesOk && (await downloadFileElements(result.plans, tab.id));
     vaultPermissionMissing = !filesOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
@@ -666,6 +700,173 @@ async function writePlanNotes(plans) {
   return true;
 }
 
+// Stabilt id pr. opgave: ElementID fra TaskUrl (fx main.aspx?CourseID=36016&ElementID=4831051&...).
+// Falder tilbage til kursus+titel hvis URL'en mangler/ser anderledes ud, så dedup stadig virker.
+function taskId(task) {
+  const elementId = task.TaskUrl ? new URL(task.TaskUrl).searchParams.get("ElementID") : null;
+  return elementId ? `opgave:${elementId}` : `opgave:${task.CourseId}:${task.TaskTitle}`;
+}
+
+// Afleveringsopgavers vedhæftede opgavebeskrivelse ligger i selve Afleveringsopgave-værktøjet
+// (assignment.itslearning.com), ikke i plan.elements eller Ressourcer — nået via en cross-origin
+// SSO-handshake (LoginSSO.aspx → assignment.itslearning.com/view.aspx) der sætter en session-cookie
+// scopet til DET domæne. En direkte DownloadRedirect.ashx-URL uden den handshake giver 403 (afprøvet
+// 2026-08-12). Løsningen: lad en rigtig fane gennemføre handshaket selv (samme teknik som
+// resolveOfficeDownloadUrl), og læs filens rigtige download-URL ud af siden bagefter — den ligger som
+// klartekst i sidens fileListControl.initialize([...])-konfiguration (Knockout, ikke server-rendret
+// før JS kører, så det skal læses fra den FÆRDIGT indlæste side, ikke fra et rent HTML-fetch).
+const ASSIGNMENT_TOOL_HOST = "assignment.itslearning.com";
+
+// Hele SSO-kæden (LoginSSO.aspx -> ... -> assignment.itslearning.com) foregår inde i indlejrede
+// iframes, aldrig i selve fanens topframe — bekræftet live 2026-08-12: en chrome.tabs.onUpdated-
+// baseret ventefunktion (der kun ser tab.url, altså topframen) timede ud efter 20s, selvom
+// kæde-hop-loggeren tidligere havde vist at kaldene rent faktisk skete. chrome.webRequest ser
+// derimod alle frames uanset origin, som den eksisterende diagnostik allerede beviser. Bruger
+// derfor webRequest igen, men venter på RO (ingen nyt kald i quietMs) i stedet for det første
+// kald, så vi rammer den sidste interne navigation, ikke en signeret mellemside undervejs — og
+// gemmer requestens frameId, så vi bagefter kan injicere scriptet i den RIGTIGE (indlejrede,
+// cross-origin) iframe, ikke fanens topframe, hvor JSON'en aldrig ville findes.
+function waitForFrameToSettle(tabId, urlPattern, timeoutMs, quietMs = 1500) {
+  return new Promise((resolve, reject) => {
+    let quietTimer = null;
+    let lastFrameId = null;
+    const overallTimeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timeout: intet kald matcher ${urlPattern} inden for ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    function cleanup() {
+      clearTimeout(overallTimeout);
+      clearTimeout(quietTimer);
+      chrome.webRequest.onBeforeRequest.removeListener(listener);
+    }
+
+    function listener(details) {
+      if (details.tabId !== tabId) return;
+      lastFrameId = details.frameId;
+      clearTimeout(quietTimer);
+      quietTimer = setTimeout(() => {
+        cleanup();
+        resolve(lastFrameId);
+      }, quietMs);
+    }
+
+    chrome.webRequest.onBeforeRequest.addListener(listener, { urls: [urlPattern] });
+  });
+}
+
+// Balanceret parentes-scan i stedet for en grådig regex — "DownloadEndpointUrl" og
+// "signedFileRepoId" er flade strengfelter og trygge at matche direkte, men selve filens navn kan i
+// princippet indeholde citationstegn, så vi henter det fra samme JSON i stedet for en løsrevet regex.
+function extractAssignmentFile(html) {
+  const downloadUrlMatch = html.match(/"DownloadEndpointUrl":"([^"]+)"/);
+  const fileRepoIdMatch = html.match(/"signedFileRepoId":"([^"]+)"/);
+  const nameMatch = html.match(/"Name":"((?:[^"\\]|\\.)*)"/);
+  if (!downloadUrlMatch || !fileRepoIdMatch || !nameMatch) return null;
+  const downloadUrl = downloadUrlMatch[1]
+    .replace(/\\u0026/g, "&")
+    .replace("{fileRepoId}", encodeURIComponent(fileRepoIdMatch[1]));
+  return {
+    name: JSON.parse(`"${nameMatch[1]}"`),
+    url: new URL(downloadUrl, "https://assignment.itslearning.com").toString(),
+  };
+}
+
+async function downloadTaskAttachment(task) {
+  if (!task.TaskUrl) return null;
+
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url: task.TaskUrl, active: false });
+    tabId = tab.id;
+    const frameId = await waitForFrameToSettle(tabId, `*://${ASSIGNMENT_TOOL_HOST}/*`, 20000);
+
+    const [{ result: html }] = await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [frameId] },
+      func: () => document.documentElement.outerHTML,
+    });
+    const file = extractAssignmentFile(html);
+    if (!file) {
+      console.warn(
+        `VIAstudyWiz: siden landede for opgaven "${task.TaskTitle}", men fileListControl-data blev ikke fundet i HTML'en`
+      );
+      return null;
+    }
+
+    const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
+    const rawName = sanitizeFilename(file.name);
+    const stem = rawName.replace(/\.[^./]+$/, "");
+    // Samme RAW/MD-gren som FAG/ (10-filsystem-design-raw-md.md) — watch_viastudywiz.py er ikke
+    // bundet til FAG/, den konverterer enhver RAW/-gren i vaulten. Noten linker til MD (læselaget),
+    // ikke RAW (bytes), samme regel som lektionsplan-noternes materialer-liste (issue #26).
+    await writeToVault(`NOTER/OPGAVER/${folder}/RAW/${rawName}`, file.url); // VAULT_PERMISSION propagerer til kalderen
+    runFilesDownloaded++;
+    return `NOTER/OPGAVER/${folder}/MD/${stem}.md`;
+  } catch (err) {
+    if (err.code === "VAULT_PERMISSION") throw err; // propagerer til kalderen, samme regel som ellers
+    console.warn(`VIAstudyWiz: ingen vedhæftning fundet for opgaven "${task.TaskTitle}":`, err);
+    return null;
+  } finally {
+    if (tabId !== null) chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+// NOTER/OPGAVER/<opgave>/ er opgavens egen mappe (kladde, uddrag, aflevering) — jf. ValdiVault
+// 12-notestruktur-egne-noter.md §2. Noten her er kun indgangen: deadline + link til itslearning.
+// Skrives én gang og aldrig igen, netop fordi mappen er Valdemars eget skriveområde — en
+// gensynkronisering må ikke overskrive det han selv har skrevet i noten (samme regel som
+// lektionsplan-noterne, af en stærkere grund).
+async function writeTaskNotes(tasks) {
+  const written = await getDownloadedIds();
+
+  for (const task of tasks) {
+    const noteId = `note:${taskId(task)}`;
+    if (written.has(noteId)) continue;
+
+    const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
+    const fag = sanitizeFilename(courseFolderName(task.CourseTitle ?? "ukendt-fag"));
+
+    let attachmentPath = null;
+    try {
+      attachmentPath = await downloadTaskAttachment(task);
+    } catch (err) {
+      console.error(`VIAstudyWiz opgave-vedhæftning-fejl (${folder}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
+      recordError(`Opgave-vedhæftning (${folder}): ${err.message}`);
+    }
+
+    const note = [
+      "---",
+      "type: opgave",
+      `fag: ${fag}`,
+      `deadline: "${toGoogleDateTime(task.Deadline).replace("T", " ")}"`,
+      ...(task.TaskUrl ? [`kilde: "${task.TaskUrl}"`] : []),
+      `hentet: "${formatNow()}"`,
+      "---",
+      "",
+      `# ${task.TaskTitle ?? folder}`,
+      "",
+      `Deadline: ${task.DeadlineDisplayTime ?? task.Deadline}`,
+      ...(task.TaskUrl ? ["", `[Åbn opgaven i itslearning](${task.TaskUrl})`] : []),
+      // Link til MD-noten, ikke RAW-filen — samme regel som lektionsplan-noternes
+      // materialer-liste (issue #26), af samme grund: MD er læselaget.
+      ...(attachmentPath ? ["", "## Opgavebeskrivelse", `- [[${attachmentPath}]]`] : []),
+      "",
+    ].join("\n");
+
+    const path = `NOTER/OPGAVER/${folder}/${folder}.md`;
+    try {
+      await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
+      await markDownloaded(noteId);
+    } catch (err) {
+      console.error(`VIAstudyWiz opgave-note-fejl (${path}):`, err);
+      if (err.code === "VAULT_PERMISSION") return false;
+      recordError(`Opgave (${folder}): ${err.message}`);
+    }
+  }
+  return true;
+}
+
 // itslearning bruger separate typeNames pr. dokumenttype for samme
 // ViewLearningToolElement-URL-mønster ("Fil", "Microsoft Word", ... — bekræftet i gemte
 // metadata-dumps), og der dukker jævnligt uforudsete varianter op alt efter hvordan
@@ -938,6 +1139,48 @@ function planHasSpecificTime(plan) {
   return durationHours < 23;
 }
 
+// Afleveringsopgaver får deres eget event på selve deadline-tidspunktet, adskilt fra
+// lektionsplan-events (issue #58). Deadline er et punkt, ikke et interval — Google kræver en
+// slutning, så eventet lægges som den sidste halve time op til deadline. Til forskel fra
+// opgave-noten opdateres eventet ved hver kørsel (upsert): flytter underviseren deadline, skal
+// kalenderen følge med.
+const TASK_EVENT_DURATION_MINUTES = 30;
+
+async function syncTaskDeadlines(tasks, token, calendarIds, eventMap) {
+  for (const task of tasks) {
+    const calendarName = COURSE_DISPLAY_NAMES[task.CourseTitle];
+    if (!calendarName) continue; // ukendt/ikke-mappet fag, samme regel som lektions-events
+    const calendarId = calendarIds[calendarName];
+    if (!calendarId) {
+      console.warn(`VIAstudyWiz: ingen Google-kalender fundet ved navn "${calendarName}"`);
+      continue;
+    }
+
+    const deadline = toGoogleDateTime(task.Deadline);
+    // Regnes som UTC begge veje ("...Z" ind, .toISOString() ud) så det er ren væg-tids-aritmetik:
+    // maskinens egen tidszone må ikke forskyde tidspunktet, timeZone-feltet nedenfor bestemmer det.
+    const start = new Date(new Date(`${deadline}Z`).getTime() - TASK_EVENT_DURATION_MINUTES * 60000)
+      .toISOString()
+      .slice(0, 19);
+    const eventId = taskId(task);
+    const wasNew = !eventMap[eventId];
+    const body = {
+      status: "confirmed",
+      summary: `⏰ ${calendarName} — aflevering: ${task.TaskTitle ?? ""}`,
+      description: [`Deadline: ${task.DeadlineDisplayTime ?? deadline}`, task.TaskUrl ?? ""].join("\n").trim(),
+      start: { dateTime: start, timeZone: TIME_ZONE },
+      end: { dateTime: deadline, timeZone: TIME_ZONE },
+    };
+    try {
+      await upsertCalendarEvent(token, calendarId, eventId, body, eventMap);
+      if (wasNew) runEventsSynced++;
+    } catch (err) {
+      console.error(`VIAstudyWiz opgave-kalender-fejl (${body.summary}):`, err);
+      recordError(`${body.summary}: ${err.message}`);
+    }
+  }
+}
+
 async function syncCalendar(result) {
   const token = await getAuthToken();
   const calendarIds = await fetchCalendarIdMap(token);
@@ -1019,6 +1262,8 @@ async function syncCalendar(result) {
       recordError(`${body.summary}: ${err.message}`);
     }
   }
+
+  await syncTaskDeadlines(result.tasks ?? [], token, calendarIds, eventMap);
 
   await saveEventMap(eventMap);
 }
