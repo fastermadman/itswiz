@@ -732,7 +732,7 @@ function courseCalendarName(courseName) {
 // style=...>...</span></p>" for et Musikforståelse-felt). stripHtml() bruges derfor altid, den
 // er et no-op på allerede rent tekst.
 function planLiteratureText(plan) {
-  const text = plan.fields?.find((f) => f.headingText?.startsWith("Tilhørende litteratur"))?.text;
+  const text = plan.fields?.find((f) => f.headingText?.includes("Litteratur"))?.text;
   return text ? stripHtml(text) || null : null;
 }
 
