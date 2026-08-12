@@ -106,6 +106,39 @@ aldrig igen — det er brugerens skriveflade.
 ét sted pr. fag i stedet for flere rødder at huske, besluttet efter
 ADHD-hensyn i issue #65).
 
+### ⚒ Forberedelse — læs-noget vs. gør-noget (issue #59)
+
+itslearnings `Arbejdsopgave`-elementer (typisk titlen "Forberedelse") bærer
+intet indhold i `plan.elements` — kun en URL til
+`/CustomActivity/CustomActivityOverview.aspx`. Den side er almindelig
+server-renderet HTML, så `collectRangeInPage` henter beskrivelsen med en ren
+`fetch` (ingen SSO-handshake, ingen skjult fane) og læser den ud af sidens ene
+`.h-userinput`-element. Indlejrede dokumenter (Google Docs m.fl.) ligger som
+iframes bag itslearnings oembed-viser og pakkes ud til rigtige links, ellers
+ville `stripHtml` fjerne dem helt.
+
+Resultatet lander **to steder med hver sit job**:
+
+- **Lektionsplan-noten** (`MD/`): `forberedelse:` i frontmatter (`false` når
+  der ikke er noget) driver `Litteratur.base`s ⚒-kolonne, og en
+  `## ⚒ Forberedelse`-sektion i AUTO-blokken har det fulde indhold med
+  klikbare markdown-links. Maskin-ejet, så underviserens rettelser følger med.
+- **Forelæsningsnote-stubben** (`NOTER/`): `- [ ] ⚒ <titel>` pr. element.
+  Skrives ved oprettelsen, og nye elementer **appendes** senere hvis
+  underviseren tilføjer noget — eksisterende linjer, og dermed dine
+  afkrydsninger, røres aldrig.
+
+Skellet læs/gør ligger i *bæreren*, ikke i indholdet: itslearning har ét
+fritekstfelt, så et "Forberedelse"-element kan sagtens indeholde ren
+litteratur. Derfor står `litteratur:` (fra planens eget felt) og
+`forberedelse:` (fra elementerne) som to uafhængige felter, med hver sit
+symbol og sin kolonne — koden gætter aldrig på hvad teksten "egentlig" er.
+
+Snitfladen til afleveringsopgaver (nedenfor) er skarp: **deadline → egen note
+i `✎ NOTER/OPGAVER/`, ingen deadline → linje i lektionens noter.** De to kan
+ikke overlappe, fordi opgave-noterne allerede filtrerer sentinel-deadlinen
+`9999-12-31` fra.
+
 ### Egne noter, Obsidian-siden
 
 `VIDEN/` (permanente noter + EMR-genererede literature-noter),

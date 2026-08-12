@@ -221,6 +221,31 @@ async function collectRangeInPage(startUnix, endUnix) {
     return tasks;
   }
 
+  // "Forberedelse" og andre Arbejdsopgave-elementer bærer INTET indhold i plan.elements — kun
+  // titel, id og en URL til CustomActivity-siden (issue #59, bekræftet mod 16 elementer på tværs af
+  // 3 fag i gemte metadata-dumps). Siden er almindelig server-renderet HTML, så en ren fetch er nok:
+  // ingen SSO-handshake, ingen skjult fane som fil-kæderne og Afleveringsopgave-værktøjet kræver
+  // (live-inspiceret 2026-08-12). Selve beskrivelsen ligger i præcis ét .h-userinput-element —
+  // valgt frem for at matche <h2>Beskrivelse</h2>, som er sprogafhængig.
+  async function fetchActivityBody(element) {
+    const res = await fetch(element.url, { credentials: "include" });
+    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    const body = doc.querySelector(".h-userinput");
+    if (!body) return null;
+    // Indlejrede dokumenter (Google Docs, Office, Padlet o.l.) ligger som iframes, og stripHtml
+    // fjerner iframes helt — linket ville altså FORSVINDE, ikke bare blive fladtrykt til tekst.
+    // itslearning pakker dem i sin egen oembed-viser med det rigtige mål i ?Url=; uden udpakningen
+    // ville linket pege på wrapperen i stedet for dokumentet. Bekræftet live på et Dansk-element.
+    for (const frame of body.querySelectorAll("iframe[src]")) {
+      const src = new URL(frame.getAttribute("src"), location.origin);
+      const link = doc.createElement("a");
+      link.setAttribute("href", src.searchParams.get("Url") ?? src.href);
+      link.textContent = "Indlejret dokument";
+      frame.replaceWith(link);
+    }
+    return body.innerHTML;
+  }
+
   const courses = await fetchCourses();
   const courseIds = courses.map((c) => c.CourseId);
   const events = await fetchMyEvents(courseIds, startUnix, endUnix);
@@ -237,6 +262,20 @@ async function collectRangeInPage(startUnix, endUnix) {
   for (const key of planKeys) {
     const [courseId, planId] = key.split(":");
     plans[key] = await fetchPlan(courseId, planId);
+  }
+
+  // Antallet af kald er allerede afgrænset af tidsvinduet (kun planer i vinduet er hentet ovenfor).
+  // Fejler ét element, står titlen der stadig — den kommer fra plan.elements — og kun teksten
+  // mangler; det må ikke vælte resten af kørslen.
+  for (const plan of Object.values(plans)) {
+    for (const element of plan?.elements ?? []) {
+      if (element.typeName !== "Arbejdsopgave") continue;
+      try {
+        element.body = await fetchActivityBody(element);
+      } catch (err) {
+        console.warn(`VIAstudyWiz: kunne ikke hente Forberedelse-indhold for "${element.title}":`, err);
+      }
+    }
   }
 
   return {
@@ -670,6 +709,18 @@ function planLiteratureText(plan) {
   return text ? stripHtml(text) || null : null;
 }
 
+// Arbejdsopgave-elementer er itslearnings "gør noget"-side af en lektion, modsat litteratur-feltets
+// "læs noget" (issue #59). Skellet ligger i BÆREREN, ikke i indholdet: et element med titlen
+// "Forberedelse" kan sagtens indeholde en ren litteraturliste (bekræftet live på et Religion-
+// element), for itslearning har ét enkelt fritekstfelt til det hele. Vi holder derfor de to kilder
+// adskilt i noten og gætter aldrig på hvad teksten "egentlig" er.
+// Titler trimmes: mindst ét element hedder "Forberedelse " med afsluttende mellemrum.
+function forberedelseElements(plan) {
+  return (plan.elements ?? [])
+    .filter((el) => el.typeName === "Arbejdsopgave")
+    .map((el) => ({ titel: (el.title ?? "Forberedelse").trim(), body: el.body, url: el.url }));
+}
+
 // YAML literal block scalar (|) — undgår escaping af anførselstegn/kolon/linjeskift i fritekst,
 // som en almindelig citeret streng ellers ville kræve. Obsidian viser det som flerlinjet tekst
 // i Properties-panelet.
@@ -696,31 +747,60 @@ function noteStubPath(courseName, weekFolder) {
   return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/NOTER/${weekFolder}/${weekFolder} note.md`;
 }
 
+// Stubbens Forberedelse-sektion (issue #59): kun titlen som afkrydsningslinje, aldrig indholdet.
+// Indholdet står i lektionsplan-notens AUTO-blok, som kilde: wikilinker til, og som genskrives når
+// underviseren retter noget. Stod teksten også her, ville Valdemars egen fil — der per design
+// aldrig overskrives — drifte væk fra itslearning uden at nogen kunne se det.
+const FORB_HEADING = "## ⚒ Forberedelse";
+
 // Skriver kun hvis filen ikke findes i forvejen — modsat lektionsplan-noten (som genskrives når
 // planen ændrer sig), er denne stub udelukkende til at give Valdemar et sted at skrive: findes
 // den allerede, er den hans, og røres aldrig igen. Et rigtigt exists-tjek (readFromVault),
 // ikke written.has(noteId) (muterbar download-log) — samme klasse beskyttelse som
 // already_converted() i watch_viastudywiz.py, se 12-notestruktur-egne-noter.md §6.
+// Eneste undtagelse er nye afkrydsningslinjer, som APPENDES (se nedenfor) — eksisterende linjer,
+// og dermed hans afkrydsninger, røres aldrig.
+// Tager hele plan'en frem for fag/uge/emne/start hver for sig: felterne udledes alligevel her, og
+// signaturen var på vej mod syv parametre da Forberedelse kom til.
 // Returnerer false hvis vault-tilladelsen mangler, ellers true (fejl på selve stubben er ikke
 // kritiske nok til at stoppe resten af kørslen — kun logges via recordError).
-async function writeLectureNoteStub(courseName, weekFolder, weekBase, topic, lektionsplanPath) {
+async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse) {
+  const courseName = plan.courseName ?? "ukendt-fag";
   const path = noteStubPath(courseName, weekFolder);
+  const labels = forberedelse.map((el) => `⚒ ${el.titel}`);
   try {
     const existing = await readFromVault(path);
-    if (existing != null) return true;
+    if (existing != null) {
+      // Underviseren kan tilføje en Forberedelse EFTER stubben blev skrevet — uden dette ville den
+      // aldrig dukke op i noten, fordi stubben kun skrives én gang.
+      // ponytail: matcher på titel, ikke element-id. To elementer med IDENTISK titel i samme
+      // lektion giver kun én linje; et id i en HTML-kommentar er opgraderingen hvis det sker.
+      const nye = labels.filter((label) => !existing.includes(label)).map((label) => `- [ ] ${label}`);
+      if (nye.length === 0) return true;
+      const opdateret = existing.includes(FORB_HEADING)
+        ? existing.replace(FORB_HEADING, [FORB_HEADING, ...nye].join("\n"))
+        : `${existing.trimEnd()}\n\n${[FORB_HEADING, ...nye].join("\n")}\n`;
+      await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(opdateret)}`);
+      return true;
+    }
+    const topic = plan.topic?.name?.trim();
     const kildeStem = lektionsplanPath.slice(lektionsplanPath.lastIndexOf("/") + 1).replace(/\.md$/, "");
-    const frontmatter = [
+    const note = [
       "---",
       "type: note",
       `fag: ${courseDisplayName(courseName)}`,
-      `uge: ${weekBase}`,
+      `uge: ${weekFolderBase(plan)}`,
       ...(topic ? [`emne: "${topic}"`] : []),
+      // uge (W33fre) sorterer alfabetisk og scrambler ugedagene — start er den universelle,
+      // kronologiske nøgle, samme lærepenge som Litteratur.base's sorteringsfejl i issue #65.
+      `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
       `kilde: "[[${kildeStem}]]"`,
       "tags: []",
       "---",
       "",
+      ...(labels.length ? [FORB_HEADING, ...labels.map((label) => `- [ ] ${label}`), ""] : []),
     ].join("\n");
-    await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(frontmatter)}`);
+    await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
     return true;
   } catch (err) {
     console.error(`VIAstudyWiz forelæsningsnote-stub-fejl (${path}):`, err);
@@ -799,25 +879,47 @@ async function writePlanNotes(plans) {
       );
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
+    const forberedelse = forberedelseElements(plan);
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
     const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
-    const stubOk = await writeLectureNoteStub(courseName, weekFolder, weekFolderBase(plan), topic, lektionsplanPath);
+    const stubOk = await writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse);
     if (!stubOk) return false;
+
+    // Ligger i AUTO-blokken, så underviserens rettelser følger med (issue #61) — i modsætning til
+    // afkrydsningerne i stubben, som er Valdemars og aldrig overskrives. Underoverskrift kun ved
+    // flere elementer: 13 af 16 hedder bare "Forberedelse", og "## ⚒ Forberedelse / ### Forberedelse"
+    // er ren støj. Link tilbage til itslearning, fordi billeder i beskrivelsen ikke overlever
+    // stripHtml (deres URL'er er kortlivede tokens fra filerepository).
+    const forberedelseLines = forberedelse.flatMap((el) => [
+      "",
+      ...(forberedelse.length > 1 ? [`### ${el.titel}`, ""] : []),
+      stripHtml(el.body, true) || "_(intet indhold hentet — åbn i itslearning)_",
+      "",
+      `[Åbn "${el.titel}" i itslearning](https://via.itslearning.com${el.url})`,
+    ]);
 
     const autoContent = [
       `# ${plan.title ?? weekFolder}`,
       "",
       stripHtml(plan.description),
       ...(materials.length ? ["", "## Materialer", ...materials] : []),
+      ...(forberedelse.length ? ["", FORB_HEADING, ...forberedelseLines] : []),
     ].join("\n");
 
     // Hashet dækker kun det maskin-genererede indhold (autoContent), ikke frontmatter — ellers
     // ville "hentet:"-tidsstemplet i frontmatter gøre hashet forskelligt ved hver kørsel uanset
     // om planen reelt ændrede sig, og hele pointen med at undgå unødvendige genskrivninger ville
     // forsvinde.
-    const currentHash = simpleHash(autoContent);
+    // Bagsiden af det: et NYT frontmatter-felt når aldrig ud til noter hvis AUTO-indholdet er
+    // uændret — en lektion uden Forberedelse ville aldrig få `forberedelse: false`, og basens
+    // `!= false`-filter ville så se et felt der slet ikke findes. Versionsmarkøren tvinger én
+    // genskrivning af alle lektionsplan-noter når skemaet ændrer sig, og koster ingenting bagefter.
+    // Bump den når frontmatter får nye felter. (Valdemars eget indhold uden for AUTO-markørerne
+    // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
+    const FRONTMATTER_VERSION = 2; // 2 = forberedelse-feltet, issue #59
+    const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (hashes[noteId] === currentHash) continue;
 
     const frontmatter = [
@@ -833,6 +935,13 @@ async function writePlanNotes(plans) {
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
       ...(literature ? yamlBlockLines("litteratur", `▥ ${literature}`) : ["litteratur: false"]),
+      // Kun titlerne, ikke indholdet: Properties-panelet og basens kolonne skal kunne læses på et
+      // blik, og selve teksten står i AUTO-sektionen nedenfor. `false` frem for at udelade feltet,
+      // så basens formel kan bruge et eksplicit `!= false` i stedet for antaget truthiness — samme
+      // mønster som `litteratur` lige ovenfor.
+      ...(forberedelse.length
+        ? yamlBlockLines("forberedelse", forberedelse.map((el) => `⚒ ${el.titel}`).join("\n"))
+        : ["forberedelse: false"]),
       "---",
       "",
     ].join("\n");
@@ -1203,10 +1312,14 @@ function toGoogleDateTime(isoString) {
 
 // itslearnings plan-beskrivelser er rig HTML (<p>, <table>, links, osv.). Service workers har
 // ikke DOMParser, så det er en regex-baseret oversættelse til læsbar ren tekst, ikke en fuld parser.
-function stripHtml(html) {
+// markdownLinks bruges kun til Forberedelse-indhold (issue #59), hvor teksten er fuld af
+// handlings-links (SharePoint-PPT'er man skal skrive i, emu.dk, indlejrede Google Docs) der skal
+// kunne klikkes i Obsidian. Kalenderbeskrivelser og plan-tekst bliver ved "tekst (url)" — Google
+// Calendar kan ikke markdown, og et [tekst](url) dér ville bare være støj.
+function stripHtml(html, markdownLinks = false) {
   if (!html) return "";
   return html
-    .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, "$2 ($1)")
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, markdownLinks ? "[$2]($1)" : "$2 ($1)")
     .replace(/<\/(p|div|tr|table|li)>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
@@ -1232,6 +1345,11 @@ function buildEventDescription(plan) {
   const literature = planLiteratureText(plan);
   if (literature) {
     lines.push("", "▥ Tilhørende litteratur:", literature);
+  }
+  // Ren tekst, ikke markdown — Google Calendar renderer ikke [tekst](url), men gør bare-URL'er
+  // klikbare af sig selv, hvilket er præcis hvad stripHtml's "tekst (url)"-form giver.
+  for (const el of forberedelseElements(plan)) {
+    lines.push("", `⚒ Forberedelse — ${el.titel}:`, stripHtml(el.body));
   }
   const elements = (plan.elements ?? []).map((el) => `- ${el.title}`);
   if (elements.length > 0) {
