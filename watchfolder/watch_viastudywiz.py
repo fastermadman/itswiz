@@ -100,7 +100,7 @@ def read_frontmatter_field(text: str, key: str) -> str | None:
 # findes, fald tilbage til at parse emnet ud af mappenavnet ellers (fx hvis kalender-sync/
 # lektionsplan-noter er slået fra i indstillingerne).
 def enrich_from_plan_note(week_dir: Path) -> dict[str, str]:
-    notes = list(week_dir.glob("* lektionsplan.md"))
+    notes = list(week_dir.glob("[PLAN] *.md"))
     if not notes:
         return {}
     text = notes[0].read_text(encoding="utf-8")

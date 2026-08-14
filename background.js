@@ -943,7 +943,7 @@ async function writePlanNotes(plans) {
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
-    const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/${weekFolder} lektionsplan.md`;
+    const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/[PLAN] ${weekFolder}.md`;
     const stubOk = await writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse);
     if (!stubOk) return false;
 
