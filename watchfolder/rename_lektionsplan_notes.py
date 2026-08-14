@@ -1,30 +1,36 @@
 #!/usr/bin/env python3
 """
-Omdøber eksisterende lektionsplan-noter fra '*lektionsplan.md' til '[PLAN] *.md'.
+Omdøber eksisterende meta-noter til [TAG]-præfiks-formatet (issue #82, #85):
+  '<uge> lektionsplan.md' -> '[PLAN] <uge>.md'  (i */MD/<uge>/)
+  '<uge> note.md'         -> '[NOTE] <uge>.md'  (i */NOTER/<uge>/)
 
-Bruges efter at background.js er opdateret til at bruge det nye format.
-Scriptet er sikkert mod doubletter — hvis [PLAN] allerede eksisterer, springer
-den over (skriver en advarsel).
+Bruges efter at background.js er opdateret til at skrive det nye format.
+Scriptet er sikkert mod doubletter — hvis målfilen allerede eksisterer, springer
+den over (skriver en advarsel) i stedet for at overskrive.
 """
 
 import sys
 from pathlib import Path
 
 VAULT_ROOT = Path.home() / "ViaVault"
-MD_DIR_NAME = "MD"
+
+# (rod-mappenavn, gammelt filnavn-suffiks, nyt præfiks)
+RENAME_RULES = [
+    ("MD", " lektionsplan.md", "[PLAN] "),
+    ("NOTER", " note.md", "[NOTE] "),
+]
 
 
-def rename_in_week_dir(week_dir: Path) -> int:
+def rename_in_week_dir(week_dir: Path, old_suffix: str, new_prefix: str) -> int:
     """Omdøber filer i én ugemappe. Returnerer antal omdøbt."""
-    old_files = list(week_dir.glob("* lektionsplan.md"))
+    old_files = list(week_dir.glob(f"*{old_suffix}"))
     if not old_files:
         return 0
 
     count = 0
     for old_file in old_files:
-        # Parse weekFolder fra mappenavnet (fx "W33fre - Intro til faget")
         week_folder = week_dir.name
-        new_name = f"[PLAN] {week_folder}.md"
+        new_name = f"{new_prefix}{week_folder}.md"
         new_file = week_dir / new_name
 
         if new_file.exists():
@@ -44,14 +50,14 @@ def main():
         return 1
 
     total = 0
-    # Find alle MD-mapper (struktur: FAG/<fagtype>/MD/<uge>/)
-    for md_dir in sorted(VAULT_ROOT.rglob(f"*/{MD_DIR_NAME}")):
-        if not md_dir.is_dir():
-            continue
+    for root_dir_name, old_suffix, new_prefix in RENAME_RULES:
+        for root_dir in sorted(VAULT_ROOT.rglob(f"*/{root_dir_name}")):
+            if not root_dir.is_dir():
+                continue
 
-        for week_dir in sorted(md_dir.iterdir()):
-            if week_dir.is_dir():
-                total += rename_in_week_dir(week_dir)
+            for week_dir in sorted(root_dir.iterdir()):
+                if week_dir.is_dir():
+                    total += rename_in_week_dir(week_dir, old_suffix, new_prefix)
 
     print(f"\n✅ Færdig: {total} filer omdøbt")
     return 0

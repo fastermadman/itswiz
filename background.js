@@ -782,7 +782,7 @@ function mdPath(courseName, weekFolder, title) {
 // § FAG/<fag>/NOTER/<uge>/ — søskende til RAW/MD, ikke en separat NOTER-rod (issue #65 §11:
 // Valdemar har ADHD og har brug for ét sted pr. fag at kigge, ikke tre rødder at huske).
 function noteStubPath(courseName, weekFolder) {
-  return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/NOTER/${weekFolder}/${weekFolder} note.md`;
+  return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/NOTER/${weekFolder}/[NOTE] ${weekFolder}.md`;
 }
 
 // Stubbens Forberedelse-sektion (issue #59): kun titlen som afkrydsningslinje, aldrig indholdet.
