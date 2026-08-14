@@ -49,6 +49,13 @@ API_BASE = "https://mineru.net/api/v4"
 SUPPORTED_SUFFIXES = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
 POLL_INTERVAL_S = 8
 POLL_TIMEOUT_S = 20 * 60
+# Uploads til MinerU's Aliyun-endpoint (Shanghai) kan lejlighedsvis være meget langsomme
+# (~13 KB/s målt, issue #84) uden at MinerU selv fejler — 5 min var for kort til en 12 MB-fil på
+# en dårlig dag. 3 forsøg med 30s mellemrum dækker forbigående routing-udsving uden at kræve
+# manuel sletning af fejlmarkøren for hvert forsøg.
+UPLOAD_TIMEOUT_S = 20 * 60
+UPLOAD_RETRIES = 3
+UPLOAD_RETRY_BACKOFF_S = 30
 
 
 # Læses først ved første API-kald (ikke ved import), så sti-logikken kan enhedstestes uden .env.
@@ -100,7 +107,9 @@ def read_frontmatter_field(text: str, key: str) -> str | None:
 # findes, fald tilbage til at parse emnet ud af mappenavnet ellers (fx hvis kalender-sync/
 # lektionsplan-noter er slået fra i indstillingerne).
 def enrich_from_plan_note(week_dir: Path) -> dict[str, str]:
-    notes = list(week_dir.glob("[PLAN] *.md"))
+    # glob() ville fortolke "[PLAN]" som en karakterklasse (ét tegn ud af P/L/A/N), ikke en
+    # bogstavelig streng — derfor startswith() på et almindeligt "*.md"-glob i stedet.
+    notes = [p for p in week_dir.glob("*.md") if p.name.startswith("[PLAN] ")]
     if not notes:
         return {}
     text = notes[0].read_text(encoding="utf-8")
@@ -208,11 +217,23 @@ def submit(doc_path: Path) -> str:
 
     batch_id = resp["data"]["batch_id"]
     upload_url = resp["data"]["file_urls"][0]
+    data = doc_path.read_bytes()
 
-    put_resp = requests.put(upload_url, data=doc_path.read_bytes(), timeout=300)
-    put_resp.raise_for_status()
-
-    return batch_id
+    for attempt in range(1, UPLOAD_RETRIES + 1):
+        try:
+            put_resp = requests.put(upload_url, data=data, timeout=UPLOAD_TIMEOUT_S)
+            put_resp.raise_for_status()
+            return batch_id
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            if attempt == UPLOAD_RETRIES:
+                raise
+            print(
+                f"Upload-forsøg {attempt}/{UPLOAD_RETRIES} for {doc_path.name} fejlede ({exc}) "
+                f"— prøver igen om {UPLOAD_RETRY_BACKOFF_S}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(UPLOAD_RETRY_BACKOFF_S)
 
 
 def poll(batch_id: str) -> dict:
@@ -336,7 +357,7 @@ def selfcheck() -> int:
             # Med lektionsplan-note ved siden af: emne + start/stop kommer derfra i stedet.
             md_dir = root / "Musik" / MD_DIR_NAME / "W34tors - Når børn synger."
             md_dir.mkdir(parents=True)
-            (md_dir / "W34tors - Når børn synger. lektionsplan.md").write_text(
+            (md_dir / "[PLAN] W34tors - Når børn synger..md").write_text(
                 '---\nemne: "Når børn synger. (fra plan)"\nstart: "2026-08-20 08:15:00"\nstop: "2026-08-20 12:00:00"\n---\n',
                 encoding="utf-8",
             )
