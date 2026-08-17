@@ -331,6 +331,12 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
     tekst-blok op i markdown'en (sekventielt fra sidste fundne position, så gentaget tekst
     tidligere i dokumentet ikke giver fejlmatch). Sider uden nogen søgbar tekst (rene
     billed-sider) springes stille over — ingen markør, ingen fejl.
+
+    Sidetallet er (typisk) trykt i footeren på selve den fysiske side, ikke i headeren —
+    derfor placeres markøren som en footer i markdown'en også: EFTER siden sit eget indhold,
+    ikke før. Konkret betyder det at en sides label indsættes ved overgangen til NÆSTE sides
+    indhold (forskudt ét trin i forhold til selve tekst-ankeret), og den sidste side får sin
+    markør sat i slutningen af dokumentet i stedet for.
     """
     try:
         blocks = json.loads(content_list_path.read_text(encoding="utf-8"))
@@ -340,6 +346,7 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
     pages = _group_blocks_by_page(blocks)
     result = full_md_text
     search_pos = 0
+    pending_label: str | None = None
 
     for page_idx in sorted(pages):
         page_blocks = pages[page_idx]
@@ -352,13 +359,15 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
         # Ankeret kan matche midt i en linje (fx lige efter "# " i en overskrift) — indsæt
         # markøren før hele linjen, ellers splittes fx overskriftens "#" fra sin egen tekst.
         line_start = result.rfind("\n", 0, idx) + 1
-        label = _printed_page_number(page_blocks) or str(page_idx + 1)
-        # Ingen "---" foran den allerførste markør — frontmatter's egen lukkende "---"
-        # (tilføjet senere i integrate_output) fungerer allerede som skilletegn der.
-        hr = "" if line_start == 0 else "---\n\n"
-        marker = f"\n\n{hr}*— side {label} —*\n\n"
-        result = result[:line_start] + marker + result[line_start:]
-        search_pos = line_start + len(marker) + (idx - line_start) + len(anchor)
+        if pending_label is not None:
+            marker = f"\n\n*— side {pending_label} —*\n\n---\n\n"
+            result = result[:line_start] + marker + result[line_start:]
+            idx += len(marker)
+        pending_label = _printed_page_number(page_blocks) or str(page_idx + 1)
+        search_pos = idx + len(anchor)
+
+    if pending_label is not None:
+        result = result.rstrip("\n") + f"\n\n*— side {pending_label} —*\n"
 
     return result
 
@@ -510,10 +519,14 @@ def selfcheck() -> int:
         assert "*— side 181 —*" in marked, marked  # trykt sidetal foretrukket
         assert "*— side 2 —*" in marked, marked  # page_idx=1 uden page_number-blok -> 1+1
         assert "*— side 4 —*" in marked, marked  # page_idx=3 uden page_number-blok -> 3+1
-        # Rækkefølge: markørerne skal stå FØR deres egen sides tekst, i stigende sideorden.
-        assert marked.index("*— side 181 —*") < marked.index("Første afsnit")
-        assert marked.index("*— side 2 —*") < marked.index("Andet afsnit")
-        assert marked.index("*— side 2 —*") < marked.index("*— side 4 —*")
+        # Footer-semantik: en sides label står EFTER dens eget indhold, ikke før — den
+        # optræder altså ved overgangen til NÆSTE sides tekst. Sidste side (4) har ingen
+        # næste side at blive forskudt til, så dens markør ender i bunden af dokumentet.
+        assert marked.index("Første afsnit") < marked.index("*— side 181 —*")
+        assert marked.index("*— side 181 —*") < marked.index("Andet afsnit")
+        assert marked.index("Andet afsnit") < marked.index("*— side 2 —*")
+        assert marked.index("*— side 2 —*") < marked.index("Fjerde PDF-side")
+        assert marked.index("Fjerde PDF-side") < marked.index("*— side 4 —*")
 
         # Manglende/korrupt content_list.json må aldrig vælte konverteringen — bare uændret markdown.
         missing = root / "does-not-exist.json"
