@@ -189,6 +189,40 @@ async function collectRangeInPage(startUnix, endUnix) {
     return fetchJson(url);
   }
 
+  // itslearning kan have en plan der aldrig får et event.PlanIds-link (issue #92, live-verificeret
+  // 2026-08-17: en Musik-lektion med reelt indhold i Planner havde intet linket kalender-event —
+  // det ene event i vinduet var et generisk lokale-bookings-event for en helt anden tidsblok).
+  // plans/current/v1 lister planer direkte pr. fag, uafhængigt af myEvents — bruges HER kun til at
+  // finde planId'er der mangler i planKeys nedenfor. Selve plan-indholdet hentes stadig via
+  // fetchPlan ovenfor (samme /v2-endpoint som alt andet), så resten af koden ikke skal kende to
+  // forskellige plan-objektformer.
+  async function fetchCoursePlansPage(courseId, pageIndex, pageSize) {
+    const url = `${BASE}/restapi/personal/course/${courseId}/plans/current/v1?PageIndex=${pageIndex}&PageSize=${pageSize}&ChildId=0`;
+    return fetchJson(url);
+  }
+
+  // Kappet til 5 sider (250 planer) som sikkerhed mod et kursus med usædvanligt mange planer —
+  // ikke observeret i praksis (20 planer dækkede ~6 uger frem for Musik), men bedre en for lav grænse
+  // for daysForward end en uendelig løkke. Stopper tidligere hvis en side kommer tilbage kortere end
+  // pageSize (sidste side) eller tom.
+  const ORPHAN_PLAN_PAGE_SIZE = 50;
+  const MAX_ORPHAN_PLAN_PAGES = 5;
+
+  async function fetchOrphanPlanCandidateIds(courseId) {
+    const ids = [];
+    for (let pageIndex = 0; pageIndex < MAX_ORPHAN_PLAN_PAGES; pageIndex++) {
+      const page = await fetchCoursePlansPage(courseId, pageIndex, ORPHAN_PLAN_PAGE_SIZE);
+      const entries = page?.entityArray ?? [];
+      if (entries.length === 0) break;
+      for (const entry of entries) {
+        const startMs = new Date(entry.start).getTime();
+        if (startMs >= startUnix * 1000 && startMs <= endUnix * 1000) ids.push(entry.id);
+      }
+      if (entries.length < ORPHAN_PLAN_PAGE_SIZE) break;
+    }
+    return ids;
+  }
+
   // apiDescriptionPlainText har faste labels ("Lokale/Room:" osv.), ikke sprogafhængige.
   function parseDescription(text) {
     const labels = {
@@ -286,6 +320,24 @@ async function collectRangeInPage(startUnix, endUnix) {
     plans[key] = await fetchPlan(courseId, planId);
   }
 
+  // Forældreløse planer (issue #92): findes i Planner, men uden noget linket kalender-event —
+  // planKeys ovenfor ser dem derfor aldrig, uanset hvor mange gange kørslen gentages. Ét fags
+  // fejl (kursus lukket, midlertidigt utilgængeligt) må ikke vælte resten af kørslen, samme
+  // mønster som fetchTasks ovenfor.
+  const orphanPlans = {};
+  for (const courseId of courseIds) {
+    try {
+      const candidateIds = await fetchOrphanPlanCandidateIds(courseId);
+      for (const planId of candidateIds) {
+        const key = `${courseId}:${planId}`;
+        if (planKeys.has(key)) continue; // allerede dækket via et kalender-event
+        orphanPlans[key] = await fetchPlan(courseId, planId);
+      }
+    } catch (err) {
+      console.warn(`VIAstudyWiz: kunne ikke hente forældreløse planer for kursus ${courseId}:`, err);
+    }
+  }
+
   // Antallet af kald er allerede afgrænset af tidsvinduet (kun planer i vinduet er hentet ovenfor).
   // Fejler ét element, står titlen der stadig — den kommer fra plan.elements — og kun teksten
   // mangler; det må ikke vælte resten af kørslen.
@@ -304,6 +356,7 @@ async function collectRangeInPage(startUnix, endUnix) {
     courses,
     events: events.map((e) => ({ ...e, parsedDescription: parseDescription(e.apiDescriptionPlainText ?? "") })),
     plans,
+    orphanPlans,
     tasks,
   };
 }
@@ -1601,6 +1654,56 @@ async function syncCalendar(result) {
       const created = await upsertCalendarEvent(token, calendarId, event.id, body, eventMap);
       console.log(
         `VIAstudyWiz: "${body.summary}" -> kalender-id ${calendarId}, event-link ${created.htmlLink}`
+      );
+      if (wasNew) runEventsSynced++;
+    } catch (err) {
+      console.error(`VIAstudyWiz kalender-fejl (${body.summary}):`, err);
+      recordError(`${body.summary}: ${err.message}`);
+    }
+  }
+
+  // Forældreløse planer (issue #92): ingen kalender-event at læse tid/lokale fra, kun selve planen.
+  // Egen nøgle-namespace ("plan:courseId:planId") så den aldrig kan kollidere med et event.id — hvis
+  // itslearning senere alligevel linker planen til et rigtigt event, får den to kalender-indgange
+  // indtil den ene ryddes op i hånden. Sjældent, selv-synligt (dublet, ikke tabt info), accepteret.
+  for (const [planKey, plan] of Object.entries(result.orphanPlans ?? {})) {
+    if (!plan) continue;
+
+    const calendarName = courseCalendarName(plan.courseName);
+    if (!calendarName) continue; // ukendt/ikke-mappet fag, samme regel som resten af filen
+
+    const calendarId = calendarIds[calendarName];
+    if (!calendarId) {
+      const message = `Ingen Google-kalender fundet ved navn "${calendarName}" (forældreløs plan)`;
+      console.warn(`VIAstudyWiz: ${message}`);
+      recordError(message);
+      continue;
+    }
+
+    // Ingen "ingen specifik tid angivet"-fallback her (til forskel fra hoved-loopet ovenfor) —
+    // der er intet event.start/event.end at falde tilbage til, det er jo netop pointen med
+    // forældreløse planer. En plan uden specifik tid ville give et misvisende heldags-event.
+    if (!planHasSpecificTime(plan)) continue;
+
+    const eventKey = `plan:${planKey}`;
+    const wasNew = !eventMap[eventKey];
+
+    const titlePart = stripWeekdayPrefix(plan.title) || plan.title;
+    const topic = plan.topic?.name?.trim();
+    const summaryTitle = topic ? `${topic} — ${titlePart}` : titlePart;
+    const literaturePrefix = planLiteratureText(plan) ? "▥ " : "";
+    const body = {
+      status: "confirmed",
+      summary: `${literaturePrefix}${calendarName} — ${summaryTitle}`,
+      description: buildEventDescription(plan),
+      start: { dateTime: toGoogleDateTime(plan.start), timeZone: TIME_ZONE },
+      end: { dateTime: toGoogleDateTime(plan.stop), timeZone: TIME_ZONE },
+    };
+
+    try {
+      const created = await upsertCalendarEvent(token, calendarId, eventKey, body, eventMap);
+      console.log(
+        `VIAstudyWiz: [forældreløs plan] "${body.summary}" -> kalender-id ${calendarId}, event-link ${created.htmlLink}`
       );
       if (wasNew) runEventsSynced++;
     } catch (err) {
