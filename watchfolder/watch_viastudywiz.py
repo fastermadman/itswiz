@@ -353,7 +353,10 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
         # markøren før hele linjen, ellers splittes fx overskriftens "#" fra sin egen tekst.
         line_start = result.rfind("\n", 0, idx) + 1
         label = _printed_page_number(page_blocks) or str(page_idx + 1)
-        marker = f"\n\n*— side {label} —*\n\n"
+        # Ingen "---" foran den allerførste markør — frontmatter's egen lukkende "---"
+        # (tilføjet senere i integrate_output) fungerer allerede som skilletegn der.
+        hr = "" if line_start == 0 else "---\n\n"
+        marker = f"\n\n{hr}*— side {label} —*\n\n"
         result = result[:line_start] + marker + result[line_start:]
         search_pos = line_start + len(marker) + (idx - line_start) + len(anchor)
 
