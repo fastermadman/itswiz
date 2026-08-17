@@ -1498,7 +1498,11 @@ async function syncTaskDeadlines(tasks, token, calendarIds, eventMap) {
     if (!calendarName) continue; // ukendt/ikke-mappet fag, samme regel som lektions-events
     const calendarId = calendarIds[calendarName];
     if (!calendarId) {
-      console.warn(`VIAstudyWiz: ingen Google-kalender fundet ved navn "${calendarName}"`);
+      // Se samme fejlhåndtering i syncCalendar() nedenfor — faget er kendt/mappet, men selve
+      // Google-kalenderen mangler. Ikke forventet, derfor recordError (ikke kun console.warn).
+      const message = `Ingen Google-kalender fundet ved navn "${calendarName}"`;
+      console.warn(`VIAstudyWiz: ${message}`);
+      recordError(message);
       continue;
     }
 
@@ -1544,7 +1548,14 @@ async function syncCalendar(result) {
 
     const calendarId = calendarIds[calendarName];
     if (!calendarId) {
-      console.warn(`VIAstudyWiz: ingen Google-kalender fundet ved navn "${calendarName}"`);
+      // I modsætning til !calendarName ovenfor er dette IKKE forventet — faget er kendt/mappet,
+      // men selve Google-kalenderen mangler (omdøbt, slettet, OAuth-scope). Uden recordError her
+      // forsvinder det i console.warn, og eventet forbliver stille tomt i Google Calendar uden
+      // nogen advarsel til brugeren (fundet 2026-08-17: materialer downloadet korrekt, kalender-
+      // event tomt, ingen notifikation).
+      const message = `Ingen Google-kalender fundet ved navn "${calendarName}"`;
+      console.warn(`VIAstudyWiz: ${message}`);
+      recordError(message);
       continue;
     }
 
