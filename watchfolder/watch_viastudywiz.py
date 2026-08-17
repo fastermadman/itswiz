@@ -267,12 +267,45 @@ def _group_blocks_by_page(blocks: list[dict]) -> dict[int, list[dict]]:
 
 
 def _printed_page_number(page_blocks: list[dict]) -> str | None:
+    # Nogle scanninger har to fysiske bogsider pr. PDF-side (opslag/dobbeltside-scan) — så flere
+    # page_number-blokke på samme page_idx, i vilkårlig rækkefølge (observeret: højeste tal først).
+    # Live-verificeret 2026-08-17 mod "Materialitet I Fibiger & Jensen Andre verdener": page_idx=0
+    # gav både "191" og "190". At tage kun den første ville stille tabe den anden.
+    numbers = []
+    other_texts = []
     for block in page_blocks:
-        if block.get("type") == "page_number":
-            text = (block.get("text") or "").strip()
-            if text:
-                return text
-    return None
+        if block.get("type") != "page_number":
+            continue
+        text = (block.get("text") or "").strip()
+        if not text:
+            continue
+        if text.isdigit():
+            numbers.append(int(text))
+        else:
+            other_texts.append(text)
+    if numbers:
+        numbers = sorted(set(numbers))
+        return f"{numbers[0]}–{numbers[-1]}" if len(numbers) > 1 else str(numbers[0])
+    return other_texts[0] if other_texts else None
+
+
+# Løbende sidehoved/-fod (fx kapitelnavn, gentaget identisk på hver side) er ikke støj men
+# dokument-metadata — live-verificeret 2026-08-17: "Kap. 8. Materialitet" stod ordret i både
+# header- og footer-blokke på 10-11 af 11 sider i "Materialitet I Fibiger & Jensen Andre verdener".
+# Kræver flertal for at undgå at en enkeltstående afvigelse (fx en fejlscannet side) bliver taget
+# som dokumentets faste overskrift.
+def _extract_running_header(blocks: list[dict]) -> str | None:
+    from collections import Counter
+
+    texts = [
+        (b.get("text") or "").strip()
+        for b in blocks
+        if b.get("type") in ("header", "footer") and (b.get("text") or "").strip()
+    ]
+    if not texts:
+        return None
+    text, count = Counter(texts).most_common(1)[0]
+    return text if count >= len(texts) / 2 else None
 
 
 # 40 tegn er et kompromis: langt nok til at være entydigt i de fleste dokumenter, kort nok at
@@ -345,11 +378,18 @@ def integrate_output(doc_path: Path, zip_url: str) -> None:
         images_dir = tmp_dir / "images"
 
         md_text = full_md.read_text(encoding="utf-8")
+        running_header = None
         content_list_matches = list(tmp_dir.glob("*_content_list.json"))
         if content_list_matches:
             md_text = insert_page_markers(md_text, content_list_matches[0])
+            try:
+                blocks = json.loads(content_list_matches[0].read_text(encoding="utf-8"))
+                running_header = _extract_running_header(blocks)
+            except (json.JSONDecodeError, OSError):
+                pass
 
-        text = frontmatter(doc_path) + to_wikilinks(md_text)
+        extra_fm = f'sektion: "{running_header}"\n' if running_header else ""
+        text = frontmatter(doc_path, extra=extra_fm) + to_wikilinks(md_text)
         dest_md.write_text(text, encoding="utf-8")
 
         if images_dir.exists():
@@ -472,6 +512,26 @@ def selfcheck() -> int:
         # Manglende/korrupt content_list.json må aldrig vælte konverteringen — bare uændret markdown.
         missing = root / "does-not-exist.json"
         assert insert_page_markers(md, missing) == md
+
+        # Dobbeltside-scanning: to page_number-blokke på samme page_idx (opslag), vilkårlig
+        # rækkefølge i JSON'en — skal give en sorteret range, ikke bare den første fundne.
+        spread_page = [
+            {"type": "page_number", "page_idx": 0, "text": "191"},
+            {"type": "page_number", "page_idx": 0, "text": "190"},
+        ]
+        assert _printed_page_number(spread_page) == "190–191"
+        assert _printed_page_number([{"type": "page_number", "page_idx": 0, "text": "47"}]) == "47"
+        assert _printed_page_number([{"type": "text", "page_idx": 0, "text": "ingen sidetal her"}]) is None
+
+        # Løbende sidehoved/-fod: konsistent gentaget tekst (flertal) bliver til sektions-metadata,
+        # en enkeltstående afvigelse (fejlscannet side) må ikke fejlagtigt tages som overskrift.
+        consistent_header = [{"type": "header", "page_idx": i, "text": "Kap. 8. Materialitet"} for i in range(5)]
+        assert _extract_running_header(consistent_header) == "Kap. 8. Materialitet"
+
+        inconsistent = [{"type": "header", "page_idx": i, "text": f"tilfældig tekst {i}"} for i in range(5)]
+        assert _extract_running_header(inconsistent) is None
+
+        assert _extract_running_header([]) is None
 
     print("selfcheck ok")
     return 0
