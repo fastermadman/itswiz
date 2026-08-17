@@ -22,6 +22,7 @@ Kræver MINERU_API_TOKEN i en .env-fil ved siden af dette script
 """
 
 import hashlib
+import json
 import re
 import shutil
 import sys
@@ -249,6 +250,80 @@ def poll(batch_id: str) -> dict:
     raise TimeoutError(f"Timeout efter {POLL_TIMEOUT_S}s")
 
 
+# MinerU's content_list.json indeholder page_idx (0-indekseret PDF-position) på hver blok, men det
+# ender aldrig i full.md — kun full.md + images/ beholdes i dag (se docstring øverst). Til
+# citat/henvisningsbrug er PDF-position alene ofte forkert: mange af Valdemars PDF'er er scannede
+# udpluk af bøger (fx "Ubbesen Klasseledelse i og med musik s181-199.pdf"), hvor bogens egen trykte
+# sidetal ikke starter ved 1. MinerU kan selv genkende det trykte sidetal som en "page_number"-blok
+# (typisk header/footer-tekst) — den foretrækkes når den findes, PDF-positionen er fallback.
+def _group_blocks_by_page(blocks: list[dict]) -> dict[int, list[dict]]:
+    pages: dict[int, list[dict]] = {}
+    for block in blocks:
+        page_idx = block.get("page_idx")
+        if page_idx is None:
+            continue
+        pages.setdefault(page_idx, []).append(block)
+    return pages
+
+
+def _printed_page_number(page_blocks: list[dict]) -> str | None:
+    for block in page_blocks:
+        if block.get("type") == "page_number":
+            text = (block.get("text") or "").strip()
+            if text:
+                return text
+    return None
+
+
+# 40 tegn er et kompromis: langt nok til at være entydigt i de fleste dokumenter, kort nok at
+# markdown-escaping (fx et **fed**-ord midt i ankeret) sjældent når at afvige fra rå JSON-teksten.
+ANCHOR_LENGTH = 40
+
+
+def _first_anchor_text(page_blocks: list[dict]) -> str | None:
+    skip_types = {"page_number", "header", "footer", "aside_text"}
+    for block in page_blocks:
+        if block.get("type") in skip_types:
+            continue
+        text = (block.get("text") or "").strip()
+        if text:
+            return text[:ANCHOR_LENGTH]
+    return None
+
+
+def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
+    """Indsætter sidemarkører i markdown ud fra MinerU's content_list.json.
+
+    Best-effort tekst-ankring, ikke garanteret præcis: for hver side søges dens første
+    tekst-blok op i markdown'en (sekventielt fra sidste fundne position, så gentaget tekst
+    tidligere i dokumentet ikke giver fejlmatch). Sider uden nogen søgbar tekst (rene
+    billed-sider) springes stille over — ingen markør, ingen fejl.
+    """
+    try:
+        blocks = json.loads(content_list_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return full_md_text
+
+    pages = _group_blocks_by_page(blocks)
+    result = full_md_text
+    search_pos = 0
+
+    for page_idx in sorted(pages):
+        page_blocks = pages[page_idx]
+        anchor = _first_anchor_text(page_blocks)
+        if not anchor:
+            continue
+        idx = result.find(anchor, search_pos)
+        if idx == -1:
+            continue
+        label = _printed_page_number(page_blocks) or str(page_idx + 1)
+        marker = f"\n\n*— side {label} —*\n\n"
+        result = result[:idx] + marker + result[idx:]
+        search_pos = idx + len(marker) + len(anchor)
+
+    return result
+
+
 def integrate_output(doc_path: Path, zip_url: str) -> None:
     dest_md, dest_images = md_targets(doc_path)
     dest_md.parent.mkdir(parents=True, exist_ok=True)
@@ -269,7 +344,12 @@ def integrate_output(doc_path: Path, zip_url: str) -> None:
         full_md = tmp_dir / "full.md"
         images_dir = tmp_dir / "images"
 
-        text = frontmatter(doc_path) + to_wikilinks(full_md.read_text(encoding="utf-8"))
+        md_text = full_md.read_text(encoding="utf-8")
+        content_list_matches = list(tmp_dir.glob("*_content_list.json"))
+        if content_list_matches:
+            md_text = insert_page_markers(md_text, content_list_matches[0])
+
+        text = frontmatter(doc_path) + to_wikilinks(md_text)
         dest_md.write_text(text, encoding="utf-8")
 
         if images_dir.exists():
@@ -367,6 +447,31 @@ def selfcheck() -> int:
             assert 'stop: "2026-08-20 12:00:00"' in fm, fm
         finally:
             VAULT_ROOT = old_root
+
+        # Sidemarkører: trykt sidetal (page_number-blok) skal foretrækkes frem for PDF-position.
+        blocks = [
+            {"type": "title", "page_idx": 0, "text": "Kapitel 3"},
+            {"type": "text", "page_idx": 0, "text": "Første afsnit på siden."},
+            {"type": "page_number", "page_idx": 0, "text": "181"},
+            {"type": "text", "page_idx": 1, "text": "Andet afsnit, næste side."},
+            # Ingen page_number-blok her — falder tilbage til PDF-position (page_idx + 1 = 3).
+            {"type": "text", "page_idx": 3, "text": "Fjerde PDF-side, ingen mellemliggende side 2 fanget."},
+        ]
+        content_list = root / "content_list.json"
+        content_list.write_text(json.dumps(blocks), encoding="utf-8")
+        md = "Kapitel 3\n\nFørste afsnit på siden.\n\nAndet afsnit, næste side.\n\nFjerde PDF-side, ingen mellemliggende side 2 fanget."
+        marked = insert_page_markers(md, content_list)
+        assert "*— side 181 —*" in marked, marked  # trykt sidetal foretrukket
+        assert "*— side 2 —*" in marked, marked  # page_idx=1 uden page_number-blok -> 1+1
+        assert "*— side 4 —*" in marked, marked  # page_idx=3 uden page_number-blok -> 3+1
+        # Rækkefølge: markørerne skal stå FØR deres egen sides tekst, i stigende sideorden.
+        assert marked.index("*— side 181 —*") < marked.index("Første afsnit")
+        assert marked.index("*— side 2 —*") < marked.index("Andet afsnit")
+        assert marked.index("*— side 2 —*") < marked.index("*— side 4 —*")
+
+        # Manglende/korrupt content_list.json må aldrig vælte konverteringen — bare uændret markdown.
+        missing = root / "does-not-exist.json"
+        assert insert_page_markers(md, missing) == md
 
     print("selfcheck ok")
     return 0
