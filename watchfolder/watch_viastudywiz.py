@@ -297,10 +297,12 @@ def _group_blocks_by_page(blocks: list[dict]) -> dict[int, list[dict]]:
 
 
 def _printed_page_number(page_blocks: list[dict]) -> str | None:
-    # Nogle scanninger har to fysiske bogsider pr. PDF-side (opslag/dobbeltside-scan) — så flere
-    # page_number-blokke på samme page_idx, i vilkårlig rækkefølge (observeret: højeste tal først).
+    # Dobbeltside-scans (opslag med to fysiske bogsider pr. PDF-side) splittes normalt FØR dette
+    # kaldes (se _split_double_page, #101) — så page_blocks er allerede kun én fysisk sides
+    # blokke, og der er kun ét page_number. Intervallet herunder er fallback for det scenarie
+    # split ikke kunne afgøre (fx manglende layout.json/page_size, se insert_page_markers).
     # Live-verificeret 2026-08-17 mod "Materialitet I Fibiger & Jensen Andre verdener": page_idx=0
-    # gav både "191" og "190". At tage kun den første ville stille tabe den anden.
+    # gav både "191" og "190" uden split.
     numbers = []
     other_texts = []
     for block in page_blocks:
@@ -317,6 +319,46 @@ def _printed_page_number(page_blocks: list[dict]) -> str | None:
         numbers = sorted(set(numbers))
         return f"{numbers[0]}–{numbers[-1]}" if len(numbers) > 1 else str(numbers[0])
     return other_texts[0] if other_texts else None
+
+
+# #101: content_list.json's blokke har hver deres egen bbox (bekræftet ved inspektion af rå
+# API-output) — en dobbeltside-scans venstre og højre fysiske side kan derfor skelnes ud fra om
+# blokkens x0 ligger i venstre eller højre halvdel af PDF-siden. Kun relevant når der faktisk ER
+# to forskellige sidetal på samme page_idx; ellers ingen split (almindelig enkeltside-scan).
+def _split_double_page(page_blocks: list[dict], width: int) -> list[list[dict]] | None:
+    numbers = {
+        int(b["text"].strip())
+        for b in page_blocks
+        if b.get("type") == "page_number" and (b.get("text") or "").strip().isdigit()
+    }
+    if len(numbers) != 2:
+        return None
+
+    mid = width / 2
+    halves: list[list[dict]] = [[], []]
+    for block in page_blocks:
+        bbox = block.get("bbox")
+        x0 = bbox[0] if bbox else 0
+        halves[0 if x0 < mid else 1].append(block)
+    if not halves[0] or not halves[1]:
+        return None
+    return halves
+
+
+# page_size findes kun i layout.json, ikke i content_list.json (se #98) — pdf_info-listen har sit
+# eget page_idx-felt pr. side, ikke nødvendigvis liste-index, så der slås op på det eksplicit.
+def _page_widths(layout_path: Path | None) -> dict[int, int]:
+    if layout_path is None:
+        return {}
+    try:
+        layout = json.loads(layout_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {
+        page["page_idx"]: page["page_size"][0]
+        for page in layout.get("pdf_info", [])
+        if "page_size" in page
+    }
 
 
 # Løbende sidehoved/-fod (fx kapitelnavn, gentaget identisk på hver side) er ikke støj men
@@ -354,7 +396,9 @@ def _first_anchor_text(page_blocks: list[dict]) -> str | None:
     return None
 
 
-def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
+def insert_page_markers(
+    full_md_text: str, content_list_path: Path, layout_path: Path | None = None
+) -> str:
     """Indsætter sidemarkører i markdown ud fra MinerU's content_list.json.
 
     Best-effort tekst-ankring, ikke garanteret præcis: for hver side søges dens første
@@ -367,12 +411,17 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
     ikke før. Konkret betyder det at en sides label indsættes ved overgangen til NÆSTE sides
     indhold (forskudt ét trin i forhold til selve tekst-ankeret), og den sidste side får sin
     markør sat i slutningen af dokumentet i stedet for.
+
+    `layout_path` (MinerU's layout.json, #98) er valgfri — findes den, splittes dobbeltside-
+    scans (#101) i venstre/højre fysisk side vha. bbox, så hver får sin egen præcise markør i
+    stedet for ét interval-tal for hele opslaget.
     """
     try:
         blocks = json.loads(content_list_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return full_md_text
 
+    page_widths = _page_widths(layout_path)
     pages = _group_blocks_by_page(blocks)
     result = full_md_text
     search_pos = 0
@@ -380,21 +429,25 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
 
     for page_idx in sorted(pages):
         page_blocks = pages[page_idx]
-        anchor = _first_anchor_text(page_blocks)
-        if not anchor:
-            continue
-        idx = result.find(anchor, search_pos)
-        if idx == -1:
-            continue
-        # Ankeret kan matche midt i en linje (fx lige efter "# " i en overskrift) — indsæt
-        # markøren før hele linjen, ellers splittes fx overskriftens "#" fra sin egen tekst.
-        line_start = result.rfind("\n", 0, idx) + 1
-        if pending_label is not None:
-            marker = f"\n\n*— side {pending_label} —*\n\n---\n\n"
-            result = result[:line_start] + marker + result[line_start:]
-            idx += len(marker)
-        pending_label = _printed_page_number(page_blocks) or str(page_idx + 1)
-        search_pos = idx + len(anchor)
+        width = page_widths.get(page_idx)
+        groups = (_split_double_page(page_blocks, width) if width else None) or [page_blocks]
+
+        for group in groups:
+            anchor = _first_anchor_text(group)
+            if not anchor:
+                continue
+            idx = result.find(anchor, search_pos)
+            if idx == -1:
+                continue
+            # Ankeret kan matche midt i en linje (fx lige efter "# " i en overskrift) — indsæt
+            # markøren før hele linjen, ellers splittes fx overskriftens "#" fra sin egen tekst.
+            line_start = result.rfind("\n", 0, idx) + 1
+            if pending_label is not None:
+                marker = f"\n\n*— side {pending_label} —*\n\n---\n\n"
+                result = result[:line_start] + marker + result[line_start:]
+                idx += len(marker)
+            pending_label = _printed_page_number(group) or str(page_idx + 1)
+            search_pos = idx + len(anchor)
 
     if pending_label is not None:
         result = result.rstrip("\n") + f"\n\n*— side {pending_label} —*\n"
@@ -423,7 +476,10 @@ def integrate_output(doc_path: Path, zip_bytes: bytes) -> None:
         running_header = None
         content_list_matches = list(tmp_dir.glob("*_content_list.json"))
         if content_list_matches:
-            md_text = insert_page_markers(md_text, content_list_matches[0])
+            layout_path = tmp_dir / "layout.json"
+            md_text = insert_page_markers(
+                md_text, content_list_matches[0], layout_path if layout_path.exists() else None
+            )
             try:
                 blocks = json.loads(content_list_matches[0].read_text(encoding="utf-8"))
                 running_header = _extract_running_header(blocks)
