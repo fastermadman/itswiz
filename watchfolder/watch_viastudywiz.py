@@ -243,8 +243,6 @@ def submit(doc_path: Path) -> str:
             time.sleep(UPLOAD_RETRY_BACKOFF_S)
 
 
-# mtime-TTL tjekket ved læsning er nok (#99) — ingen cron nødvendig for at rydde op i forældede
-# cache-filer, de bliver bare ignoreret og overskrevet ved næste forsøg på samme dokument.
 def cached_zip(digest: str) -> bytes | None:
     path = CACHE_DIR / f"{digest}.zip"
     if not path.exists():
@@ -255,8 +253,17 @@ def cached_zip(digest: str) -> bytes | None:
     return path.read_bytes()
 
 
+# TTL-tjek ved LÆSNING alene renser kun de dokumenter der faktisk forsøges igen — lykkes
+# konverteringen første gang (det normale), bliver den fil aldrig læst igen, og cachen vokser
+# ubegrænset (~80 dok/uge × median 6-7 MB er ikke plads til på en presset disk, se #99). Feje
+# forældede filer her, ved SKRIVNING, betyder oprydningen sker som bivirkning af normal drift —
+# stadig ingen cron.
 def write_cache(digest: str, zip_bytes: bytes) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    for stale in CACHE_DIR.glob("*.zip"):
+        if now - stale.stat().st_mtime > CACHE_TTL_S:
+            stale.unlink()
     (CACHE_DIR / f"{digest}.zip").write_bytes(zip_bytes)
 
 
