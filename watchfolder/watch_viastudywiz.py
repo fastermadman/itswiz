@@ -58,6 +58,12 @@ UPLOAD_TIMEOUT_S = 20 * 60
 UPLOAD_RETRIES = 3
 UPLOAD_RETRY_BACKOFF_S = 30
 
+# Cache af MinerU's rå zip-svar, nøglet på dokumentets sha256 (#99). Beskytter mod at et
+# scriptnedbrud MELLEM et vellykket (betalt) MinerU-kald og det færdige lokale output tvinger et
+# nyt betalt kald ved næste forsøg. Uden for VAULT_ROOT så watchdog ikke ser den.
+CACHE_DIR = Path.home() / ".viastudywiz-cache"
+CACHE_TTL_S = 7 * 24 * 60 * 60
+
 
 # Læses først ved første API-kald (ikke ved import), så sti-logikken kan enhedstestes uden .env.
 @lru_cache(maxsize=1)
@@ -237,6 +243,23 @@ def submit(doc_path: Path) -> str:
             time.sleep(UPLOAD_RETRY_BACKOFF_S)
 
 
+# mtime-TTL tjekket ved læsning er nok (#99) — ingen cron nødvendig for at rydde op i forældede
+# cache-filer, de bliver bare ignoreret og overskrevet ved næste forsøg på samme dokument.
+def cached_zip(digest: str) -> bytes | None:
+    path = CACHE_DIR / f"{digest}.zip"
+    if not path.exists():
+        return None
+    if time.time() - path.stat().st_mtime > CACHE_TTL_S:
+        path.unlink()
+        return None
+    return path.read_bytes()
+
+
+def write_cache(digest: str, zip_bytes: bytes) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (CACHE_DIR / f"{digest}.zip").write_bytes(zip_bytes)
+
+
 def poll(batch_id: str) -> dict:
     deadline = time.time() + POLL_TIMEOUT_S
     while time.time() < deadline:
@@ -372,7 +395,7 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
     return result
 
 
-def integrate_output(doc_path: Path, zip_url: str) -> None:
+def integrate_output(doc_path: Path, zip_bytes: bytes) -> None:
     dest_md, dest_images = md_targets(doc_path)
     dest_md.parent.mkdir(parents=True, exist_ok=True)
 
@@ -381,10 +404,7 @@ def integrate_output(doc_path: Path, zip_url: str) -> None:
     with tempfile.TemporaryDirectory() as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
         zip_path = tmp_dir / "result.zip"
-
-        zip_resp = requests.get(zip_url, timeout=120)
-        zip_resp.raise_for_status()
-        zip_path.write_bytes(zip_resp.content)
+        zip_path.write_bytes(zip_bytes)
 
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(tmp_dir)
@@ -424,11 +444,20 @@ def process_document(doc_path: Path) -> None:
         print(f"Dublet af {original_md.name} — henviser i stedet for at konvertere igen", flush=True)
         return
 
-    print(f"Uploader til MinerU: {doc_path.name}", flush=True)
+    digest = hashlib.sha256(doc_path.read_bytes()).hexdigest()
+    zip_bytes = cached_zip(digest)
     try:
-        batch_id = submit(doc_path)
-        result = poll(batch_id)
-        integrate_output(doc_path, result["full_zip_url"])
+        if zip_bytes is None:
+            print(f"Uploader til MinerU: {doc_path.name}", flush=True)
+            batch_id = submit(doc_path)
+            result = poll(batch_id)
+            zip_resp = requests.get(result["full_zip_url"], timeout=120)
+            zip_resp.raise_for_status()
+            zip_bytes = zip_resp.content
+            write_cache(digest, zip_bytes)
+        else:
+            print(f"Cache-hit, springer MinerU-kald over: {doc_path.name}", flush=True)
+        integrate_output(doc_path, zip_bytes)
         print(f"Færdig: {doc_path.name}", flush=True)
     except (requests.RequestException, RuntimeError, TimeoutError, OSError) as exc:
         print(f"Fejl ved {doc_path.name}: {exc}", file=sys.stderr, flush=True)
