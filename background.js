@@ -512,6 +512,13 @@ function weekFolderName(plan) {
   return topic ? `${base} - ${sanitizeFilename(topic)}` : base;
 }
 
+// Returnerer { url, fileName } — Viewer.aspx-kaldet bærer ALTID en FileName-parameter (fx
+// "Frede+V+Nielsen+Ars+og+Scientia+dimensionen.pdf") ved siden af selve FileDownloadUrl, men den
+// endelige filerepository.itslearning.com-URL (som FileDownloadUrl peger på) har hverken endelse i
+// stien eller i noget response-content-disposition-parameter — kun en opak GUID + Token +
+// "Download=1". Uden at fange FileName her mister vi den eneste kilde til filendelsen for
+// elementer hvis titel selv mangler den (issue fundet 2026-08-18, element "Frede V Nielsen Ars og
+// Scientia dimensionen" uden ".pdf"-suffiks i titlen).
 async function resolvePdfDownloadUrl(elementUrl, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     let tabId = null;
@@ -527,10 +534,11 @@ async function resolvePdfDownloadUrl(elementUrl, timeoutMs = 20000) {
     }
 
     function listener(details) {
-      const fileDownloadUrl = new URL(details.url).searchParams.get("FileDownloadUrl");
+      const params = new URL(details.url).searchParams;
+      const fileDownloadUrl = params.get("FileDownloadUrl");
       if (fileDownloadUrl) {
         cleanup();
-        resolve(fileDownloadUrl);
+        resolve({ url: fileDownloadUrl, fileName: params.get("FileName") });
       }
     }
 
@@ -697,11 +705,15 @@ async function withRetry(fn) {
 // Elementets titel har ingen filendelse (fx "KRONIK Fortidsøglen klassisk musik") — de to
 // download-kæder skelnes reelt af hvilket netværkskald der rammer først, ikke af titlen, så
 // prøv PDF-kæden (den korteste) først og fald tilbage til Office-kæden hvis den ikke rammer.
+// Returnerer altid { url, fileName } — Office-kæden har ingen tilsvarende FileName-kilde (den går
+// aldrig gennem Viewer.aspx), så fileName er null der. Det er OK: WOPI-fallbacken i
+// downloadFileElements løser samme problem for Office-dokumenter via CheckFileInfo i stedet.
 async function resolveDownloadUrlUnknownType(elementUrl) {
   try {
     return await resolvePdfDownloadUrl(elementUrl, 10000);
   } catch {
-    return await resolveOfficeDownloadUrl(elementUrl);
+    const url = await resolveOfficeDownloadUrl(elementUrl);
+    return { url, fileName: null };
   }
 }
 
@@ -1360,12 +1372,18 @@ async function downloadFileElements(plans, tabId) {
       let filename;
       if (isPdf || isOffice) {
         downloadUrl = isPdf
-          ? await withRetry(() => resolvePdfDownloadUrl(element.url))
+          ? (await withRetry(() => resolvePdfDownloadUrl(element.url))).url
           : await withRetry(() => resolveOfficeDownloadUrl(element.url));
         filename = rawPath(courseName, weekFolder, element.title);
       } else {
-        downloadUrl = await withRetry(() => resolveDownloadUrlUnknownType(element.url));
+        const resolved = await withRetry(() => resolveDownloadUrlUnknownType(element.url));
+        downloadUrl = resolved.url;
+        // Viewer.aspx's FileName-parameter (fanget i resolvePdfDownloadUrl) foretrækkes — den
+        // bærer titlen elementet reelt blev uploadet med, inkl. endelse, uafhængigt af om selve
+        // filerepository-URL'en har nogen endelse-info overhovedet (den har typisk ikke).
+        const fromViewerFileName = resolved.fileName?.match(/\.[a-z0-9]{2,5}$/i)?.[0]?.toLowerCase() ?? "";
         const extension =
+          fromViewerFileName ||
           extractExtension(downloadUrl) ||
           (downloadUrl.includes("/contents?access_token=") ? await extractExtensionFromWopi(downloadUrl) : "");
         if (!extension) {
