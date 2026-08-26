@@ -58,6 +58,12 @@ UPLOAD_TIMEOUT_S = 20 * 60
 UPLOAD_RETRIES = 3
 UPLOAD_RETRY_BACKOFF_S = 30
 
+# Cache af MinerU's rå zip-svar, nøglet på dokumentets sha256 (#99). Beskytter mod at et
+# scriptnedbrud MELLEM et vellykket (betalt) MinerU-kald og det færdige lokale output tvinger et
+# nyt betalt kald ved næste forsøg. Uden for VAULT_ROOT så watchdog ikke ser den.
+CACHE_DIR = Path.home() / ".viastudywiz-cache"
+CACHE_TTL_S = 7 * 24 * 60 * 60
+
 
 # Læses først ved første API-kald (ikke ved import), så sti-logikken kan enhedstestes uden .env.
 @lru_cache(maxsize=1)
@@ -237,6 +243,30 @@ def submit(doc_path: Path) -> str:
             time.sleep(UPLOAD_RETRY_BACKOFF_S)
 
 
+def cached_zip(digest: str) -> bytes | None:
+    path = CACHE_DIR / f"{digest}.zip"
+    if not path.exists():
+        return None
+    if time.time() - path.stat().st_mtime > CACHE_TTL_S:
+        path.unlink()
+        return None
+    return path.read_bytes()
+
+
+# TTL-tjek ved LÆSNING alene renser kun de dokumenter der faktisk forsøges igen — lykkes
+# konverteringen første gang (det normale), bliver den fil aldrig læst igen, og cachen vokser
+# ubegrænset (~80 dok/uge × median 6-7 MB er ikke plads til på en presset disk, se #99). Feje
+# forældede filer her, ved SKRIVNING, betyder oprydningen sker som bivirkning af normal drift —
+# stadig ingen cron.
+def write_cache(digest: str, zip_bytes: bytes) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    for stale in CACHE_DIR.glob("*.zip"):
+        if now - stale.stat().st_mtime > CACHE_TTL_S:
+            stale.unlink()
+    (CACHE_DIR / f"{digest}.zip").write_bytes(zip_bytes)
+
+
 def poll(batch_id: str) -> dict:
     deadline = time.time() + POLL_TIMEOUT_S
     while time.time() < deadline:
@@ -267,10 +297,12 @@ def _group_blocks_by_page(blocks: list[dict]) -> dict[int, list[dict]]:
 
 
 def _printed_page_number(page_blocks: list[dict]) -> str | None:
-    # Nogle scanninger har to fysiske bogsider pr. PDF-side (opslag/dobbeltside-scan) — så flere
-    # page_number-blokke på samme page_idx, i vilkårlig rækkefølge (observeret: højeste tal først).
+    # Dobbeltside-scans (opslag med to fysiske bogsider pr. PDF-side) splittes normalt FØR dette
+    # kaldes (se _split_double_page, #101) — så page_blocks er allerede kun én fysisk sides
+    # blokke, og der er kun ét page_number. Intervallet herunder er fallback for det scenarie
+    # split ikke kunne afgøre (fx manglende layout.json/page_size, se insert_page_markers).
     # Live-verificeret 2026-08-17 mod "Materialitet I Fibiger & Jensen Andre verdener": page_idx=0
-    # gav både "191" og "190". At tage kun den første ville stille tabe den anden.
+    # gav både "191" og "190" uden split.
     numbers = []
     other_texts = []
     for block in page_blocks:
@@ -287,6 +319,46 @@ def _printed_page_number(page_blocks: list[dict]) -> str | None:
         numbers = sorted(set(numbers))
         return f"{numbers[0]}–{numbers[-1]}" if len(numbers) > 1 else str(numbers[0])
     return other_texts[0] if other_texts else None
+
+
+# #101: content_list.json's blokke har hver deres egen bbox (bekræftet ved inspektion af rå
+# API-output) — en dobbeltside-scans venstre og højre fysiske side kan derfor skelnes ud fra om
+# blokkens x0 ligger i venstre eller højre halvdel af PDF-siden. Kun relevant når der faktisk ER
+# to forskellige sidetal på samme page_idx; ellers ingen split (almindelig enkeltside-scan).
+def _split_double_page(page_blocks: list[dict], width: int) -> list[list[dict]] | None:
+    numbers = {
+        int(b["text"].strip())
+        for b in page_blocks
+        if b.get("type") == "page_number" and (b.get("text") or "").strip().isdigit()
+    }
+    if len(numbers) != 2:
+        return None
+
+    mid = width / 2
+    halves: list[list[dict]] = [[], []]
+    for block in page_blocks:
+        bbox = block.get("bbox")
+        x0 = bbox[0] if bbox else 0
+        halves[0 if x0 < mid else 1].append(block)
+    if not halves[0] or not halves[1]:
+        return None
+    return halves
+
+
+# page_size findes kun i layout.json, ikke i content_list.json (se #98) — pdf_info-listen har sit
+# eget page_idx-felt pr. side, ikke nødvendigvis liste-index, så der slås op på det eksplicit.
+def _page_widths(layout_path: Path | None) -> dict[int, int]:
+    if layout_path is None:
+        return {}
+    try:
+        layout = json.loads(layout_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {
+        page["page_idx"]: page["page_size"][0]
+        for page in layout.get("pdf_info", [])
+        if "page_size" in page
+    }
 
 
 # Løbende sidehoved/-fod (fx kapitelnavn, gentaget identisk på hver side) er ikke støj men
@@ -324,7 +396,9 @@ def _first_anchor_text(page_blocks: list[dict]) -> str | None:
     return None
 
 
-def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
+def insert_page_markers(
+    full_md_text: str, content_list_path: Path, layout_path: Path | None = None
+) -> str:
     """Indsætter sidemarkører i markdown ud fra MinerU's content_list.json.
 
     Best-effort tekst-ankring, ikke garanteret præcis: for hver side søges dens første
@@ -337,12 +411,17 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
     ikke før. Konkret betyder det at en sides label indsættes ved overgangen til NÆSTE sides
     indhold (forskudt ét trin i forhold til selve tekst-ankeret), og den sidste side får sin
     markør sat i slutningen af dokumentet i stedet for.
+
+    `layout_path` (MinerU's layout.json, #98) er valgfri — findes den, splittes dobbeltside-
+    scans (#101) i venstre/højre fysisk side vha. bbox, så hver får sin egen præcise markør i
+    stedet for ét interval-tal for hele opslaget.
     """
     try:
         blocks = json.loads(content_list_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return full_md_text
 
+    page_widths = _page_widths(layout_path)
     pages = _group_blocks_by_page(blocks)
     result = full_md_text
     search_pos = 0
@@ -350,21 +429,25 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
 
     for page_idx in sorted(pages):
         page_blocks = pages[page_idx]
-        anchor = _first_anchor_text(page_blocks)
-        if not anchor:
-            continue
-        idx = result.find(anchor, search_pos)
-        if idx == -1:
-            continue
-        # Ankeret kan matche midt i en linje (fx lige efter "# " i en overskrift) — indsæt
-        # markøren før hele linjen, ellers splittes fx overskriftens "#" fra sin egen tekst.
-        line_start = result.rfind("\n", 0, idx) + 1
-        if pending_label is not None:
-            marker = f"\n\n*— side {pending_label} —*\n\n---\n\n"
-            result = result[:line_start] + marker + result[line_start:]
-            idx += len(marker)
-        pending_label = _printed_page_number(page_blocks) or str(page_idx + 1)
-        search_pos = idx + len(anchor)
+        width = page_widths.get(page_idx)
+        groups = (_split_double_page(page_blocks, width) if width else None) or [page_blocks]
+
+        for group in groups:
+            anchor = _first_anchor_text(group)
+            if not anchor:
+                continue
+            idx = result.find(anchor, search_pos)
+            if idx == -1:
+                continue
+            # Ankeret kan matche midt i en linje (fx lige efter "# " i en overskrift) — indsæt
+            # markøren før hele linjen, ellers splittes fx overskriftens "#" fra sin egen tekst.
+            line_start = result.rfind("\n", 0, idx) + 1
+            if pending_label is not None:
+                marker = f"\n\n*— side {pending_label} —*\n\n---\n\n"
+                result = result[:line_start] + marker + result[line_start:]
+                idx += len(marker)
+            pending_label = _printed_page_number(group) or str(page_idx + 1)
+            search_pos = idx + len(anchor)
 
     if pending_label is not None:
         result = result.rstrip("\n") + f"\n\n*— side {pending_label} —*\n"
@@ -372,7 +455,7 @@ def insert_page_markers(full_md_text: str, content_list_path: Path) -> str:
     return result
 
 
-def integrate_output(doc_path: Path, zip_url: str) -> None:
+def integrate_output(doc_path: Path, zip_bytes: bytes) -> None:
     dest_md, dest_images = md_targets(doc_path)
     dest_md.parent.mkdir(parents=True, exist_ok=True)
 
@@ -381,10 +464,7 @@ def integrate_output(doc_path: Path, zip_url: str) -> None:
     with tempfile.TemporaryDirectory() as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
         zip_path = tmp_dir / "result.zip"
-
-        zip_resp = requests.get(zip_url, timeout=120)
-        zip_resp.raise_for_status()
-        zip_path.write_bytes(zip_resp.content)
+        zip_path.write_bytes(zip_bytes)
 
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(tmp_dir)
@@ -396,7 +476,10 @@ def integrate_output(doc_path: Path, zip_url: str) -> None:
         running_header = None
         content_list_matches = list(tmp_dir.glob("*_content_list.json"))
         if content_list_matches:
-            md_text = insert_page_markers(md_text, content_list_matches[0])
+            layout_path = tmp_dir / "layout.json"
+            md_text = insert_page_markers(
+                md_text, content_list_matches[0], layout_path if layout_path.exists() else None
+            )
             try:
                 blocks = json.loads(content_list_matches[0].read_text(encoding="utf-8"))
                 running_header = _extract_running_header(blocks)
@@ -424,11 +507,20 @@ def process_document(doc_path: Path) -> None:
         print(f"Dublet af {original_md.name} — henviser i stedet for at konvertere igen", flush=True)
         return
 
-    print(f"Uploader til MinerU: {doc_path.name}", flush=True)
+    digest = hashlib.sha256(doc_path.read_bytes()).hexdigest()
+    zip_bytes = cached_zip(digest)
     try:
-        batch_id = submit(doc_path)
-        result = poll(batch_id)
-        integrate_output(doc_path, result["full_zip_url"])
+        if zip_bytes is None:
+            print(f"Uploader til MinerU: {doc_path.name}", flush=True)
+            batch_id = submit(doc_path)
+            result = poll(batch_id)
+            zip_resp = requests.get(result["full_zip_url"], timeout=120)
+            zip_resp.raise_for_status()
+            zip_bytes = zip_resp.content
+            write_cache(digest, zip_bytes)
+        else:
+            print(f"Cache-hit, springer MinerU-kald over: {doc_path.name}", flush=True)
+        integrate_output(doc_path, zip_bytes)
         print(f"Færdig: {doc_path.name}", flush=True)
     except (requests.RequestException, RuntimeError, TimeoutError, OSError) as exc:
         print(f"Fejl ved {doc_path.name}: {exc}", file=sys.stderr, flush=True)
