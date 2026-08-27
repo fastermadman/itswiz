@@ -39,6 +39,7 @@ Dry-run som standard, `--apply` udfører, `--selfcheck` kører den indbyggede te
 
 import json
 import re
+import tempfile
 import sys
 import time
 import unicodedata
@@ -49,6 +50,13 @@ DATA_JSON = VAULT_ROOT / ".obsidian" / "plugins" / "hold-course" / "data.json"
 
 # main.js: COLOR_PALETTE har 6 farver, og addClass sætter colorIndex = classes.length % længden.
 COLOR_PALETTE_SIZE = 6
+
+# Hold Courses class.courseUrl renderes som et rigtigt "Course page"-link BÅDE på fag-kortet
+# (main.js: _renderClassCard) og i fag-headeren (_renderClassView) — ét klik fra Hold Course til
+# itslearning. Formen er verificeret live 2026-08-28 (ikke gættet, jf. #118): CourseID'et er
+# første halvdel af plan_id ("36016:1297067"), og itslearnings egen venstremenu linker til
+# præcis denne URL.
+COURSE_URL = "https://via.itslearning.com/Course/Course.aspx?CourseId={}"
 
 # Symbol + farve pr. fag. Symbolerne matcher background.js' FOLDER_SYMBOLS, farverne matcher
 # Valdemars Google-kalendere, så Hold Course og kalenderen viser samme fag i samme farve.
@@ -225,14 +233,28 @@ def ensure_semester(data: dict, plans: list[dict], new_id) -> dict:
     return sem
 
 
-def ensure_class(sem: dict, fag: str, new_id) -> dict:
+def course_url(course_id: str) -> str:
+    """itslearning-kursets forside ud fra plan_id'ets/kilde-URL'ens CourseID. Tom streng når vi
+    ikke har et id — synken gætter aldrig på et link der kan føre et forkert sted hen."""
+    return COURSE_URL.format(course_id) if course_id else ""
+
+
+def ensure_class(sem: dict, fag: str, new_id, course_id: str = "") -> dict:
     # `code` er IKKE fagets navn med et symbol foran — det ville stå lige over/ved siden af
     # `name` (samme tekst to gange, kun det ene med ikon: bekræftet live 2026-08-27, "to titler").
     # Kun symbolet alene her, `name` er fagets fulde navn og vises ét sted for sig.
+    # itslearnings eget kursusnavn ("LSmu-2527", set live 2026-08-28 på /Courses/36016/about) blev
+    # også overvejet som code og fravalgt: en ren VIA-administrativ kode siger intet på et blik.
     style = FAG_STYLE.get(fag, {})
     code = style.get("symbol", fag)
+    url = course_url(course_id)
     cls = find_stamped(sem["classes"], "vswFag", fag)
     if cls:
+        # Samme ejerskabs-mønster som vaultLink/notes: vswCourseUrl husker hvad synken sidst skrev,
+        # så et felt Valdemar selv har rettet i EditClassModal ("Course page URL") bliver stående.
+        if url and cls.get("courseUrl", "") in ("", cls.get("vswCourseUrl", "")):
+            cls["courseUrl"] = url
+            cls["vswCourseUrl"] = url
         # code er synkens konfiguration (FAG_STYLE) og sættes derfor ved hver kørsel. colorIndex
         # sættes KUN ved oprettelsen (se nedenfor) — Hold Course har ingen farvevælger i UI'et,
         # kun en positionel auto-tildeling, og en anden farve pr. kørsel oveni Valdemars egen
@@ -242,9 +264,20 @@ def ensure_class(sem: dict, fag: str, new_id) -> dict:
     # Kun felterne vi rent faktisk har data til. Underviser, lokale, mødedage og tidspunkter står
     # tomme og røres aldrig igen — udfylder Valdemar dem én gang i Hold Course, bliver de stående
     # (spørgsmål 4 i #113: synken gætter aldrig på data den ikke har).
+    #
+    # De to felt-grupper er ikke bare "ikke nået endnu", de er afprøvet mod virkeligheden og skal
+    # BLIVE tomme (live-tjek i itslearning 2026-08-28, se #118):
+    #   professorName — Musik har fem undervisere i itslearnings deltagerliste (Anne Katrine
+    #     Christensen, Anne-Mette Nystrøm Søndergaard Jensen, Klaus Franck Glüsing, Lone Sonne,
+    #     Mikael Koed Thomsen). Der FINDES ingen underviser pr. fag at skrive her; underviseren er
+    #     et lektions-faktum, og Hold Course har intet lektions-felt til det.
+    #   meetingDays/meetingStartTime/meetingEndTime — ville gøre skade, ikke gavn. main.js'
+    #     getItemsForDate stempler klassens ENE mødetid på den FØRSTE lektion på datoen, og Musik
+    #     har torsdage med to reelle lektioner (08:15 og 12:25). Kalenderen ville altså vise et
+    #     forkert klokkeslæt på den ene af dem, hvor den nu ikke viser noget.
     cls = {
         "id": new_id(), "colorIndex": style.get("colorIndex", len(sem["classes"]) % COLOR_PALETTE_SIZE),
-        "code": code, "name": fag, "courseUrl": "", "meetingLink": "",
+        "code": code, "name": fag, "courseUrl": url, "vswCourseUrl": url, "meetingLink": "",
         "professorName": "", "professorEmail": "", "officeHours": "",
         "taName": "", "taEmail": "", "taOfficeHours": "",
         "meetingDays": [], "location": "", "startDate": "", "endDate": "",
@@ -353,7 +386,9 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
 
     sem = ensure_semester(data, plans, new_id)
     for plan in sorted(plans, key=lambda p: (p["fag"], p.get("start", ""))):
-        cls = ensure_class(sem, plan["fag"], new_id)
+        # plan_id er "<courseId>:<planId>" (background.js: planKey) — første halvdel er det
+        # CourseID class.courseUrl skal pege på.
+        cls = ensure_class(sem, plan["fag"], new_id, plan["plan_id"].split(":")[0])
         lec = ensure_lecture(cls, plan, new_id)
         due = lec["date"]
         # Opgavernes nøgle hænger på lektionens EGET id, ikke på plan_id eller dato: id'et er det
@@ -408,6 +443,63 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     return data
 
 
+def sync_task_completion(data: dict, vault_root: Path, dry_run: bool) -> tuple[list[str], list[str]]:
+    """Holder Forberedelse-afkrydsningen i [NOTE]-stubben og opgavens status i Hold Course ens.
+    Returnerer (krydset af i vaulten, markeret done i Hold Course).
+
+    Hold Course -> vault: et Done-tryk krydser `- [ ] ⚒ <titel>` af i stubben, hvorfra
+    background.js' EKSISTERENDE checkbox->itslearning-mekanisme (issue #70) tager over. Ingen ny
+    itslearning-kode, kun en ny skriver af den samme linje. Extensionen skal selv have
+    `enableTaskCompletionSync` slået til, ellers ligger krydset bare der uden effekt.
+
+    Vault -> Hold Course: en allerede afkrydset linje sætter opgaven til `done`. Uden den retning
+    er kæden kun envejs, og alt Valdemar fuldfører i itslearning/vaulten bliver stående som
+    "not started" i Hold Course — hvor det ophober sig som Overdue for evigt på både dashboardets
+    Today-strip, i Assignments-listen og som rød pille i kalenderen (main.js: getAllAssignments
+    filtrerer udelukkende på `status !== 'done'`). Retningen rører KUN `not-started`: har Valdemar
+    selv sat opgaven til `in-progress` i Hold Course, er det hans vurdering og ikke vores.
+
+    Bindes på OPGAVE-niveau, ikke lektion (afklaret med Valdemar 2026-08-28): en lektion kan i
+    princippet have flere forberedelses-opgaver, hver med sit eget itslearning-element/URL, så kun
+    en per-opgave-binding rammer den rigtige. Nøglen er assignment.vswKey's "<lecture.id>|forb|
+    <titel>"-form (samme titel background.js skrev linjen med, se writeLectureNoteStub).
+
+    Begge retninger går KUN mod fuldført, aldrig tilbage — samme retning som selve
+    itslearning-synken, og derfor naturligt idempotent og uden mulighed for at de to sider kan
+    vippe frem og tilbage mod hinanden."""
+    checked, marked_done = [], []
+    for sem in data.get("semesters", []):
+        for cls in sem.get("classes", []):
+            for lec in cls.get("lectures", []):
+                stub_rel = lec.get("vswVaultLink") or lec.get("vaultLink")
+                if not stub_rel:
+                    continue
+                file = vault_root / stub_rel
+                if not file.exists():
+                    continue
+                text, changed = None, False
+                for assign in lec.get("assignments", []):
+                    key = assign.get("vswKey", "")
+                    if "|forb|" not in key:
+                        continue
+                    titel = key.split("|forb|", 1)[1]
+                    if text is None:
+                        text = file.read_text(encoding="utf-8")
+                    unchecked = f"- [ ] {FORBEREDELSE_PREFIX} {titel}"
+                    checked_line = f"- [x] {FORBEREDELSE_PREFIX} {titel}"
+                    if assign.get("status") == "done":
+                        if unchecked in text:
+                            text = text.replace(unchecked, checked_line)
+                            changed = True
+                            checked.append(f"{titel} ({stub_rel})")
+                    elif assign.get("status") == "not-started" and checked_line in text:
+                        assign["status"] = "done"
+                        marked_done.append(f"{titel} ({stub_rel})")
+                if changed and not dry_run:
+                    file.write_text(text, encoding="utf-8")
+    return checked, marked_done
+
+
 def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) -> int:
     if not data_path.exists():
         print(f"Hold Course' data.json findes ikke ({data_path}) — er pluginet installeret?", file=sys.stderr)
@@ -418,13 +510,32 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     before = data_path.read_text(encoding="utf-8")
     mtime = data_path.stat().st_mtime
     data = json.loads(before)
-    after = json.dumps(sync_data(data, plans, tasks=tasks), indent=2, ensure_ascii=False) + "\n"
+    merged = sync_data(data, plans, tasks=tasks)
+    # FØR serialiseringen: vault -> Hold Course-retningen sætter status på opgaver i `merged`, og
+    # de ændringer skal med i den data.json vi sammenligner og skriver.
+    checked, marked_done = sync_task_completion(merged, vault_root, dry_run=not apply)
+    after = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
 
     if uden_plan_id and not quiet:
         print(f"{len(uden_plan_id)} lektionsplan-note(r) uden plan_id springes over "
               f"(ældre end issue #96, kan ikke matches sikkert — ret dem i vaulten):")
         for rel in uden_plan_id:
             print(f"  {rel}")
+
+    # Rapporteres UANSET om data.json selv skal genskrives: Hold Course kan have gemt et Done-tryk
+    # siden sidste kørsel uden at vores egen frontmatter-flet ændrer noget, og et Done-tryk skal
+    # krydses af i vaulten ved næste tick, ikke først når en lektionsplan-note tilfældigvis ændrer
+    # sig.
+    if checked and not quiet:
+        label = "Krydset af" if apply else "Ville krydse af (dry-run)"
+        print(f"{label}: {len(checked)} Forberedelse-opgave(r) markeret Done i Hold Course:")
+        for titel in checked:
+            print(f"  {titel}")
+    if marked_done and not quiet:
+        label = "Markeret Done i Hold Course" if apply else "Ville markere Done i Hold Course (dry-run)"
+        print(f"{label}: {len(marked_done)} Forberedelse-opgave(r) allerede krydset af i vaulten:")
+        for titel in marked_done:
+            print(f"  {titel}")
 
     if after == before:
         # Watch-scriptet kalder denne funktion hvert minut; uden quiet ville loggen fyldes med
@@ -604,6 +715,58 @@ def selfcheck() -> int:
     assert json.dumps(sync_data(json.loads(snap4), [plan], lambda: "MÅ-IKKE-BRUGES", tasks=[opgave]),
                       sort_keys=True) == snap4, "opgave-synk er ikke idempotent"
 
+    # sync_task_completion: opgave-niveau binding, ikke lektion (Valdemars valg, 2026-08-28).
+    stub_dir = Path(tempfile.mkdtemp())
+    stub_path = stub_dir / "stub.md"
+    stub_path.write_text(
+        "---\ntype: note\n---\n\n## ⚒ Forberedelse\n"
+        "- [ ] ⚒ Forberedelse\n- [ ] ⚒ Læs kapitel 2\n", encoding="utf-8")
+    rel = str(stub_path.relative_to(stub_dir.parent))
+    lec_tc = {"id": "L1", "vaultLink": rel, "assignments": [
+        {"vswKey": "L1|forb|Forberedelse", "status": "done"},
+        {"vswKey": "L1|forb|Læs kapitel 2", "status": "not-started"},
+        {"vswKey": "L1|lit|nogetandet", "status": "done"},  # ikke forberedelse — må ikke krydses
+    ]}
+    data_tc = {"semesters": [{"classes": [{"lectures": [lec_tc]}]}]}
+    checked_dry, done_dry = sync_task_completion(data_tc, stub_dir.parent, dry_run=True)
+    assert checked_dry == [f"Forberedelse ({rel})"], checked_dry
+    assert done_dry == [], done_dry                           # ingen linje er krydset af i vaulten endnu
+    assert "- [ ] ⚒ Forberedelse" in stub_path.read_text(encoding="utf-8"), "dry-run skrev alligevel"
+
+    checked, _ = sync_task_completion(data_tc, stub_dir.parent, dry_run=False)
+    assert checked == [f"Forberedelse ({rel})"], checked
+    written = stub_path.read_text(encoding="utf-8")
+    assert "- [x] ⚒ Forberedelse" in written, written        # den Done-markerede krydses af
+    assert "- [ ] ⚒ Læs kapitel 2" in written, written        # den ANDEN opgave, stadig not-started, rørt IKKE
+
+    # Idempotent: kør igen, ingenting sker (allerede [x], og opgaven er allerede done).
+    assert sync_task_completion(data_tc, stub_dir.parent, dry_run=False) == ([], [])
+
+    # Den anden retning: Valdemar (eller extensionen efter en itslearning-synk) krydser af i
+    # vaulten -> opgaven bliver done i Hold Course. Uden den ville alt fuldført arbejde blive
+    # stående som Overdue på dashboardet for evigt.
+    stub_path.write_text(
+        "---\ntype: note\n---\n\n## ⚒ Forberedelse\n"
+        "- [x] ⚒ Forberedelse\n- [x] ⚒ Læs kapitel 2\n", encoding="utf-8")
+    lec_tc["assignments"][1]["status"] = "not-started"
+    lec_tc["assignments"].append({"vswKey": "L1|forb|Eget tempo", "status": "in-progress"})
+    _, marked = sync_task_completion(data_tc, stub_dir.parent, dry_run=False)
+    assert marked == [f"Læs kapitel 2 ({rel})"], marked
+    assert lec_tc["assignments"][1]["status"] == "done", lec_tc["assignments"][1]
+    # in-progress er Valdemars egen vurdering og røres ikke, heller ikke selvom linjen mangler.
+    assert lec_tc["assignments"][3]["status"] == "in-progress", lec_tc["assignments"][3]
+    assert sync_task_completion(data_tc, stub_dir.parent, dry_run=False) == ([], [])
+
+    # class.courseUrl: udledt af plan_id'ets CourseID, verificeret URL-form (live 2026-08-28).
+    ids8 = iter(f"u{n}" for n in range(100))
+    data8 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [plan], lambda: next(ids8))
+    cls8 = data8["semesters"][0]["classes"][0]
+    assert cls8["courseUrl"] == "https://via.itslearning.com/Course/Course.aspx?CourseId=36016", cls8
+    cls8["courseUrl"] = "https://via.itslearning.com/noget-jeg-selv-valgte"  # Valdemar retter feltet
+    data8 = sync_data(data8, [plan], lambda: "MÅ-IKKE-BRUGES")
+    cls8 = data8["semesters"][0]["classes"][0]
+    assert cls8["courseUrl"] == "https://via.itslearning.com/noget-jeg-selv-valgte", cls8
+
     # Key Concepts & Lesson Goal (lec.notes): udfyldes fra beskrivelse:, men Valdemars egen
     # rettelse i Hold Course overlever en resync, ligesom vaultLink.
     plan_b = dict(plan, beskrivelse="I dag arbejder vi med resonansbegrebet.")
@@ -617,7 +780,7 @@ def selfcheck() -> int:
     lec7 = data7["semesters"][0]["classes"][0]["lectures"][0]
     assert lec7["notes"] == "Mine egne stikord til timen", lec7  # ikke overskrevet
 
-    # LivsOplysning-scenariet    # LivsOplysning-scenariet (live 2026-08-27): intet udfyldt litteratur-felt, men vedhæftede
+    # LivsOplysning-scenariet (live 2026-08-27): intet udfyldt litteratur-felt, men vedhæftede
     # fil-elementer i materiale_filer. Skal STADIG give en Reading-opgave, ikke ingenting.
     livso = dict(plan, plan_id="9:9", litteratur="false", litteratur_filer="false",
                  forberedelse="false", materiale_filer="📎 [[§ FAG/⚖︎ LivsOplysning/MD/x/Rosa1.md]]",
