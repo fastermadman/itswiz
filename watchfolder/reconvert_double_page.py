@@ -13,6 +13,10 @@ watch_viastudywiz.py ser RAW-filen som ny igen ved næste kørsel. Ingen lokal
 cache at genbruge her (MinerU-zip-cachen har kun ~1 uges TTL, se #99) - hver
 genkonvertering koster et nyt MinerU-kald.
 
+Noter med highlights (==tekst==) springes over i stedet for at slettes — write_conversion()'s
+egen highlight-beskyttelse (#42) når aldrig at virke her, fordi allerede_converted() ser filen
+som "ny" først EFTER den er slettet af dette script.
+
 Dry-run som standard, `--apply` udfører, `--selfcheck` kører de indbyggede tests.
 """
 import re
@@ -20,7 +24,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from watch_viastudywiz import VAULT_ROOT, md_targets
+from watch_viastudywiz import VAULT_ROOT, has_highlights, md_targets
 
 INTERVAL_MARKER = re.compile(r"— side \d+–\d+ —")
 KILDE_FIELD = re.compile(r'^kilde:\s*"\[\[([^\]]+)\]\]"', re.MULTILINE)
@@ -57,13 +61,18 @@ def main() -> int:
         print("Dry-run. Kør med --apply for at slette dem (genkonverteres af watch_viastudywiz.py ved næste kørsel).")
         return 0
 
+    deleted = 0
     for note, raw_path in jobs:
+        if has_highlights(note):
+            print(f"Springer over (highlights): {note.relative_to(VAULT_ROOT)}", file=sys.stderr)
+            continue
         note.unlink()
+        deleted += 1
         _, attachments_dir = md_targets(raw_path)
         if attachments_dir.exists():
             shutil.rmtree(attachments_dir)
 
-    print(f"Færdig. {len(jobs)} note(r) + tilhørende _attachments slettet.")
+    print(f"Færdig. {deleted} note(r) + tilhørende _attachments slettet, {len(jobs) - deleted} sprunget over (highlights).")
     return 0
 
 
@@ -94,6 +103,12 @@ def selfcheck() -> int:
         assert len(jobs) == 1, jobs
         assert jobs[0][0] == affected, jobs
         assert jobs[0][1] == raw_pdf, jobs
+
+        # Highlightede noter beskyttes mod sletning, selv når de er "affected" (#42).
+        affected.write_text(
+            affected.read_text(encoding="utf-8") + "\n==vigtig markering==\n", encoding="utf-8"
+        )
+        assert has_highlights(affected)
 
     print("selfcheck ok")
     return 0
