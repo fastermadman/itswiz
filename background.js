@@ -947,11 +947,17 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
   }
 }
 
-// issue #70: CustomActivity-siden er en almindelig WebForms-postback uden UpdatePanel (live-målt
-// 2026-08-12), så et rent form-POST med de skjulte felter er nok — samme GET som
-// fetchActivityBody allerede laver. Selvstændig funktion (ingen closures over ydre scope) fordi
-// den injiceres i itslearning-fanen via chrome.scripting.executeScript, samme grund som
-// fetchActivityBody kun kan køre i selve fanen: session-cookien findes kun der.
+// issue #70: CustomActivity-siden er en almindelig WebForms-postback uden UpdatePanel, så et rent
+// form-POST med de skjulte felter er nok — samme GET som fetchActivityBody allerede laver.
+// Selvstændig funktion (ingen closures over ydre scope) fordi den injiceres i itslearning-fanen
+// via chrome.scripting.executeScript, samme grund som fetchActivityBody kun kan køre i selve
+// fanen: session-cookien findes kun der.
+// Toggleknappen er en rigtig checkbox (name="…$TaskCompletedToggle$input") med en onchange der
+// kalder __doPostBack('…$TaskCompletedToggle', '') — issuets oprindelige live-måling (2026-08-12)
+// fangede kun __EVENTTARGET-kaldet, ikke at checkboxens EGEN feltværdi også skal med i POST'en
+// (en rigtig klik-handling sætter checked=true client-side FØR postbacken sendes, så den rider
+// med i form-serialiseringen). Uden feltet ser serveren en umarkeret boks og gør intet — 200 OK,
+// ingen fejl, ingen synlig ændring. Live-verificeret 2026-08-27 mod CustomActivityId 4732053.
 async function toggleTaskCompletedInPage(url) {
   const getRes = await fetch(url, { credentials: "include" });
   const doc = new DOMParser().parseFromString(await getRes.text(), "text/html");
@@ -963,6 +969,7 @@ async function toggleTaskCompletedInPage(url) {
     __VIEWSTATE: field("__VIEWSTATE"),
     __VIEWSTATEGENERATOR: field("__VIEWSTATEGENERATOR"),
     __EVENTVALIDATION: field("__EVENTVALIDATION"),
+    "ctl00$ContentPlaceHolder$TaskCompletedToggle$input": "on",
   });
   await fetch(url, {
     method: "POST",
