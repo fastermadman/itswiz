@@ -225,15 +225,18 @@ def ensure_semester(data: dict, plans: list[dict], new_id) -> dict:
 
 
 def ensure_class(sem: dict, fag: str, new_id) -> dict:
+    # `code` er IKKE fagets navn med et symbol foran — det ville stå lige over/ved siden af
+    # `name` (samme tekst to gange, kun det ene med ikon: bekræftet live 2026-08-27, "to titler").
+    # Kun symbolet alene her, `name` er fagets fulde navn og vises ét sted for sig.
     style = FAG_STYLE.get(fag, {})
-    code = f'{style["symbol"]} {fag}' if style.get("symbol") else fag
+    code = style.get("symbol", fag)
     cls = find_stamped(sem["classes"], "vswFag", fag)
     if cls:
-        # code og colorIndex er synkens konfiguration (FAG_STYLE), ikke Valdemars data, og sættes
-        # derfor ved hver kørsel. `name` og alle kontaktfelter er hans og røres aldrig igen.
+        # code er synkens konfiguration (FAG_STYLE) og sættes derfor ved hver kørsel. colorIndex
+        # sættes KUN ved oprettelsen (se nedenfor) — Hold Course har ingen farvevælger i UI'et,
+        # kun en positionel auto-tildeling, og en anden farve pr. kørsel oveni Valdemars egen
+        # (fx via kalenderens farver) gav "flere farver i spil", ikke færre (samme dato).
         cls["code"] = code
-        if "colorIndex" in style:
-            cls["colorIndex"] = style["colorIndex"]
         return cls
     # Kun felterne vi rent faktisk har data til. Underviser, lokale, mødedage og tidspunkter står
     # tomme og røres aldrig igen — udfylder Valdemar dem én gang i Hold Course, bliver de stående
@@ -469,8 +472,16 @@ def selfcheck() -> int:
     sem = data["semesters"][0]
     assert sem["term"] == "Fall" and sem["year"] == 2026, sem
     cls = sem["classes"][0]
-    assert cls["code"] == "♪ Musik" and cls["name"] == "Musik" and cls["vswFag"] == "Musik", cls
-    assert cls["colorIndex"] == 5, cls  # grøn, som i Valdemars kalender
+    assert cls["code"] == "♪" and cls["name"] == "Musik" and cls["vswFag"] == "Musik", cls
+    assert cls["colorIndex"] == 5, cls  # kun sat ved oprettelsen, som defaulten for Musik
+
+    # colorIndex rørt IGEN ved en senere kørsel: Hold Course har ingen farvevælger, kun en
+    # positionel auto-tildeling — en gentaget override ville give "flere farver i spil" i stedet
+    # for færre (Valdemars ord, live 2026-08-27), da HC selv kan have flyttet den siden.
+    cls["colorIndex"] = 1
+    data_recolor = sync_data(data, [plan], lambda: "MÅ-IKKE-BRUGES")
+    assert data_recolor["semesters"][0]["classes"][0]["colorIndex"] == 1, "colorIndex blev overskrevet"
+    assert data_recolor["semesters"][0]["classes"][0]["code"] == "♪", "code følger stadig med"
     lec = cls["lectures"][0]
     assert lec["title"] == "Musikforståelse" and lec["date"] == "2026-09-01", lec
     # "Lecture note" peger på [NOTE]-stubben, ikke på maskinens [PLAN].
