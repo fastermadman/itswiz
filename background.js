@@ -1018,13 +1018,14 @@ async function writePlanNotes(plans) {
     // tidsspunktet fik en NY placeholder-plan). weekFolderName() er dato-afledt, så en udskudt
     // lektion regner sig frem til en ny mappe her — uden dette flyttes de allerede hentede filer
     // aldrig med, og bliver stående i den gamle ugemappe for evigt (issue #96).
-    const prevRecord = planNoteRecord(records, noteId);
+    let prevRecord = planNoteRecord(records, noteId);
     if (prevRecord?.weekFolder && prevRecord.weekFolder !== weekFolder) {
       try {
         await moveDirInVault(`${FAG_ROOT}/${fag}/MD/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/MD/${weekFolder}`);
         await moveDirInVault(`${FAG_ROOT}/${fag}/RAW/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/RAW/${weekFolder}`);
         runChangedNotes.push(`${prevRecord.weekFolder} → ${weekFolder} (${fagField}): lektion flyttet, vault-materialer fulgte med`);
         await savePlanNoteRecord(noteId, prevRecord.hash, weekFolder);
+        prevRecord = { hash: prevRecord.hash, weekFolder };
       } catch (err) {
         console.error(`VIAstudyWiz vault-flytning fejlede (${prevRecord.weekFolder} → ${weekFolder}):`, err);
         recordError(`Lektion flyttet (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): vault-materialer kunne ikke flyttes automatisk — ${err.message}`);
@@ -1090,7 +1091,16 @@ async function writePlanNotes(plans) {
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
     const FRONTMATTER_VERSION = 3; // 2 = forberedelse-feltet (#59), 3 = fjernet redundant dato:-felt
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
-    if (prevRecord?.hash === currentHash) continue;
+    if (prevRecord?.hash === currentHash) {
+      // Indholdet er uændret, så resten af funktionen springes over — men weekFolder skal stadig
+      // opdateres i storage, ellers når en ukendt/forældet placering (fx lige opgraderet fra det
+      // gamle streng-format, weekFolder: null) aldrig at blive kendt, og drift-detektionen
+      // ovenfor får aldrig en baseline at sammenligne næste gang planen rykker sig (issue #96).
+      if (prevRecord.weekFolder !== weekFolder) {
+        await savePlanNoteRecord(noteId, currentHash, weekFolder);
+      }
+      continue;
+    }
 
     const frontmatter = [
       "---",
