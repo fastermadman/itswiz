@@ -5,6 +5,7 @@ const DEFAULTS = {
   enableFileDownloads: true,
   enableCalendarSync: true,
   enableMetadataExport: false,
+  enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
 };
 
@@ -41,6 +42,7 @@ async function load() {
   document.getElementById("enableFileDownloads").checked = merged.enableFileDownloads;
   document.getElementById("enableCalendarSync").checked = merged.enableCalendarSync;
   document.getElementById("enableMetadataExport").checked = merged.enableMetadataExport;
+  document.getElementById("enableTaskCompletionSync").checked = merged.enableTaskCompletionSync;
   await refreshVaultDirStatus();
 }
 
@@ -52,6 +54,7 @@ document.getElementById("save").addEventListener("click", async () => {
     enableFileDownloads: document.getElementById("enableFileDownloads").checked,
     enableCalendarSync: document.getElementById("enableCalendarSync").checked,
     enableMetadataExport: document.getElementById("enableMetadataExport").checked,
+    enableTaskCompletionSync: document.getElementById("enableTaskCompletionSync").checked,
   };
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
   const status = document.getElementById("status");

@@ -403,7 +403,8 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
-    const notesOk = (await writePlanNotes(result.plans)) && (await writeTaskNotes(result.tasks ?? []));
+    const notesOk =
+      (await writePlanNotes(result.plans, tab.id, settings.enableTaskCompletionSync)) && (await writeTaskNotes(result.tasks ?? []));
     // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
     // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
     const filesOk = notesOk && (await downloadFileElements(result.plans, tab.id));
@@ -843,7 +844,7 @@ function planLiteratureText(plan) {
 function forberedelseElements(plan) {
   return (plan.elements ?? [])
     .filter((el) => el.typeName === "Arbejdsopgave")
-    .map((el) => ({ titel: (el.title ?? "Forberedelse").trim(), body: el.body, url: el.url }));
+    .map((el) => ({ titel: (el.title ?? "Forberedelse").trim(), body: el.body, url: el.url, isCompleted: el.isCompleted ?? false }));
 }
 
 // YAML literal block scalar (|) — undgår escaping af anførselstegn/kolon/linjeskift i fritekst,
@@ -889,13 +890,22 @@ const FORB_HEADING = "## ⚒ Forberedelse";
 // signaturen var på vej mod syv parametre da Forberedelse kom til.
 // Returnerer false hvis vault-tilladelsen mangler, ellers true (fejl på selve stubben er ikke
 // kritiske nok til at stoppe resten af kørslen — kun logges via recordError).
-async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse) {
+async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse, tabId, syncEnabled) {
   const courseName = plan.courseName ?? "ukendt-fag";
   const path = noteStubPath(courseName, weekFolder);
   const labels = forberedelse.map((el) => `⚒ ${el.titel}`);
   try {
     const existing = await readFromVault(path);
     if (existing != null) {
+      // issue #70: kun når afkrydsningen allerede er sat af Valdemar — nye stubbe kan ikke have
+      // et flueben, så tjekket giver først mening her, ikke ved førstegangs-skrivning nedenfor.
+      if (syncEnabled) {
+        const afkrydsede = new Set(
+          existing.split("\n").filter((line) => /^- \[[xX]\]/.test(line.trim())).map((line) => line.replace(/^- \[[xX]\]\s*/, "").trim())
+        );
+        const skalMarkeres = forberedelse.filter((el) => !el.isCompleted && afkrydsede.has(`⚒ ${el.titel}`));
+        if (skalMarkeres.length) await completeTasks(skalMarkeres, tabId);
+      }
       // Underviseren kan tilføje en Forberedelse EFTER stubben blev skrevet — uden dette ville den
       // aldrig dukke op i noten, fordi stubben kun skrives én gang.
       // ponytail: matcher på titel, ikke element-id. To elementer med IDENTISK titel i samme
@@ -934,6 +944,49 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
     if (err.code === "VAULT_PERMISSION") return false;
     recordError(`Forelæsningsnote (${weekFolder}): ${err.message}`);
     return true;
+  }
+}
+
+// issue #70: CustomActivity-siden er en almindelig WebForms-postback uden UpdatePanel (live-målt
+// 2026-08-12), så et rent form-POST med de skjulte felter er nok — samme GET som
+// fetchActivityBody allerede laver. Selvstændig funktion (ingen closures over ydre scope) fordi
+// den injiceres i itslearning-fanen via chrome.scripting.executeScript, samme grund som
+// fetchActivityBody kun kan køre i selve fanen: session-cookien findes kun der.
+async function toggleTaskCompletedInPage(url) {
+  const getRes = await fetch(url, { credentials: "include" });
+  const doc = new DOMParser().parseFromString(await getRes.text(), "text/html");
+  const field = (name) => doc.querySelector(`[name="${name}"]`)?.value ?? "";
+  const body = new URLSearchParams({
+    __ITSL_CSRF_TOKEN__: field("__ITSL_CSRF_TOKEN__"),
+    __EVENTTARGET: "ctl00$ContentPlaceHolder$TaskCompletedToggle",
+    __EVENTARGUMENT: "",
+    __VIEWSTATE: field("__VIEWSTATE"),
+    __VIEWSTATEGENERATOR: field("__VIEWSTATEGENERATOR"),
+    __EVENTVALIDATION: field("__EVENTVALIDATION"),
+  });
+  await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+}
+
+// Kun én retning ([ ] → [x] i noten poster til itslearning, aldrig omvendt) og kun når
+// isCompleted allerede er false — isCompleted kommer med i plan.elements ved hver kørsel, så det
+// ER idempotens-tjekket, ingen selvstændig log nødvendig. WebForms svarer 200 + en fejlside ved et
+// udløbet __EVENTVALIDATION i stedet for en fejlkode (issue #70), så succes verificeres ikke her —
+// et fejlet POST retter sig selv ved næste kørsel, fordi isCompleted så stadig er false og noten
+// stadig har [x]. ponytail: ingen re-GET til at bekræfte samme kørsel, næste kørsels friske
+// isCompleted er verifikationen.
+async function completeTasks(forberedelse, tabId) {
+  for (const el of forberedelse) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: toggleTaskCompletedInPage, args: [el.url] });
+    } catch (err) {
+      console.error(`VIAstudyWiz TaskCompletedToggle-fejl ("${el.titel}"):`, err);
+      recordError(`Kunne ikke markere "${el.titel}" som fuldført i itslearning: ${err.message}`);
+    }
   }
 }
 
@@ -998,7 +1051,7 @@ function summarizeAutoChange(oldAutoContent, newAutoContent) {
 // Returnerer false hvis vault-tilladelsen manglede — kalderen bruger det til at springe resten
 // af kørslen over (tilladelsen kommer ikke tilbage af sig selv midt i et løb) og til at tænde
 // advarsels-badge'et.
-async function writePlanNotes(plans) {
+async function writePlanNotes(plans, tabId, syncTaskCompletion) {
   const records = await getPlanNoteRecords();
 
   for (const [planKey, plan] of Object.entries(plans)) {
@@ -1053,7 +1106,7 @@ async function writePlanNotes(plans) {
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
     const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/[PLAN] ${weekFolder}.md`;
-    const stubOk = await writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse);
+    const stubOk = await writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse, tabId, syncTaskCompletion);
     if (!stubOk) return false;
 
     // Ligger i AUTO-blokken, så underviserens rettelser følger med (issue #61) — i modsætning til
@@ -1810,6 +1863,7 @@ const DEFAULT_SETTINGS = {
   enableFileDownloads: true,
   enableCalendarSync: true,
   enableMetadataExport: false,
+  enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
 };
 
