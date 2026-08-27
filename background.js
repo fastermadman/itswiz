@@ -1148,6 +1148,10 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const literature = planLiteratureText(plan);
     const literatureFiles = literature ? matchLiteratureElements(literature, plan.elements ?? []) : [];
     const forberedelse = forberedelseElements(plan);
+    // Samme tekst som AUTO-sektionens brødtekst nedenfor, men som eget felt: Hold Course-synken
+    // (issue #113) læser kun frontmatter, ikke AUTO-blokken, og "Key Concepts & Lesson Goal" på
+    // lektionen i Hold Course er netop den fritekst-boks planens beskrivelse hører hjemme i.
+    const beskrivelse = stripHtml(plan.description).trim();
     // Ikke alle undervisere udfylder "Tilhørende litteratur"-feltet — LivsOplysning vedhæfter i
     // stedet læsestoffet som almindelige fil-elementer og skriver selve læse-instruktionen
     // ("Forberedelse: Læs indledningen af...") ind i planens frie beskrivelsestekst i stedet for i
@@ -1201,7 +1205,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
-    const FRONTMATTER_VERSION = 7; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113)
+    const FRONTMATTER_VERSION = 8; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113)
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (prevRecord?.hash === currentHash) {
       // Indholdet er uændret, så resten af funktionen springes over — men weekFolder skal stadig
@@ -1254,6 +1258,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       ...(materialeFiler.length
         ? yamlBlockLines("materiale_filer", materialeFiler.map((el) => `📎 [[${mdPath(courseName, weekFolder, el.title)}]]`).join("\n"))
         : ["materiale_filer: false"]),
+      ...(beskrivelse ? yamlBlockLines("beskrivelse", beskrivelse) : ["beskrivelse: false"]),
       "---",
       "",
     ].join("\n");

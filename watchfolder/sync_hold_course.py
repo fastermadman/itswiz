@@ -272,9 +272,19 @@ def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
         lec = {"id": new_id(), "title": "", "date": "", "status": "not-started",
                "notes": "", "vaultLink": "", "assignments": [], "vswPlanId": plan["plan_id"]}
         cls["lectures"].append(lec)
-    # Synkens felter. status og notes er Valdemars og røres ikke.
+    # Synkens felter. status er udelukkende Valdemars og røres aldrig.
     lec["title"] = plan.get("emne") or plan.get("uge") or "Lektion"
     lec["date"] = (plan.get("start") or "")[:10]
+
+    # "Key Concepts & Lesson Goal" (lec.notes) er en fritekst-boks han også selv kan skrive i,
+    # samme situation som vaultLink lige nedenfor: vswNotes husker hvad synken sidst skrev, så en
+    # tom boks udfyldes, en boks han selv har rettet i (afviger fra vswNotes) står urørt.
+    beskrivelse = plan.get("beskrivelse", "")
+    beskrivelse = "" if beskrivelse == "false" else beskrivelse
+    notes_owned = "vswNotes" not in lec or lec.get("notes", "") in ("", lec["vswNotes"])
+    if beskrivelse and notes_owned:
+        lec["notes"] = beskrivelse
+        lec["vswNotes"] = beskrivelse
     # Hold Courses "Lecture note" er Valdemars egen note for lektionen, ikke maskinens lektionsplan
     # — derfor [NOTE]-stubben, som selv linker videre til [PLAN] via sit kilde:-felt. Ét klik til
     # planen, i stedet for at bruge feltet på en note han ikke selv skriver i.
@@ -594,7 +604,20 @@ def selfcheck() -> int:
     assert json.dumps(sync_data(json.loads(snap4), [plan], lambda: "MÅ-IKKE-BRUGES", tasks=[opgave]),
                       sort_keys=True) == snap4, "opgave-synk er ikke idempotent"
 
-    # LivsOplysning-scenariet (live 2026-08-27): intet udfyldt litteratur-felt, men vedhæftede
+    # Key Concepts & Lesson Goal (lec.notes): udfyldes fra beskrivelse:, men Valdemars egen
+    # rettelse i Hold Course overlever en resync, ligesom vaultLink.
+    plan_b = dict(plan, beskrivelse="I dag arbejder vi med resonansbegrebet.")
+    ids7 = iter(f"g{n}" for n in range(100))
+    data7 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [plan_b], lambda: next(ids7))
+    lec7 = data7["semesters"][0]["classes"][0]["lectures"][0]
+    assert lec7["notes"] == "I dag arbejder vi med resonansbegrebet.", lec7
+    lec7["notes"] = "Mine egne stikord til timen"  # Valdemar retter i Hold Course
+    plan_b2 = dict(plan_b, beskrivelse="Underviseren har opdateret beskrivelsen.")
+    data7 = sync_data(data7, [plan_b2], lambda: "MÅ-IKKE-BRUGES")
+    lec7 = data7["semesters"][0]["classes"][0]["lectures"][0]
+    assert lec7["notes"] == "Mine egne stikord til timen", lec7  # ikke overskrevet
+
+    # LivsOplysning-scenariet    # LivsOplysning-scenariet (live 2026-08-27): intet udfyldt litteratur-felt, men vedhæftede
     # fil-elementer i materiale_filer. Skal STADIG give en Reading-opgave, ikke ingenting.
     livso = dict(plan, plan_id="9:9", litteratur="false", litteratur_filer="false",
                  forberedelse="false", materiale_filer="📎 [[§ FAG/⚖︎ LivsOplysning/MD/x/Rosa1.md]]",
