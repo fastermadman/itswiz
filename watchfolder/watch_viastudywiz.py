@@ -38,6 +38,8 @@ import requests
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+import sync_hold_course
+
 TIME_ZONE = ZoneInfo("Europe/Copenhagen")
 VAULT_ROOT = Path.home() / "ViaVault"
 RAW_DIR_NAME = "RAW"
@@ -605,9 +607,23 @@ class DocumentHandler(FileSystemEventHandler):
         process_document(path)
 
 
+def sync_hold_course_quietly() -> None:
+    """Holder Hold Course-pluginets data.json i sync med lektionsplan-noterne (issue #113).
+
+    Ligger her frem for som et selvstændigt trin, fordi #113 kræver at synken sker uden noget nyt
+    manuelt trin. Kaldet er billigt (læser ~36 små noter) og skriver kun når noget reelt ændrede
+    sig, så minut-intervallet i main() koster ingenting. Fejl må aldrig vælte watcheren — MinerU-
+    konverteringen er den vigtige opgave her, Hold Course-synken er en bekvemmelighed."""
+    try:
+        sync_hold_course.sync(VAULT_ROOT, sync_hold_course.DATA_JSON, apply=True, quiet=True)
+    except Exception as exc:  # noqa: BLE001 — se docstring: synken må aldrig stoppe watcheren
+        print(f"Hold Course-synk fejlede (fortsætter): {exc}", file=sys.stderr, flush=True)
+
+
 def main():
     VAULT_ROOT.mkdir(parents=True, exist_ok=True)
     scan_existing()
+    sync_hold_course_quietly()
 
     observer = Observer()
     observer.schedule(DocumentHandler(), str(VAULT_ROOT), recursive=True)
@@ -616,6 +632,7 @@ def main():
     try:
         while True:
             time.sleep(60)
+            sync_hold_course_quietly()
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
