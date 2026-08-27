@@ -322,10 +322,27 @@ def _printed_page_number(page_blocks: list[dict]) -> str | None:
 
 
 # #101: content_list.json's blokke har hver deres egen bbox (bekræftet ved inspektion af rå
-# API-output) — en dobbeltside-scans venstre og højre fysiske side kan derfor skelnes ud fra om
-# blokkens x0 ligger i venstre eller højre halvdel af PDF-siden. Kun relevant når der faktisk ER
+# API-output) — en dobbeltside-scans to fysiske sider kan derfor skelnes ud fra om blokkens
+# koordinat ligger i den ene eller anden halvdel af PDF-siden. Kun relevant når der faktisk ER
 # to forskellige sidetal på samme page_idx; ellers ingen split (almindelig enkeltside-scan).
-def _split_double_page(page_blocks: list[dict], width: int) -> list[list[dict]] | None:
+#
+# #103: venstre/højre (x-aksen) er IKKE den eneste orientering i praksis — undervisere roterer
+# ikke altid scanningen, så to fysiske sider kan lige så vel være stablet oven på hinanden
+# (y-aksen). Live-verificeret på "Benedikt Otzen Myter i Genesis": de to page_number-blokke havde
+# næsten identisk x0 (26 vs. 28) men vidt forskellig y0 (179 vs. 907) — en x-splittet ville lægge
+# dem i samme halvdel og aldrig adskille dem. Løsningen prøver derfor begge akser og bruger den
+# der rent faktisk lægger de to kendte sidetal i hver sin halvdel, i stedet for at antage
+# orienteringen på forhånd.
+def _bisect_blocks(page_blocks: list[dict], coord_index: int, mid: float) -> list[list[dict]]:
+    halves: list[list[dict]] = [[], []]
+    for block in page_blocks:
+        bbox = block.get("bbox")
+        coord = bbox[coord_index] if bbox else 0
+        halves[0 if coord < mid else 1].append(block)
+    return halves
+
+
+def _split_double_page(page_blocks: list[dict], page_size: tuple[int, int]) -> list[list[dict]] | None:
     numbers = {
         int(b["text"].strip())
         for b in page_blocks
@@ -334,20 +351,22 @@ def _split_double_page(page_blocks: list[dict], width: int) -> list[list[dict]] 
     if len(numbers) != 2:
         return None
 
-    mid = width / 2
-    halves: list[list[dict]] = [[], []]
-    for block in page_blocks:
-        bbox = block.get("bbox")
-        x0 = bbox[0] if bbox else 0
-        halves[0 if x0 < mid else 1].append(block)
-    if not halves[0] or not halves[1]:
-        return None
-    return halves
+    for coord_index, dimension in ((0, page_size[0]), (1, page_size[1])):
+        halves = _bisect_blocks(page_blocks, coord_index, dimension / 2)
+        if not halves[0] or not halves[1]:
+            continue
+        half_numbers = [
+            {int(b["text"].strip()) for b in half if b.get("type") == "page_number" and (b.get("text") or "").strip().isdigit()}
+            for half in halves
+        ]
+        if half_numbers[0] and half_numbers[1] and not (half_numbers[0] & half_numbers[1]):
+            return halves
+    return None
 
 
 # page_size findes kun i layout.json, ikke i content_list.json (se #98) — pdf_info-listen har sit
 # eget page_idx-felt pr. side, ikke nødvendigvis liste-index, så der slås op på det eksplicit.
-def _page_widths(layout_path: Path | None) -> dict[int, int]:
+def _page_sizes(layout_path: Path | None) -> dict[int, tuple[int, int]]:
     if layout_path is None:
         return {}
     try:
@@ -355,7 +374,7 @@ def _page_widths(layout_path: Path | None) -> dict[int, int]:
     except (json.JSONDecodeError, OSError):
         return {}
     return {
-        page["page_idx"]: page["page_size"][0]
+        page["page_idx"]: tuple(page["page_size"])
         for page in layout.get("pdf_info", [])
         if "page_size" in page
     }
@@ -413,7 +432,8 @@ def insert_page_markers(
     markør sat i slutningen af dokumentet i stedet for.
 
     `layout_path` (MinerU's layout.json, #98) er valgfri — findes den, splittes dobbeltside-
-    scans (#101) i venstre/højre fysisk side vha. bbox, så hver får sin egen præcise markør i
+    scans (#101/#103) i deres to fysiske sider vha. bbox (venstre/højre eller top/bund, se
+    _split_double_page), så hver får sin egen præcise markør i
     stedet for ét interval-tal for hele opslaget.
     """
     try:
@@ -421,7 +441,7 @@ def insert_page_markers(
     except (json.JSONDecodeError, OSError):
         return full_md_text
 
-    page_widths = _page_widths(layout_path)
+    page_sizes = _page_sizes(layout_path)
     pages = _group_blocks_by_page(blocks)
     result = full_md_text
     search_pos = 0
@@ -429,8 +449,8 @@ def insert_page_markers(
 
     for page_idx in sorted(pages):
         page_blocks = pages[page_idx]
-        width = page_widths.get(page_idx)
-        groups = (_split_double_page(page_blocks, width) if width else None) or [page_blocks]
+        page_size = page_sizes.get(page_idx)
+        groups = (_split_double_page(page_blocks, page_size) if page_size else None) or [page_blocks]
 
         for group in groups:
             anchor = _first_anchor_text(group)
@@ -633,6 +653,46 @@ def selfcheck() -> int:
         assert _printed_page_number(spread_page) == "190–191"
         assert _printed_page_number([{"type": "page_number", "page_idx": 0, "text": "47"}]) == "47"
         assert _printed_page_number([{"type": "text", "page_idx": 0, "text": "ingen sidetal her"}]) is None
+
+        # #103: opslag kan være vendt forskelligt side for side i samme dokument (nogle roteret
+        # rigtigt, nogle ikke) — _split_double_page afgør akse pr. side ud fra hvor de to kendte
+        # sidetal rent faktisk adskilles, i stedet for at antage én orientering for hele dokumentet.
+        horizontal_spread = [
+            {"type": "text", "page_idx": 0, "bbox": [10, 500, 200, 520], "text": "Venstre tekst"},
+            {"type": "page_number", "page_idx": 0, "bbox": [10, 780, 30, 800], "text": "10"},
+            {"type": "text", "page_idx": 0, "bbox": [400, 500, 590, 520], "text": "Højre tekst"},
+            {"type": "page_number", "page_idx": 0, "bbox": [570, 780, 590, 800], "text": "11"},
+        ]
+        halves = _split_double_page(horizontal_spread, (600, 800))
+        assert halves is not None, halves
+        assert {b["text"] for b in halves[0]} == {"Venstre tekst", "10"}, halves
+        assert {b["text"] for b in halves[1]} == {"Højre tekst", "11"}, halves
+
+        # Reelle bbox-værdier fra "Benedikt Otzen Myter i Genesis" (#103): x0 for de to
+        # page_number-blokke er næsten identisk (26 vs. 28) — en ren x-split ville aldrig
+        # adskille dem. y0 derimod (179 vs. 907) adskiller rent, fordi siderne er stablet
+        # oven på hinanden, ikke ved siden af hinanden (underviseren har ikke roteret scanningen).
+        vertical_spread = [
+            {"type": "text", "page_idx": 0, "bbox": [50, 50, 400, 150], "text": "Øverste side"},
+            {"type": "page_number", "page_idx": 0, "bbox": [28, 179, 50, 197], "text": "34"},
+            {"type": "text", "page_idx": 0, "bbox": [50, 700, 400, 800], "text": "Nederste side"},
+            {"type": "page_number", "page_idx": 0, "bbox": [26, 907, 48, 927], "text": "35"},
+        ]
+        halves = _split_double_page(vertical_spread, (595, 841))
+        assert halves is not None, halves
+        assert {b["text"] for b in halves[0]} == {"Øverste side", "34"}, halves
+        assert {b["text"] for b in halves[1]} == {"Nederste side", "35"}, halves
+
+        # Almindelig enkeltside-scan (kun ét sidetal) — intet forsøg på split.
+        assert _split_double_page([{"type": "page_number", "page_idx": 0, "bbox": [10, 10, 20, 20], "text": "5"}], (600, 800)) is None
+
+        # Ingen af akserne kan adskille de to sidetal — sikker fallback til None (arver den
+        # gamle interval-opførsel) i stedet for at gætte forkert.
+        unsplittable = [
+            {"type": "page_number", "page_idx": 0, "bbox": [10, 10, 20, 20], "text": "6"},
+            {"type": "page_number", "page_idx": 0, "bbox": [10, 10, 20, 20], "text": "7"},
+        ]
+        assert _split_double_page(unsplittable, (600, 800)) is None
 
         # Løbende sidehoved/-fod: konsistent gentaget tekst (flertal) bliver til sektions-metadata,
         # en enkeltstående afvigelse (fejlscannet side) må ikke fejlagtigt tages som overskrift.
