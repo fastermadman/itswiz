@@ -823,14 +823,18 @@ function courseCalendarName(courseName) {
 }
 
 // Fritekstfelt underviseren selv udfylder — henviser ofte til grundbogssider, ikke kun vedhæftede
-// filer, så det kan ikke kobles til bestemte elementer. headingText starter altid med
-// "Tilhørende litteratur", men har varierende parentes-tilføjelser pr. underviser/kursus.
+// filer, så det kan ikke kobles til bestemte elementer. headingText varierer i store/små
+// bogstaver på tværs af undervisere/kurser — bekræftet live 2026-08-27: feltet med det faktiske
+// indhold (10 af 10 planer med udfyldt tekst) hedder "Tilhørende litteratur (læses forud for
+// lektionen)" med lille l, mens et par planer har et separat TOMT felt "Litteratur" med stort L.
+// Et case-sensitivt includes("Litteratur") ramte kun det tomme felt og misforstod dermed en
+// UDFYLDT lektion for en tom (issue #44) — match derfor case-insensitivt.
 // field.text er kun rent tekst når isPlainText er sat — nogle undervisere bruger rig tekst i
 // feltet, hvor text i stedet indeholder rå HTML (bekræftet live, fx "<p><span
 // style=...>...</span></p>" for et Musikforståelse-felt). stripHtml() bruges derfor altid, den
 // er et no-op på allerede rent tekst.
 function planLiteratureText(plan) {
-  const text = plan.fields?.find((f) => f.headingText?.includes("Litteratur"))?.text;
+  const text = plan.fields?.find((f) => f.headingText?.toLowerCase().includes("litteratur"))?.text;
   return text ? stripHtml(text) || null : null;
 }
 
@@ -1089,7 +1093,7 @@ async function writePlanNotes(plans) {
     // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
-    const FRONTMATTER_VERSION = 4; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96)
+    const FRONTMATTER_VERSION = 5; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44)
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (prevRecord?.hash === currentHash) {
       // Indholdet er uændret, så resten af funktionen springes over — men weekFolder skal stadig
