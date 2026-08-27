@@ -75,6 +75,7 @@ def nfc(text: str) -> str:
 # Præfikserne background.js sætter foran værdierne i frontmatteren (yamlBlockLines).
 LITTERATUR_PREFIX = "▥"
 LITTERATUR_FIL_PREFIX = "📎"
+MATERIALE_FIL_PREFIX = "📎"
 FORBEREDELSE_PREFIX = "⚒"
 
 
@@ -375,6 +376,18 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
             ensure_assignment(lec, f'{akey}|forb|{titel}', titel, "Other", due, "", new_id,
                               linked_note=stub)
 
+        # Alt vedhæftet fil-materiale UDEN et litteratur-felt-match (background.js udelukker selv
+        # de allerede fangede litteratur_filer-mål, så ingen dublet-Reading for samme fil). Dækker
+        # fag hvor underviseren aldrig udfylder "Tilhørende litteratur" — LivsOplysning har 0
+        # udfyldte litteratur-felter, men vedhæfter læsestoffet som almindelige fil-elementer.
+        for line in prefixed_lines(plan.get("materiale_filer", ""), MATERIALE_FIL_PREFIX):
+            target = nfc(wikilink_target(line) or "")
+            if not target:
+                continue
+            res = ensure_resource(sem, cls, target, new_id)
+            ensure_assignment(lec, f'{akey}|mat|{target}', res["title"], "Reading", due,
+                              res["id"], new_id, linked_note=target)
+
     # Afleveringsopgaver hænger på faget, ikke på en lektion — derfor klasse-niveau. De vises i
     # Hold Courses Assignments-liste og kalender uden at blive klistret på en tilfældig lektion.
     for task in sorted(tasks, key=lambda t: (t["fag"], t.get("deadline", ""))):
@@ -581,6 +594,32 @@ def selfcheck() -> int:
     assert json.dumps(sync_data(json.loads(snap4), [plan], lambda: "MÅ-IKKE-BRUGES", tasks=[opgave]),
                       sort_keys=True) == snap4, "opgave-synk er ikke idempotent"
 
+    # LivsOplysning-scenariet (live 2026-08-27): intet udfyldt litteratur-felt, men vedhæftede
+    # fil-elementer i materiale_filer. Skal STADIG give en Reading-opgave, ikke ingenting.
+    livso = dict(plan, plan_id="9:9", litteratur="false", litteratur_filer="false",
+                 forberedelse="false", materiale_filer="📎 [[§ FAG/⚖︎ LivsOplysning/MD/x/Rosa1.md]]",
+                 fag="LivsOplysning", _path="§ FAG/⚖︎ LivsOplysning/MD/x/[PLAN] x.md")
+    ids5 = iter(f"e{n}" for n in range(100))
+    data5 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [livso], lambda: next(ids5))
+    lec5 = data5["semesters"][0]["classes"][0]["lectures"][0]
+    assert len(lec5["assignments"]) == 1, lec5["assignments"]
+    mat = lec5["assignments"][0]
+    assert mat["type"] == "Reading" and mat["title"] == "Rosa1", mat
+    assert mat["linkedBook"] == data5["semesters"][0]["resources"][0]["id"], mat
+    snap5 = json.dumps(data5, sort_keys=True)
+    assert json.dumps(sync_data(json.loads(snap5), [livso], lambda: "MÅ-IKKE-BRUGES"), sort_keys=True) == snap5
+
+    # Et fag der har BÅDE litteratur_filer og materiale_filer for samme lektion -> ingen dublet,
+    # to forskellige filer giver to opgaver.
+    baade = dict(plan, plan_id="9:10", materiale_filer="📎 [[§ FAG/♪ Musik/MD/x/Ekstra.md]]",
+                 _path="§ FAG/♪ Musik/MD/x/[PLAN] x.md")
+    ids6 = iter(f"f{n}" for n in range(100))
+    data6 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [baade], lambda: next(ids6))
+    lec6 = data6["semesters"][0]["classes"][0]["lectures"][0]
+    titles6 = sorted(a["title"] for a in lec6["assignments"] if a["type"] == "Reading")
+    assert titles6 == ["Ekstra", "Frede V Nielsen Ars og Scientia"], titles6
+
+    # Findes stubben ikke, falder vi tilbage til selve planen
     # Findes stubben ikke, falder vi tilbage til selve planen frem for et dødt link.
     assert note_stub_path("findes/slet/ikke/MD/x/[PLAN] x.md") == "findes/slet/ikke/MD/x/[PLAN] x.md"
 

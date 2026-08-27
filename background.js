@@ -1148,6 +1148,19 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const literature = planLiteratureText(plan);
     const literatureFiles = literature ? matchLiteratureElements(literature, plan.elements ?? []) : [];
     const forberedelse = forberedelseElements(plan);
+    // Ikke alle undervisere udfylder "Tilhørende litteratur"-feltet — LivsOplysning vedhæfter i
+    // stedet læsestoffet som almindelige fil-elementer og skriver selve læse-instruktionen
+    // ("Forberedelse: Læs indledningen af...") ind i planens frie beskrivelsestekst i stedet for i
+    // et separat felt (bekræftet live 2026-08-27: 0 af 6 LivsOplysning-planer har et udfyldt
+    // litteratur- eller Arbejdsopgave-felt, men alle har vedhæftede fil-elementer). Uden dette felt
+    // var LivsOplysnings læsestof usynligt for alt der læser frontmatter (Hold Course-synken,
+    // issue #113) — det stod kun i AUTO-sektionens "## Materialer", som er fritekst.
+    // Samme fil-elementer som "## Materialer" ovenfor, minus dem litteratur_filer allerede har
+    // fanget (samme fil skal ikke stå i begge felter) — NON_FILE_TYPE_NAMES udelukker i forvejen
+    // Link/Mappe/Arbejdsopgave/Afleveringsopgave, samme filter som materials-listen bruger.
+    const literatureFileTitles = new Set(literatureFiles.map((el) => el.title));
+    const materialeFiler = (plan.elements ?? [])
+      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title));
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
@@ -1188,7 +1201,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
-    const FRONTMATTER_VERSION = 6; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44)
+    const FRONTMATTER_VERSION = 7; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113)
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (prevRecord?.hash === currentHash) {
       // Indholdet er uændret, så resten af funktionen springes over — men weekFolder skal stadig
@@ -1235,6 +1248,12 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       ...(forberedelse.length
         ? yamlBlockLines("forberedelse", forberedelse.map((el) => `⚒ ${el.titel}`).join("\n"))
         : ["forberedelse: false"]),
+      // Alt vedhæftet fil-materiale der IKKE allerede står i litteratur_filer — dækker fag hvor
+      // underviseren aldrig udfylder litteratur-feltet (se kommentaren ved materialeFiler ovenfor).
+      // Samme false-mønster som de øvrige felter.
+      ...(materialeFiler.length
+        ? yamlBlockLines("materiale_filer", materialeFiler.map((el) => `📎 [[${mdPath(courseName, weekFolder, el.title)}]]`).join("\n"))
+        : ["materiale_filer: false"]),
       "---",
       "",
     ].join("\n");
