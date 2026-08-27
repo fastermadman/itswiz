@@ -38,10 +38,16 @@ import requests
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+import sync_hold_course
+
 TIME_ZONE = ZoneInfo("Europe/Copenhagen")
 VAULT_ROOT = Path.home() / "ViaVault"
 RAW_DIR_NAME = "RAW"
 MD_DIR_NAME = "MD"
+# Matcher background.js' FOLDER_SYMBOLS. Mappenavnet har symbolet foran til visuel navigation
+# (issue #63), men fag:-frontmatter skal blive ved det rene navn, ellers splitter Bases'
+# groupBy/filter materiale-/dublet-noter fra lektionsplan-/opgave-noter i to grupper (issue #111).
+FOLDER_SYMBOLS = {"♪": "Musik", "♱": "Religion", "⚖︎": "LivsOplysning"}
 ATTACHMENTS_DIR_NAME = "_attachments"
 ENV_FILE = Path(__file__).parent / ".env"
 API_BASE = "https://mineru.net/api/v4"
@@ -135,6 +141,13 @@ def format_now() -> str:
     return datetime.now(TIME_ZONE).strftime("%Y-%m-%d %H:%M")
 
 
+def plain_fag(folder_name: str) -> str:
+    for symbol, name in FOLDER_SYMBOLS.items():
+        if folder_name == f"{symbol} {name}":
+            return name
+    return folder_name
+
+
 def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -> str:
     raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
     uge, _, folder_emne = doc_path.parent.name.partition(" - ")
@@ -147,7 +160,7 @@ def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -
 
     return (
         "---\n"
-        f"fag: {raw_root.parent.name}\n"
+        f"fag: {plain_fag(raw_root.parent.name)}\n"
         f"uge: {uge}\n"
         f"type: {note_type}\n"
         f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n'
@@ -594,9 +607,23 @@ class DocumentHandler(FileSystemEventHandler):
         process_document(path)
 
 
+def sync_hold_course_quietly() -> None:
+    """Holder Hold Course-pluginets data.json i sync med lektionsplan-noterne (issue #113).
+
+    Ligger her frem for som et selvstændigt trin, fordi #113 kræver at synken sker uden noget nyt
+    manuelt trin. Kaldet er billigt (læser ~36 små noter) og skriver kun når noget reelt ændrede
+    sig, så minut-intervallet i main() koster ingenting. Fejl må aldrig vælte watcheren — MinerU-
+    konverteringen er den vigtige opgave her, Hold Course-synken er en bekvemmelighed."""
+    try:
+        sync_hold_course.sync(VAULT_ROOT, sync_hold_course.DATA_JSON, apply=True, quiet=True)
+    except Exception as exc:  # noqa: BLE001 — se docstring: synken må aldrig stoppe watcheren
+        print(f"Hold Course-synk fejlede (fortsætter): {exc}", file=sys.stderr, flush=True)
+
+
 def main():
     VAULT_ROOT.mkdir(parents=True, exist_ok=True)
     scan_existing()
+    sync_hold_course_quietly()
 
     observer = Observer()
     observer.schedule(DocumentHandler(), str(VAULT_ROOT), recursive=True)
@@ -605,6 +632,7 @@ def main():
     try:
         while True:
             time.sleep(60)
+            sync_hold_course_quietly()
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
@@ -639,6 +667,18 @@ def selfcheck() -> int:
             assert 'emne: "Når børn synger. (fra plan)"' in fm, fm
             assert 'start: "2026-08-20 08:15:00"' in fm, fm
             assert 'stop: "2026-08-20 12:00:00"' in fm, fm
+        finally:
+            VAULT_ROOT = old_root
+
+        # Symbol-mappenavn (issue #111): fag: skal blive ved det rene navn, ikke mappens
+        # visningssymbol, ellers splitter Bases materiale-noter fra lektionsplan-noter i to grupper.
+        symbol_pdf = root / "♱ Religion" / RAW_DIR_NAME / "W34tors - Dåb." / "Titel.pdf"
+        symbol_pdf.parent.mkdir(parents=True)
+        symbol_pdf.write_bytes(b"")
+        old_root, VAULT_ROOT = VAULT_ROOT, root
+        try:
+            fm = frontmatter(symbol_pdf)
+            assert "fag: Religion\n" in fm, fm
         finally:
             VAULT_ROOT = old_root
 
