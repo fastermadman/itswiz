@@ -20,10 +20,10 @@ async function getVaultHandle() {
   return handle;
 }
 
-async function getTargetDirectory(root, pathParts) {
+async function getTargetDirectory(root, pathParts, { create = true } = {}) {
   let dir = root;
   for (const part of pathParts) {
-    dir = await dir.getDirectoryHandle(part, { create: true });
+    dir = await dir.getDirectoryHandle(part, { create });
   }
   return dir;
 }
@@ -65,6 +65,54 @@ async function readFile(path) {
   return await file.text();
 }
 
+async function copyRecursive(srcDir, destDir) {
+  for await (const [name, handle] of srcDir.entries()) {
+    if (handle.kind === "file") {
+      const file = await handle.getFile();
+      const destFile = await destDir.getFileHandle(name, { create: true });
+      const writable = await destFile.createWritable();
+      await writable.write(file);
+      await writable.close();
+    } else {
+      const destSubDir = await destDir.getDirectoryHandle(name, { create: true });
+      await copyRecursive(handle, destSubDir);
+    }
+  }
+}
+
+// Flytter en hel mappe (fx en ugemappe hvis en lektion er blevet udskudt til en anden dato, se
+// issue #96) fra oldPath til newPath. FSA har intet atomisk move for mapper — kopierer rekursivt
+// og sletter kilden bagefter. No-op hvis kildemappen (eller en af dens forældre) ikke findes, fx
+// hvis den allerede blev flyttet i en tidligere kørsel.
+async function moveDir(oldPath, newPath) {
+  const root = await getVaultHandle();
+
+  const oldParts = oldPath.split("/");
+  const oldName = oldParts.pop();
+  let oldParentDir;
+  try {
+    oldParentDir = await getTargetDirectory(root, oldParts, { create: false });
+  } catch (err) {
+    if (err.name === "NotFoundError") return;
+    throw err;
+  }
+  let oldDir;
+  try {
+    oldDir = await oldParentDir.getDirectoryHandle(oldName, { create: false });
+  } catch (err) {
+    if (err.name === "NotFoundError") return;
+    throw err;
+  }
+
+  const newParts = newPath.split("/");
+  const newName = newParts.pop();
+  const newParentDir = await getTargetDirectory(root, newParts);
+  const newDir = await newParentDir.getDirectoryHandle(newName, { create: true });
+
+  await copyRecursive(oldDir, newDir);
+  await oldParentDir.removeEntry(oldName, { recursive: true });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== "offscreen") return;
   if (message.type === "writeFile") {
@@ -76,6 +124,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "readFile") {
     readFile(message.path)
       .then((text) => sendResponse({ ok: true, text }))
+      .catch((err) => sendResponse({ ok: false, error: err.message, code: err.code }));
+    return true;
+  }
+  if (message.type === "moveDir") {
+    moveDir(message.oldPath, message.newPath)
+      .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: err.message, code: err.code }));
     return true;
   }

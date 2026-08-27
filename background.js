@@ -47,6 +47,19 @@ async function readFromVault(path) {
   return response.text;
 }
 
+// Flytter en hel ugemappe (RAW/MD, inkl. konverterede materialer og _attachments) — bruges når en
+// lektion er blevet udskudt til en anden dato (issue #96, se writePlanNotes). No-op hvis
+// kildemappen ikke findes.
+async function moveDirInVault(oldPath, newPath) {
+  await ensureOffscreenDocument();
+  const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "moveDir", oldPath, newPath });
+  if (!response?.ok) {
+    throw Object.assign(new Error(response?.error ?? "Ukendt fejl ved flytning i offscreen-dokumentet"), {
+      code: response?.code,
+    });
+  }
+}
+
 // Tæller fejlede enkelt-elementer (fil-downloads, kalender-events, lektionsplan-noter) i den
 // aktuelle kørsel. Nulstilles i collectAndDownload. Uden denne var den slags fejl kun synlige i
 // service worker-konsollen — man skulle vide de skulle kigges efter for overhovedet at opdage dem.
@@ -741,15 +754,24 @@ async function markDownloaded(id) {
 // der kører synkront i en loop over alle ugens planer.
 const PLAN_NOTE_HASHES_KEY = "planNoteContentHashes";
 
-async function getPlanNoteHashes() {
-  const { [PLAN_NOTE_HASHES_KEY]: hashes } = await chrome.storage.local.get(PLAN_NOTE_HASHES_KEY);
-  return hashes ?? {};
+async function getPlanNoteRecords() {
+  const { [PLAN_NOTE_HASHES_KEY]: records } = await chrome.storage.local.get(PLAN_NOTE_HASHES_KEY);
+  return records ?? {};
 }
 
-async function savePlanNoteHash(noteId, hash) {
-  const hashes = await getPlanNoteHashes();
-  hashes[noteId] = hash;
-  await chrome.storage.local.set({ [PLAN_NOTE_HASHES_KEY]: hashes });
+// Ældre lagrede værdier er rene hash-strenge (før issue #96 tilføjede ugemappe-sporing) —
+// normaliseres her i stedet for at migrere storage, weekFolder: null betyder bare "ukendt gammel
+// placering, spring flytte-detektion over denne ene gang" (opgraderes automatisk ved næste skrivning).
+function planNoteRecord(records, noteId) {
+  const value = records[noteId];
+  if (value == null) return null;
+  return typeof value === "string" ? { hash: value, weekFolder: null } : value;
+}
+
+async function savePlanNoteRecord(noteId, hash, weekFolder) {
+  const records = await getPlanNoteRecords();
+  records[noteId] = { hash, weekFolder };
+  await chrome.storage.local.set({ [PLAN_NOTE_HASHES_KEY]: records });
 }
 
 function simpleHash(text) {
@@ -970,14 +992,14 @@ function summarizeAutoChange(oldAutoContent, newAutoContent) {
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
 // AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
-// sporet via et content-hash pr. plan (getPlanNoteHashes), ikke bare "er filen skrevet før", så
+// sporet via et content-hash pr. plan (getPlanNoteRecords), ikke bare "er filen skrevet før", så
 // underviserens rettelser ikke drifter væk fra noten (issue #61). Alt Valdemar selv skriver i
 // filen uden for AUTO-markørerne bevares uanset, se spliceAutoSection.
 // Returnerer false hvis vault-tilladelsen manglede — kalderen bruger det til at springe resten
 // af kørslen over (tilladelsen kommer ikke tilbage af sig selv midt i et løb) og til at tænde
 // advarsels-badge'et.
 async function writePlanNotes(plans) {
-  const hashes = await getPlanNoteHashes();
+  const records = await getPlanNoteRecords();
 
   for (const [planKey, plan] of Object.entries(plans)) {
     const noteId = `plan:${planKey}`;
@@ -989,6 +1011,25 @@ async function writePlanNotes(plans) {
     // værdi (courseDisplayName), da Seminarium.base filtrerer eksakt på den (issue #63).
     const fag = sanitizeFilename(courseFolderName(courseName));
     const fagField = courseDisplayName(courseName);
+
+    // planId'et er stabilt selv når itslearning redigerer start/stop-felterne på en eksisterende
+    // plan i stedet for at oprette en ny (fx en reel udskydelse, live-bekræftet 2026-08-27 på
+    // Religion: den fortrængte lektions plan beholdt sit id, kun datoen ændrede sig — mens selve
+    // tidsspunktet fik en NY placeholder-plan). weekFolderName() er dato-afledt, så en udskudt
+    // lektion regner sig frem til en ny mappe her — uden dette flyttes de allerede hentede filer
+    // aldrig med, og bliver stående i den gamle ugemappe for evigt (issue #96).
+    const prevRecord = planNoteRecord(records, noteId);
+    if (prevRecord?.weekFolder && prevRecord.weekFolder !== weekFolder) {
+      try {
+        await moveDirInVault(`${FAG_ROOT}/${fag}/MD/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/MD/${weekFolder}`);
+        await moveDirInVault(`${FAG_ROOT}/${fag}/RAW/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/RAW/${weekFolder}`);
+        runChangedNotes.push(`${prevRecord.weekFolder} → ${weekFolder} (${fagField}): lektion flyttet, vault-materialer fulgte med`);
+        await savePlanNoteRecord(noteId, prevRecord.hash, weekFolder);
+      } catch (err) {
+        console.error(`VIAstudyWiz vault-flytning fejlede (${prevRecord.weekFolder} → ${weekFolder}):`, err);
+        recordError(`Lektion flyttet (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): vault-materialer kunne ikke flyttes automatisk — ${err.message}`);
+      }
+    }
     // Links til MD-noten (navigations-graf), ikke RAW-filen — RAW er bytes til enheder, ikke
     // noget man klikker sig videre til fra en note (issue #26). Mappe/opgave-typer får aldrig en
     // MD-modpart, så de udelades. Link-elementer nævnes som ren tekst (titlen er allerede synlig
@@ -1049,7 +1090,7 @@ async function writePlanNotes(plans) {
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
     const FRONTMATTER_VERSION = 3; // 2 = forberedelse-feltet (#59), 3 = fjernet redundant dato:-felt
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
-    if (hashes[noteId] === currentHash) continue;
+    if (prevRecord?.hash === currentHash) continue;
 
     const frontmatter = [
       "---",
@@ -1081,10 +1122,10 @@ async function writePlanNotes(plans) {
     try {
       const existingText = await readFromVault(path);
       const existingBody = existingText ? existingText.replace(/^---\n[\s\S]*?\n---\n\n?/, "") : null;
-      // Kun et resumé når noten reelt fandtes FØR (hashes[noteId] !== undefined) — ellers ville
-      // enhver nyoprettet note (en plan der lige kom ind i tidsvinduet) fejlagtigt blive rapporteret
-      // som "ændret", i stedet for at det bare er første gang den skrives.
-      if (hashes[noteId] !== undefined) {
+      // Kun et resumé når noten reelt fandtes FØR (prevRecord !== null) — ellers ville enhver
+      // nyoprettet note (en plan der lige kom ind i tidsvinduet) fejlagtigt blive rapporteret som
+      // "ændret", i stedet for at det bare er første gang den skrives.
+      if (prevRecord != null) {
         const oldAutoMatch = existingBody?.match(AUTO_BLOCK_RE)?.[0];
         const oldAutoContent = oldAutoMatch ? oldAutoMatch.slice(AUTO_START.length, -AUTO_END.length).trim() : null;
         const changeSummary = summarizeAutoChange(oldAutoContent, autoContent);
@@ -1092,7 +1133,7 @@ async function writePlanNotes(plans) {
       }
       const note = frontmatter + spliceAutoSection(existingBody, autoContent) + "\n";
       await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
-      await savePlanNoteHash(noteId, currentHash);
+      await savePlanNoteRecord(noteId, currentHash, weekFolder);
     } catch (err) {
       console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
