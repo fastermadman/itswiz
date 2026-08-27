@@ -839,6 +839,40 @@ function planLiteratureText(plan) {
   return text ? stripHtml(text) || null : null;
 }
 
+// Ord der er for almindelige til at bevise noget om et match — udelades fra begge sider, ellers
+// ville fx "og"/"kap" alene kunne trække overlap-scoren op mellem to helt urelaterede titler.
+const LITTERATUR_STOPORD = new Set([
+  "og", "i", "af", "med", "til", "fra", "for", "den", "det", "en", "et", "s", "side", "siderne", "kap", "kapitel", "del",
+]);
+
+function significantTokens(text) {
+  return (text.toLowerCase().match(/[a-zæøåé]+/g) ?? []).filter((t) => t.length >= 3 && !LITTERATUR_STOPORD.has(t));
+}
+
+// Litteratur-feltet er fri tekst der lige så tit henviser til en grundbogsside (uden vedhæftet
+// fil) som til et konkret element (issue #44). Match derfor KONSERVATIVT — et forkert link er
+// værre end intet, det giver falsk tryghed om at have læst det rigtige — frem for at forsøge at
+// matche alting. Krav: mindst 2 betydende ord fra elementtitlen igen i litteraturteksten, og
+// mindst 60% af elementtitlens ord dækket. Bekræftet mod alle 10 planer med reelt indhold
+// 2026-08-27 (live-korpus): 0 falske positiver, korrekt ingen match ved rene grundbogshenvisninger
+// (ingen elementer i planen overhovedet, eller ingen med nok ordoverlap).
+// Elementer konkurrerer IKKE mod hinanden om "bedste match" — literaturteksten nævner ofte flere
+// forskellige læsninger i træk, og hver skal kunne finde sin egen fil uafhængigt af de andre.
+// Sideeffekt når to elementer reelt er samme tekst i to filformater (set live: en .pdf og en
+// .pptx med næsten-identiske titler) — begge matcher uafhængigt af hinanden og linkes begge, i
+// stedet for at gætte hvilken af dem der er "den rigtige".
+function matchLiteratureElements(literatureText, elements) {
+  if (!literatureText) return [];
+  const litTokens = new Set(significantTokens(literatureText));
+  return elements.filter((el) => {
+    const stem = el.title.replace(/\.[^./]+$/, "");
+    const elTokens = significantTokens(stem);
+    if (elTokens.length < 2) return false;
+    const matched = elTokens.filter((t) => litTokens.has(t));
+    return matched.length / elTokens.length >= 0.6 && matched.length >= 2;
+  });
+}
+
 // Arbejdsopgave-elementer er itslearnings "gør noget"-side af en lektion, modsat litteratur-feltets
 // "læs noget" (issue #59). Skellet ligger i BÆREREN, ikke i indholdet: et element med titlen
 // "Forberedelse" kan sagtens indeholde en ren litteraturliste (bekræftet live på et Religion-
@@ -1112,6 +1146,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       );
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
+    const literatureFiles = literature ? matchLiteratureElements(literature, plan.elements ?? []) : [];
     const forberedelse = forberedelseElements(plan);
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
@@ -1153,7 +1188,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
-    const FRONTMATTER_VERSION = 5; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44)
+    const FRONTMATTER_VERSION = 6; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44)
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (prevRecord?.hash === currentHash) {
       // Indholdet er uændret, så resten af funktionen springes over — men weekFolder skal stadig
@@ -1185,6 +1220,14 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       // kan slås op direkte i vaulten (fx grep efter planKey for at rekonstruere cachen manuelt).
       `plan_id: "${planKey}"`,
       ...(literature ? yamlBlockLines("litteratur", `▥ ${literature}`) : ["litteratur: false"]),
+      // Separat felt fra litteratur selv (issue #44, spørgsmål 1+3): litteratur-teksten er ofte en
+      // ren grundbogshenvisning uden fil, så et match mod plan.elements er ikke garanteret — basen
+      // skal kunne skelne "har litteratur OG en fundet fil" fra "har kun litteratur-tekst" uden at
+      // parse brødteksten. `false` når matchLiteratureElements ikke fandt noget, samme mønster som
+      // litteratur/forberedelse ovenfor.
+      ...(literatureFiles.length
+        ? yamlBlockLines("litteratur_filer", literatureFiles.map((el) => `📎 [[${mdPath(courseName, weekFolder, el.title)}]]`).join("\n"))
+        : ["litteratur_filer: false"]),
       // Kun titlerne, ikke indholdet: Properties-panelet og basens kolonne skal kunne læses på et
       // blik, og selve teksten står i AUTO-sektionen nedenfor. `false` frem for at udelade feltet,
       // så basens formel kan bruge et eksplicit `!= false` i stedet for antaget truthiness — samme
