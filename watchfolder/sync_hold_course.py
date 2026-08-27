@@ -41,6 +41,7 @@ import json
 import re
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 VAULT_ROOT = Path.home() / "ViaVault"
@@ -48,6 +49,28 @@ DATA_JSON = VAULT_ROOT / ".obsidian" / "plugins" / "hold-course" / "data.json"
 
 # main.js: COLOR_PALETTE har 6 farver, og addClass sætter colorIndex = classes.length % længden.
 COLOR_PALETTE_SIZE = 6
+
+# Symbol + farve pr. fag. Symbolerne matcher background.js' FOLDER_SYMBOLS, farverne matcher
+# Valdemars Google-kalendere, så Hold Course og kalenderen viser samme fag i samme farve.
+# colorIndex peger ind i main.js' COLOR_PALETTE: 0 amber, 1 teal, 2 coral, 3 purple, 4 pink,
+# 5 green. Gul findes ikke som sådan — amber er paletten's gule, coral er dens røde.
+# Det er VORES konfiguration, ikke Valdemars data, så synken sætter code og colorIndex ved hver
+# kørsel. `name` sættes derimod kun ved oprettelsen og er hans at redigere.
+FAG_STYLE = {
+    "Musik":         {"symbol": "♪",  "colorIndex": 5},   # grøn
+    "Religion":      {"symbol": "♱",  "colorIndex": 0},   # amber/gul
+    "LivsOplysning": {"symbol": "⚖︎", "colorIndex": 2},   # coral/rød
+}
+
+
+def nfc(text: str) -> str:
+    """Obsidian indekserer sine stier som NFC, men macOS' filsystem leverer NFD — så
+    `path.relative_to(...)` giver en streng der ser identisk ud, men som
+    `vault.getAbstractFileByPath()` ikke kan slå op. Pluginets "Open note"-knap fejler så TAVST
+    (`const file = ...getAbstractFileByPath(path); if (file) ...` — ingen else-gren, main.js:2292).
+    Ramte 14 af 34 lektioner: alle stier med å/æ/ø. Normalisér derfor alt der skal ind i data.json.
+    """
+    return unicodedata.normalize("NFC", text)
 
 # Præfikserne background.js sætter foran værdierne i frontmatteren (yamlBlockLines).
 LITTERATUR_PREFIX = "▥"
@@ -100,9 +123,44 @@ def prefixed_lines(value: str, prefix: str) -> list[str]:
     return out
 
 
+def note_stub_path(plan_path: str) -> str:
+    """`[NOTE]`-stubben der hører til en `[PLAN]`-note — Valdemars egen note for lektionen.
+
+    background.js skriver den til `§ FAG/<fag>/NOTER/<uge>/[NOTE] <uge>.md` (noteStubPath), altså
+    samme sti som lektionsplanen med MD -> NOTER og [PLAN] -> [NOTE]. Verificeret 1:1 mod vaulten:
+    36 af 36 lektionsplan-noter har en stub. Falder tilbage til selve planen hvis stubben mangler."""
+    stub = plan_path.replace("/MD/", "/NOTER/").replace("[PLAN] ", "[NOTE] ")
+    return stub if (VAULT_ROOT / stub).exists() else plan_path
+
+
 def wikilink_target(line: str) -> str | None:
     match = re.match(r'^\[\[(.+?)\]\]$', line)
     return match.group(1) if match else None
+
+
+def read_tasks(vault_root: Path) -> list[dict]:
+    """`type: opgave`-noterne extensionen skriver til NOTER/OPGAVER/ (writeTaskNotes i
+    background.js): afleveringsopgaver med en rigtig deadline, som ikke hænger på en bestemt
+    lektion. De bliver til Hold Courses klasse-niveau-opgaver.
+
+    Nøglen er ElementID fra `kilde:`-URL'en — samme stabile id som background.js' taskId() bruger.
+    Noter uden den (fx Valdemars egne, håndskrevne opgave-noter og skabelonen i META) springes over:
+    uden et stabilt id kan synken ikke undgå dubletter."""
+    tasks = []
+    for path in sorted(vault_root.rglob("*.md")):
+        if "OPGAVER" not in str(path):
+            continue
+        fields = parse_frontmatter(path.read_text(encoding="utf-8"))
+        if fields.get("type") != "opgave" or not fields.get("fag") or not fields.get("deadline"):
+            continue
+        match = re.search(r"ElementID=(\d+)", fields.get("kilde", ""))
+        if not match:
+            continue
+        fields["_element_id"] = match.group(1)
+        fields["_path"] = nfc(str(path.relative_to(vault_root)))
+        fields["_title"] = path.stem
+        tasks.append(fields)
+    return tasks
 
 
 def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
@@ -120,7 +178,7 @@ def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
         if not fields.get("plan_id"):
             uden_plan_id.append(rel)
             continue
-        fields["_path"] = rel
+        fields["_path"] = nfc(rel)
         plans.append(fields)
     return plans, uden_plan_id
 
@@ -167,15 +225,22 @@ def ensure_semester(data: dict, plans: list[dict], new_id) -> dict:
 
 
 def ensure_class(sem: dict, fag: str, new_id) -> dict:
+    style = FAG_STYLE.get(fag, {})
+    code = f'{style["symbol"]} {fag}' if style.get("symbol") else fag
     cls = find_stamped(sem["classes"], "vswFag", fag)
     if cls:
+        # code og colorIndex er synkens konfiguration (FAG_STYLE), ikke Valdemars data, og sættes
+        # derfor ved hver kørsel. `name` og alle kontaktfelter er hans og røres aldrig igen.
+        cls["code"] = code
+        if "colorIndex" in style:
+            cls["colorIndex"] = style["colorIndex"]
         return cls
     # Kun felterne vi rent faktisk har data til. Underviser, lokale, mødedage og tidspunkter står
     # tomme og røres aldrig igen — udfylder Valdemar dem én gang i Hold Course, bliver de stående
     # (spørgsmål 4 i #113: synken gætter aldrig på data den ikke har).
     cls = {
-        "id": new_id(), "colorIndex": len(sem["classes"]) % COLOR_PALETTE_SIZE,
-        "code": fag, "name": fag, "courseUrl": "", "meetingLink": "",
+        "id": new_id(), "colorIndex": style.get("colorIndex", len(sem["classes"]) % COLOR_PALETTE_SIZE),
+        "code": code, "name": fag, "courseUrl": "", "meetingLink": "",
         "professorName": "", "professorEmail": "", "officeHours": "",
         "taName": "", "taEmail": "", "taOfficeHours": "",
         "meetingDays": [], "location": "", "startDate": "", "endDate": "",
@@ -206,9 +271,22 @@ def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
     # Synkens felter. status og notes er Valdemars og røres ikke.
     lec["title"] = plan.get("emne") or plan.get("uge") or "Lektion"
     lec["date"] = (plan.get("start") or "")[:10]
-    # Kun når feltet er tomt: har Valdemar peget lektionen mod en anden note, er det hans valg.
-    if not lec.get("vaultLink"):
-        lec["vaultLink"] = plan["_path"]
+    # Hold Courses "Lecture note" er Valdemars egen note for lektionen, ikke maskinens lektionsplan
+    # — derfor [NOTE]-stubben, som selv linker videre til [PLAN] via sit kilde:-felt. Ét klik til
+    # planen, i stedet for at bruge feltet på en note han ikke selv skriver i.
+    stub = nfc(note_stub_path(plan["_path"]))
+    # vswVaultLink husker hvad synken sidst skrev. Står feltet uændret, må synken flytte det (fx da
+    # det her skiftede fra [PLAN] til [NOTE]); har Valdemar brugt pluginets Browse/Remove-knap til
+    # at pege et andet sted hen, er værdien hans og bliver stående.
+    # Mangler stemplet helt, stammer værdien fra en tidligere synk-version (der pegede på [PLAN])
+    # og ikke fra Valdemar — han har ikke haft feltet i hånden endnu. Så den må flyttes én gang.
+    sync_owned = "vswVaultLink" not in lec or lec["vaultLink"] in ("", lec["vswVaultLink"])
+    if sync_owned:
+        lec["vaultLink"] = stub
+        lec["vswVaultLink"] = stub
+    # Normalisér uanset. NFC/NFD er to kodninger af SAMME sti, ikke to forskellige valg, så det
+    # overskriver ikke hans valg — det gør bare at pluginet kan slå stien op (se nfc()).
+    lec["vaultLink"] = nfc(lec["vaultLink"])
     return lec
 
 
@@ -219,35 +297,44 @@ def ensure_resource(sem: dict, cls: dict, vault_path: str, new_id) -> dict:
                "classIds": [], "status": "unread", "vaultLink": vault_path, "url": "",
                "notes": "", "vswResKey": vault_path}
         sem["resources"].append(res)
+    res["vaultLink"] = nfc(res.get("vaultLink", ""))
     if cls["id"] not in res.setdefault("classIds", []):
         res["classIds"].append(cls["id"])
     return res
 
 
-def ensure_assignment(lec: dict, key: str, title: str, atype: str, due: str, linked_book: str, new_id) -> dict:
-    assign = find_stamped(lec.setdefault("assignments", []), "vswKey", key)
+def ensure_assignment(owner: dict, key: str, title: str, atype: str, due: str, linked_book: str,
+                      new_id, linked_note: str = "") -> dict:
+    """`owner` er enten en lecture eller en class — Hold Course har begge slags opgaver
+    (`cls.assignments[]` er dem uden lektion, main.js: addAssignment med lectureId = null)."""
+    assign = find_stamped(owner.setdefault("assignments", []), "vswKey", key)
     if assign is None:
         assign = {"id": new_id(), "title": "", "type": atype, "dueDate": "", "status": "not-started",
                   "notes": "", "grade": "", "linkedBook": "", "linkedNote": "", "vswKey": key}
-        lec["assignments"].append(assign)
+        owner["assignments"].append(assign)
     # status/grade/notes/linkedNote er Valdemars fremdrift og overskrives aldrig.
     assign["title"] = title
     assign["type"] = atype
     assign["dueDate"] = due
     if linked_book:
         assign["linkedBook"] = linked_book
+    # Kun når feltet er tomt — har Valdemar peget opgaven mod sin egen note, er det hans valg.
+    if linked_note and not assign.get("linkedNote"):
+        assign["linkedNote"] = linked_note
+    assign["linkedNote"] = nfc(assign.get("linkedNote", ""))
     return assign
 
 
 # ─── Synk ─────────────────────────────────────────────────────────────────────
 
-def sync_data(data: dict, plans: list[dict], new_id=None) -> dict:
+def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | None = None) -> dict:
     """Fletter plans ind i en data.json-struktur. Ren funktion — al I/O ligger i sync()."""
     counter = [0]
     new_id = new_id or (lambda: generate_id(counter))
     data.setdefault("semesters", [])
     data.setdefault("dataVersion", 2)
-    if not plans:
+    tasks = tasks or []
+    if not plans and not tasks:
         return data
 
     sem = ensure_semester(data, plans, new_id)
@@ -260,22 +347,37 @@ def sync_data(data: dict, plans: list[dict], new_id=None) -> dict:
         # skifter — issue #96). En dato-afledt nøgle ville fordoble alle opgaver ved hver
         # udskydelse.
         akey = lec["id"]
+        stub = lec.get("vswVaultLink") or lec["vaultLink"]
 
         lit_files = prefixed_lines(plan.get("litteratur_filer", ""), LITTERATUR_FIL_PREFIX)
-        targets = [t for t in (wikilink_target(line) for line in lit_files) if t]
+        targets = [nfc(t) for t in (wikilink_target(line) for line in lit_files) if t]
         if targets:
             for target in targets:
                 res = ensure_resource(sem, cls, target, new_id)
-                ensure_assignment(lec, f'{akey}|lit|{target}', res["title"], "Reading", due, res["id"], new_id)
+                # linkedNote peger på selve materiale-noten, så "Open note" virker direkte fra
+                # opgaven uden omvejen om Library.
+                ensure_assignment(lec, f'{akey}|lit|{target}', res["title"], "Reading", due,
+                                  res["id"], new_id, linked_note=target)
         else:
             # Ren litteratur-tekst uden filmatch: stadig en Reading-opgave, bare uden Library-link —
             # der er ikke noget at linke til (issue #44's konservative matching lader den slags stå).
             lit_text = prefixed_lines(plan.get("litteratur", ""), LITTERATUR_PREFIX)
             if lit_text:
-                ensure_assignment(lec, f'{akey}|lit|', " ".join(lit_text)[:200], "Reading", due, "", new_id)
+                ensure_assignment(lec, f'{akey}|lit|', " ".join(lit_text)[:200], "Reading", due,
+                                  "", new_id, linked_note=stub)
 
         for titel in prefixed_lines(plan.get("forberedelse", ""), FORBEREDELSE_PREFIX):
-            ensure_assignment(lec, f'{akey}|forb|{titel}', titel, "Other", due, "", new_id)
+            # Forberedelses-afkrydsningerne står i [NOTE]-stubben (issue #59), så det er dér
+            # opgaven skal føre hen.
+            ensure_assignment(lec, f'{akey}|forb|{titel}', titel, "Other", due, "", new_id,
+                              linked_note=stub)
+
+    # Afleveringsopgaver hænger på faget, ikke på en lektion — derfor klasse-niveau. De vises i
+    # Hold Courses Assignments-liste og kalender uden at blive klistret på en tilfældig lektion.
+    for task in sorted(tasks, key=lambda t: (t["fag"], t.get("deadline", ""))):
+        cls = ensure_class(sem, task["fag"], new_id)
+        ensure_assignment(cls, f'opgave|{task["_element_id"]}', task["_title"], "Writing",
+                          task["deadline"][:10], "", new_id, linked_note=task["_path"])
 
     return data
 
@@ -286,10 +388,11 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         return 1
 
     plans, uden_plan_id = read_plans(vault_root)
+    tasks = read_tasks(vault_root)
     before = data_path.read_text(encoding="utf-8")
     mtime = data_path.stat().st_mtime
     data = json.loads(before)
-    after = json.dumps(sync_data(data, plans), indent=2, ensure_ascii=False) + "\n"
+    after = json.dumps(sync_data(data, plans, tasks=tasks), indent=2, ensure_ascii=False) + "\n"
 
     if uden_plan_id and not quiet:
         print(f"{len(uden_plan_id)} lektionsplan-note(r) uden plan_id springes over "
@@ -306,8 +409,9 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
 
     sem = find_stamped(data["semesters"], "vswSync", True) or {}
     lectures = sum(len(c.get("lectures", [])) for c in sem.get("classes", []))
-    assignments = sum(len(l.get("assignments", [])) for c in sem.get("classes", []) for l in c.get("lectures", []))
-    print(f"{len(plans)} lektionsplan-noter -> {len(sem.get('classes', []))} fag, "
+    assignments = sum(len(l.get("assignments", [])) for c in sem.get("classes", []) for l in c.get("lectures", [])) \
+        + sum(len(c.get("assignments", [])) for c in sem.get("classes", []))
+    print(f"{len(plans)} lektionsplan-noter + {len(tasks)} opgave-noter -> {len(sem.get('classes', []))} fag, "
           f"{lectures} lektioner, {assignments} opgaver, {len(sem.get('resources', []))} Library-poster.")
 
     if not apply:
@@ -365,17 +469,26 @@ def selfcheck() -> int:
     sem = data["semesters"][0]
     assert sem["term"] == "Fall" and sem["year"] == 2026, sem
     cls = sem["classes"][0]
-    assert cls["code"] == "Musik" and cls["vswFag"] == "Musik", cls
+    assert cls["code"] == "♪ Musik" and cls["name"] == "Musik" and cls["vswFag"] == "Musik", cls
+    assert cls["colorIndex"] == 5, cls  # grøn, som i Valdemars kalender
     lec = cls["lectures"][0]
     assert lec["title"] == "Musikforståelse" and lec["date"] == "2026-09-01", lec
-    assert lec["vaultLink"] == plan["_path"], lec
+    # "Lecture note" peger på [NOTE]-stubben, ikke på maskinens [PLAN].
+    assert lec["vaultLink"].startswith("§ FAG/♪ Musik/NOTER/"), lec["vaultLink"]
+    assert "[NOTE] " in lec["vaultLink"], lec["vaultLink"]
+    # NFC, ellers finder pluginets getAbstractFileByPath ikke filen og "Open note" fejler tavst.
+    assert unicodedata.is_normalized("NFC", lec["vaultLink"]), lec["vaultLink"]
+    assert unicodedata.is_normalized("NFC", sem["resources"][0]["vaultLink"]), sem["resources"]
     assert len(lec["assignments"]) == 2, lec["assignments"]
     reading = next(a for a in lec["assignments"] if a["type"] == "Reading")
     assert reading["title"] == "Frede V Nielsen Ars og Scientia", reading
     assert reading["dueDate"] == "2026-09-01", reading
     assert reading["linkedBook"] == sem["resources"][0]["id"], (reading, sem["resources"])
+    # Reading-opgaven fører til selve materiale-noten, forberedelse til Valdemars stub.
+    assert reading["linkedNote"] == sem["resources"][0]["vaultLink"], reading
     assert sem["resources"][0]["classIds"] == [cls["id"]], sem["resources"]
     forb = next(a for a in lec["assignments"] if a["type"] == "Other")
+    assert forb["linkedNote"] == lec["vaultLink"], forb
     assert forb["title"] == "Forberedelse", forb
 
     # Idempotens: samme input igen giver præcis samme struktur, ingen dubletter.
@@ -438,6 +551,27 @@ def selfcheck() -> int:
     moved = next(l for l in data3["semesters"][0]["classes"][0]["lectures"] if l["vswPlanId"] == tors_a["plan_id"])
     assert len(moved["assignments"]) == 2, moved["assignments"]   # og ikke tre efter endnu en kørsel
     assert any(a["id"] == "x" for a in moved["assignments"]), moved["assignments"]
+
+    # Afleveringsopgaver lander på klassen, ikke på en lektion, og fordobles ikke ved gentagne kørsler.
+    opgave = {"type": "opgave", "fag": "Musik", "deadline": "2026-10-01 23:59:00",
+              "kilde": "https://via.itslearning.com/main.aspx?CourseID=36016&ElementID=4831051",
+              "_element_id": "4831051", "_path": "✎ NOTER/OPGAVER/Studieopgave/Studieopgave.md",
+              "_title": "Studieopgave"}
+    ids4 = iter(f"d{n}" for n in range(100))
+    data4 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2},
+                      [plan], lambda: next(ids4), tasks=[opgave])
+    cls4 = data4["semesters"][0]["classes"][0]
+    assert len(cls4["assignments"]) == 1, cls4["assignments"]
+    ca = cls4["assignments"][0]
+    assert ca["type"] == "Writing" and ca["dueDate"] == "2026-10-01", ca
+    assert ca["linkedNote"] == opgave["_path"], ca
+    assert ca["vswKey"] == "opgave|4831051", ca
+    snap4 = json.dumps(data4, sort_keys=True)
+    assert json.dumps(sync_data(json.loads(snap4), [plan], lambda: "MÅ-IKKE-BRUGES", tasks=[opgave]),
+                      sort_keys=True) == snap4, "opgave-synk er ikke idempotent"
+
+    # Findes stubben ikke, falder vi tilbage til selve planen frem for et dødt link.
+    assert note_stub_path("findes/slet/ikke/MD/x/[PLAN] x.md") == "findes/slet/ikke/MD/x/[PLAN] x.md"
 
     # `false`-felter og dublet-noter giver ingenting.
     assert prefixed_lines("false", "▥") == []
