@@ -15,6 +15,7 @@ i alt der pegede på den gamle fil (fx note-stubbens kilde:-felt, se issue om #8
 regression).
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -52,16 +53,26 @@ def rename_in_week_dir(week_dir: Path, old_suffix: str, new_prefix: str) -> list
 
 
 def fix_backlinks(renamed: list[tuple[str, str]]) -> int:
-    """Retter [[<gammel stem>]] -> [[<ny stem>]] i alle .md-filer i vaulten."""
+    """Retter [[<evt. sti>/<gammel stem>]] (evt. med |alias) -> ...ny stem... i alle .md-filer.
+
+    Links i denne vault er sti-kvalificerede (fx "[[Musik/MD/W34tors/W34tors lektionsplan]]",
+    se kilde:-feltet i watch_viastudywiz.py) - en ren "[[<stem>]]"-matchning ville derfor
+    aldrig ramme noget i praksis.
+    """
     if not renamed:
         return 0
+
+    patterns = [
+        (re.compile(r"\[\[([^\]|]*?/)?" + re.escape(old_stem) + r"(\|[^\]]*)?\]\]"), new_stem)
+        for old_stem, new_stem in renamed
+    ]
 
     count = 0
     for md_file in VAULT_ROOT.rglob("*.md"):
         text = md_file.read_text(encoding="utf-8")
         original = text
-        for old_stem, new_stem in renamed:
-            text = text.replace(f"[[{old_stem}]]", f"[[{new_stem}]]")
+        for pattern, new_stem in patterns:
+            text = pattern.sub(lambda m: f"[[{m.group(1) or ''}{new_stem}{m.group(2) or ''}]]", text)
         if text != original:
             md_file.write_text(text, encoding="utf-8")
             print(f"  ↳ backlink rettet i {md_file.relative_to(VAULT_ROOT)}")
@@ -91,5 +102,34 @@ def main():
     return 0
 
 
+def selfcheck() -> int:
+    renamed = [("W34tors lektionsplan", "[PLAN] W34tors")]
+
+    def apply(text: str) -> str:
+        for old_stem, new_stem in renamed:
+            pattern = re.compile(r"\[\[([^\]|]*?/)?" + re.escape(old_stem) + r"(\|[^\]]*)?\]\]")
+            text = pattern.sub(lambda m: f"[[{m.group(1) or ''}{new_stem}{m.group(2) or ''}]]", text)
+        return text
+
+    # Sti-kvalificeret link (den faktiske konvention i vaulten) rettes.
+    out = apply('kilde: "[[Musik/MD/W34tors/W34tors lektionsplan]]"\n')
+    assert '[[Musik/MD/W34tors/[PLAN] W34tors]]' in out, out
+
+    # Bart link uden sti rettes stadig.
+    out = apply("Se [[W34tors lektionsplan]] for detaljer.")
+    assert out == "Se [[[PLAN] W34tors]] for detaljer.", out
+
+    # Alias efter "|" bevares.
+    out = apply("[[Musik/MD/W34tors/W34tors lektionsplan|Lektionsplan]]")
+    assert out == "[[Musik/MD/W34tors/[PLAN] W34tors|Lektionsplan]]", out
+
+    # Andet fag/uge hvor stem kun optræder som delstreng må ikke ramt.
+    out = apply("[[Musik/MD/W35tors/W35tors lektionsplan]]")
+    assert out == "[[Musik/MD/W35tors/W35tors lektionsplan]]", out
+
+    print("selfcheck ok")
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(selfcheck() if "--selfcheck" in sys.argv else main())
