@@ -901,6 +901,8 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
       "tags: []",
       "---",
       "",
+      `Kilde: [[${kildeStem}]]`,
+      "",
       ...(labels.length ? [FORB_HEADING, ...labels.map((label) => `- [ ] ${label}`), ""] : []),
     ].join("\n");
     await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
