@@ -207,6 +207,16 @@ def already_converted(doc_path: Path) -> bool:
     return md_targets(doc_path)[0].exists()
 
 
+HIGHLIGHT_PATTERN = re.compile(r"==[^=\n]+==")
+
+
+# Bruges af write_conversion() (skriver aldrig oven i en highlightet note) og af
+# reconvert_double_page.py (springer highlightede noter over FØR de slettes — allerede_converted()
+# alene stopper ikke den sti, da sletning gør filen "ny" igen ved næste watcher-kørsel, se #42).
+def has_highlights(md_path: Path) -> bool:
+    return md_path.exists() and bool(HIGHLIGHT_PATTERN.search(md_path.read_text(encoding="utf-8")))
+
+
 def previously_failed(doc_path: Path) -> bool:
     # Undgår at retry en fil for evigt ved hver script-genstart (fx en PDF over MinerU's
     # sidegrænse vil aldrig lykkes) - marker-filen fjernes manuelt hvis man vil prøve igen.
@@ -475,10 +485,52 @@ def insert_page_markers(
     return result
 
 
-def integrate_output(doc_path: Path, zip_bytes: bytes) -> None:
+# Adskilt fra integrate_output() så highlight-beskyttelsen kan testes uden netværk (selfcheck).
+def write_conversion(doc_path: Path, full_md: Path, images_dir: Path) -> None:
     dest_md, dest_images = md_targets(doc_path)
     dest_md.parent.mkdir(parents=True, exist_ok=True)
 
+    md_text = full_md.read_text(encoding="utf-8")
+    running_header = None
+    content_list_matches = list(full_md.parent.glob("*_content_list.json"))
+    if content_list_matches:
+        layout_path = full_md.parent / "layout.json"
+        md_text = insert_page_markers(
+            md_text, content_list_matches[0], layout_path if layout_path.exists() else None
+        )
+        try:
+            blocks = json.loads(content_list_matches[0].read_text(encoding="utf-8"))
+            running_header = _extract_running_header(blocks)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Skriv ved siden af i stedet for at overskrive, hvis Valdemar allerede har highlightet i den
+    # eksisterende note — se has_highlights() ovenfor (issue #42). Billed-wikilinks (![[hash]])
+    # refererer ikke til mappenavnet, så .ny-mappen er sikker at bruge.
+    protect_existing = has_highlights(dest_md)
+    if protect_existing:
+        dest_md = dest_md.with_name(f"{dest_md.stem}.ny.md")
+        dest_images = dest_images.with_name(f"{dest_images.name}.ny")
+
+    extra_fm = f'sektion: "{running_header}"\n' if running_header else ""
+    text = frontmatter(doc_path, extra=extra_fm) + to_wikilinks(md_text)
+    dest_md.write_text(text, encoding="utf-8")
+
+    if images_dir.exists():
+        if dest_images.exists():
+            shutil.rmtree(dest_images)
+        dest_images.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(images_dir), str(dest_images))
+
+    if protect_existing:
+        print(
+            f"Highlights fundet i {md_targets(doc_path)[0].name} — ny konvertering skrevet til "
+            f"{dest_md.name} i stedet (issue #42)",
+            flush=True,
+        )
+
+
+def integrate_output(doc_path: Path, zip_bytes: bytes) -> None:
     # Vigtigt: udpakkes UDENFOR den overvågede vault-mappe. Ellers ser watchdog ZIP'ens egen
     # "<uuid>_origin.pdf"-kopi som en ny fil og prøver at behandle den igen (selv-triggeret loop).
     with tempfile.TemporaryDirectory() as tmp_dir_str:
@@ -489,32 +541,7 @@ def integrate_output(doc_path: Path, zip_bytes: bytes) -> None:
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(tmp_dir)
 
-        full_md = tmp_dir / "full.md"
-        images_dir = tmp_dir / "images"
-
-        md_text = full_md.read_text(encoding="utf-8")
-        running_header = None
-        content_list_matches = list(tmp_dir.glob("*_content_list.json"))
-        if content_list_matches:
-            layout_path = tmp_dir / "layout.json"
-            md_text = insert_page_markers(
-                md_text, content_list_matches[0], layout_path if layout_path.exists() else None
-            )
-            try:
-                blocks = json.loads(content_list_matches[0].read_text(encoding="utf-8"))
-                running_header = _extract_running_header(blocks)
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        extra_fm = f'sektion: "{running_header}"\n' if running_header else ""
-        text = frontmatter(doc_path, extra=extra_fm) + to_wikilinks(md_text)
-        dest_md.write_text(text, encoding="utf-8")
-
-        if images_dir.exists():
-            if dest_images.exists():
-                shutil.rmtree(dest_images)
-            dest_images.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(images_dir), str(dest_images))
+        write_conversion(doc_path, tmp_dir / "full.md", tmp_dir / "images")
 
 
 def process_document(doc_path: Path) -> None:
@@ -703,6 +730,32 @@ def selfcheck() -> int:
         assert _extract_running_header(inconsistent) is None
 
         assert _extract_running_header([]) is None
+
+        # write_conversion(): highlights i eksisterende MD beskyttes mod overskrivning (#42).
+        old_root, VAULT_ROOT = VAULT_ROOT, root
+        try:
+            with tempfile.TemporaryDirectory() as src_dir_str:
+                src_dir = Path(src_dir_str)
+                full_md = src_dir / "full.md"
+                no_images_dir = src_dir / "images"  # findes ikke — testen fokuserer på MD-beskyttelse
+                dest_md, _ = md_targets(raw_pdf)
+                ny_md = dest_md.with_name(f"{dest_md.stem}.ny.md")
+
+                # Uden highlights: overskrives direkte som hidtil.
+                full_md.write_text("Ny tekst uden markeringer.", encoding="utf-8")
+                write_conversion(raw_pdf, full_md, no_images_dir)
+                assert "Ny tekst uden markeringer." in dest_md.read_text(encoding="utf-8"), dest_md.read_text()
+                assert not ny_md.exists()
+
+                # Med highlights i den eksisterende note: beskyttes, ny konvertering havner i .ny.md.
+                dest_md.write_text(dest_md.read_text(encoding="utf-8") + "\n==vigtig markering==\n", encoding="utf-8")
+                full_md.write_text("Anden ny tekst.", encoding="utf-8")
+                write_conversion(raw_pdf, full_md, no_images_dir)
+                assert "==vigtig markering==" in dest_md.read_text(encoding="utf-8"), "highlight blev overskrevet"
+                assert ny_md.exists(), "ny konvertering blev ikke skrevet ved siden af"
+                assert "Anden ny tekst." in ny_md.read_text(encoding="utf-8")
+        finally:
+            VAULT_ROOT = old_root
 
     print("selfcheck ok")
     return 0
