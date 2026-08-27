@@ -1089,7 +1089,7 @@ async function writePlanNotes(plans) {
     // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
     // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
-    const FRONTMATTER_VERSION = 3; // 2 = forberedelse-feltet (#59), 3 = fjernet redundant dato:-felt
+    const FRONTMATTER_VERSION = 4; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96)
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (prevRecord?.hash === currentHash) {
       // Indholdet er uændret, så resten af funktionen springes over — men weekFolder skal stadig
@@ -1116,6 +1116,10 @@ async function writePlanNotes(plans) {
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
+      // Samme stabile id som weekFolder-flytningen (issue #96) sporer på — synligt her frem for
+      // kun i chrome.storage.local, så identiteten overlever en nulstillet extension-storage og
+      // kan slås op direkte i vaulten (fx grep efter planKey for at rekonstruere cachen manuelt).
+      `plan_id: "${planKey}"`,
       ...(literature ? yamlBlockLines("litteratur", `▥ ${literature}`) : ["litteratur: false"]),
       // Kun titlerne, ikke indholdet: Properties-panelet og basens kolonne skal kunne læses på et
       // blik, og selve teksten står i AUTO-sektionen nedenfor. `false` frem for at udelade feltet,
