@@ -16,7 +16,7 @@ const NOTER_ROOT = "✎ NOTER";
 // Modulniveau, ikke kun lokal i writePlanNotes: runCollectAndDownload skal kunne sammenligne den
 // mod den senest GENNEMFØRTE version (issue #121) for at vide om en engangs-backfill er
 // nødvendig — se FRONTMATTER_VERSION_KEY og runCollectAndDownload.
-const FRONTMATTER_VERSION = 8; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113)
+const FRONTMATTER_VERSION = 9; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129)
 
 // chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
 // hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
@@ -414,12 +414,18 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
+    // Download FØR noteskrivning (issue #129): writePlanNotes tjekker selv om hver materiale-fil
+    // reelt findes (existingMaterialeIds) før den skriver et wikilink til den, så downloadet skal
+    // have haft en chance for at ske FØRST — ellers ville et element der først lige er hentet
+    // denne kørsel altid mangle sit link én kørsel for sent.
+    const filesOk = await downloadFileElements(result.plans, tab.id);
+    // Spring noteskrivning over hvis tilladelsen allerede er væk — ingen grund til at forsøge at
+    // skrive noter når vaulten alligevel ikke kan skrives til.
     const notesOk =
-      (await writePlanNotes(result.plans, tab.id, settings.enableTaskCompletionSync)) && (await writeTaskNotes(result.tasks ?? []));
-    // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
-    // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
-    const filesOk = notesOk && (await downloadFileElements(result.plans, tab.id));
-    vaultPermissionMissing = !filesOk;
+      filesOk &&
+      (await writePlanNotes(result.plans, tab.id, settings.enableTaskCompletionSync)) &&
+      (await writeTaskNotes(result.tasks ?? []));
+    vaultPermissionMissing = !filesOk || !notesOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
   notifyErrorsIfAny();
@@ -1098,6 +1104,28 @@ function summarizeAutoChange(oldAutoContent, newAutoContent) {
   return addedLine.length > 80 ? `${addedLine.slice(0, 80)}…` : addedLine;
 }
 
+// Et wikilink til et materiale må kun skrives hvis MD-filen det peger på RENT FAKTISK findes i
+// vaulten lige nu, MED indhold — downloadedElementIds (dedup-cachen i downloadFileElements) er
+// ikke nok, den siger kun "vi har forsøgt at downloade dette element.id engang", ikke "filen
+// findes stadig på den sti vi er ved at skrive". Cachen drifter væk fra virkeligheden når
+// itslearning omdøber et element eller flytter dets lektion til en anden uge — mdPath() afhænger
+// af titel+weekFolder, som begge kan ændre sig efter første download, mens element.id (det cachen
+// er keyet på) består (issue #128/#129, live-bekræftet: to elementer stod som downloadet i
+// cachen uden at deres fil nogensinde har eksisteret i vaulten).
+// Tom streng tæller IKKE som fundet: readFromVault returnerer "" (ikke null) for en 0-byte fil,
+// og en 0-byte .md er præcis Obsidians egen spøgelsesnote-signatur (oprettet ved klik på et dødt
+// wikilink) — uden dette tjek ville selve symptomet på bugbasen bekræfte sig selv som "fundet" og
+// linket blive stående for evigt.
+async function existingMaterialeIds(plan, courseName, weekFolder) {
+  const fileElements = (plan.elements ?? []).filter(
+    (el) => el.typeName !== "Link" && !NON_FILE_TYPE_NAMES.has(el.typeName)
+  );
+  const checks = await Promise.all(
+    fileElements.map(async (el) => [el.id, ((await readFromVault(mdPath(courseName, weekFolder, el.title))) ?? "").trim().length > 0])
+  );
+  return new Set(checks.filter(([, exists]) => exists).map(([id]) => id));
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
 // AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
@@ -1120,6 +1148,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // værdi (courseDisplayName), da Seminarium.base filtrerer eksakt på den (issue #63).
     const fag = sanitizeFilename(courseFolderName(courseName));
     const fagField = courseDisplayName(courseName);
+    const existingIds = await existingMaterialeIds(plan, courseName, weekFolder);
 
     // planId'et er stabilt selv når itslearning redigerer start/stop-felterne på en eksisterende
     // plan i stedet for at oprette en ny (fx en reel udskydelse, live-bekræftet 2026-08-27 på
@@ -1149,7 +1178,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // (samme klasse som Forberedelse-elementernes SharePoint-links, issue #59), er MinerU-
     // renderingen ubrugelig til det, og RAW-filen findes kun på disken, ikke i noten.
     const materials = (plan.elements ?? [])
-      .filter((el) => el.typeName === "Link" || !NON_FILE_TYPE_NAMES.has(el.typeName))
+      .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && existingIds.has(el.id)))
       .map((el) =>
         el.typeName === "Link"
           ? `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`
@@ -1157,7 +1186,9 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       );
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
-    const literatureFiles = literature ? matchLiteratureElements(literature, plan.elements ?? []) : [];
+    const literatureFiles = literature
+      ? matchLiteratureElements(literature, plan.elements ?? []).filter((el) => existingIds.has(el.id))
+      : [];
     const forberedelse = forberedelseElements(plan);
     // Samme tekst som AUTO-sektionens brødtekst nedenfor, men som eget felt: Hold Course-synken
     // (issue #113) læser kun frontmatter, ikke AUTO-blokken, og "Key Concepts & Lesson Goal" på
@@ -1175,7 +1206,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Link/Mappe/Arbejdsopgave/Afleveringsopgave, samme filter som materials-listen bruger.
     const literatureFileTitles = new Set(literatureFiles.map((el) => el.title));
     const materialeFiler = (plan.elements ?? [])
-      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title));
+      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title) && existingIds.has(el.id));
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
