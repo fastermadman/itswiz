@@ -213,6 +213,13 @@ def semester_name(plans: list[dict]) -> tuple[str, str, int]:
     return f"Forår {year}", "Spring", year
 
 
+def term_year_for_date(date: str) -> tuple[str, int]:
+    """Samme juli-grænse som semester_name, men for én enkelt dato — bruges til at afgøre om en
+    lektion/opgave hører til DET semester Hold Course-objektet allerede repræsenterer."""
+    year, month = int(date[:4]), int(date[5:7])
+    return ("Fall", year) if month >= 7 else ("Spring", year)
+
+
 def ensure_semester(data: dict, plans: list[dict], new_id) -> dict:
     sem = find_stamped(data.setdefault("semesters", []), "vswSync", True)
     if sem:
@@ -385,6 +392,25 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         return data
 
     sem = ensure_semester(data, plans, new_id)
+
+    # Kun DETTE semesters lektioner/opgaver synkes ind i det (issue #125, fundet live 2026-08-28
+    # efter #121s backfill). Et itslearning-rum kan strække sig over mere end ét semester —
+    # Musik (courseId 36016) havde lektioner tilbage til 2025-08-13, samme fag: og samme rum som
+    # indeværende semesters undervisning. Uden dette filter fletter en bredere backfill (eller et
+    # rum der reelt løber flere semestre) ældre lektioner ind i samme Hold Course-fag, og hver af
+    # dem bliver en frisk, aldrig-før-set opgave med status not-started — som øjeblikkeligt tæller
+    # som Overdue på tværs af dashboard, Assignments-liste og kalender (samme
+    # getAllAssignments-mekanisme som gjorde tovejs-fuldførelsen nødvendig, bare i stor skala: 125
+    # af 137 Musik-opgaver blev Overdue af én kørsel).
+    #
+    # Filtreres kun når semestret allerede har term/year (altid sandt for et semester denne synk
+    # selv har oprettet, se ensure_semester/semester_name) — mangler de, er det tryggere at lade
+    # alt igennem end at gætte på en semestergrænse.
+    if sem.get("term") and sem.get("year"):
+        target = (sem["term"], sem["year"])
+        plans = [p for p in plans if p.get("start") and term_year_for_date(p["start"][:10]) == target]
+        tasks = [t for t in tasks if t.get("deadline") and term_year_for_date(t["deadline"][:10]) == target]
+
     for plan in sorted(plans, key=lambda p: (p["fag"], p.get("start", ""))):
         # plan_id er "<courseId>:<planId>" (background.js: planKey) — første halvdel er det
         # CourseID class.courseUrl skal pege på.
@@ -766,6 +792,20 @@ def selfcheck() -> int:
     data8 = sync_data(data8, [plan], lambda: "MÅ-IKKE-BRUGES")
     cls8 = data8["semesters"][0]["classes"][0]
     assert cls8["courseUrl"] == "https://via.itslearning.com/noget-jeg-selv-valgte", cls8
+
+    # Kun indeværende semester synkes (issue #125): et rum der løber over flere semestre (fundet
+    # live 2026-08-28 efter #121s backfill — Musik courseId 36016 havde lektioner fra 2025-08-13)
+    # må ikke flette forrige semesters lektioner ind i dette semesters fag.
+    forrige_semester = dict(plan, plan_id="36016:9990001", uge="W33tors-sidste-aar",
+                            start="2025-08-14 08:15:00", stop="2025-08-14 12:00:00")
+    ids9 = iter(f"e{n}" for n in range(100))
+    data9 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2},
+                      [plan], lambda: next(ids9))  # opretter "Efterår 2026" via plan (august -> Fall)
+    assert data9["semesters"][0]["term"] == "Fall" and data9["semesters"][0]["year"] == 2026, data9["semesters"][0]
+    data9 = sync_data(data9, [plan, forrige_semester], lambda: "MÅ-IKKE-BRUGES")
+    lectures9 = data9["semesters"][0]["classes"][0]["lectures"]
+    assert len(lectures9) == 1, lectures9   # forrige semesters lektion sprunget over, ikke tilføjet
+    assert lectures9[0]["vswPlanId"] == plan["plan_id"], lectures9
 
     # Key Concepts & Lesson Goal (lec.notes): udfyldes fra beskrivelse:, men Valdemars egen
     # rettelse i Hold Course overlever en resync, ligesom vaultLink.
