@@ -24,12 +24,17 @@ Synken ejer kun title/date/dueDate/type. Valdemars egne felter — status-pills,
 linkede noter, TA/kontor-tid — røres aldrig, og intet slettes nogensinde. Samme princip som
 spliceAutoSection i background.js: maskinen ejer en afgrænset zone, mennesket ejer resten.
 
-Kendt begrænsning: Hold Course implementerer ikke `onExternalSettingsChange`, og intet installeret
-plugin tilbyder en "genindlæs plugin"-kommando. Kører Obsidian med Hold Course indlæst, ser pluginet
-altså ikke vores skrivning, og dets næste egne `save()` skriver hele dets hukommelses-kopi tilbage
-oven i den. Det koster ikke data: mtime-vagten nedenfor sikrer at VI aldrig overskriver Valdemars
-arbejde, og synken er idempotent, så en tabt skrivning kommer igen ved næste kørsel. Hold Course
-viser den friske data næste gang pluginet indlæses.
+Kendt begrænsning (2026-08-28, delvist afhjulpet): Hold Course implementerer ikke
+`onExternalSettingsChange` og cacher sin data.json i hukommelsen ved plugin-opstart (main.js:
+`this.data = await this.loadData()`, kun kaldt i onload) — selv luk/genåbn af Hold Course-visningen
+render'er bare fra den allerede-indlæste kopi igen. Ingen installeret plugin tilbyder en "genindlæs
+KUN denne plugin"-kommando, så eneste udløser udefra er en fuld app-reload. trigger_obsidian_reload()
+gør præcis det, via Local REST API-pluginet (allerede installeret) — men KUN når sync() rent faktisk
+skrev en ændret data.json, ikke ved hver kørsel (en fuld reload afbryder Valdemar hvis han sidder og
+skriver i en note). Er Obsidian ikke åben, eller Local REST API ikke installeret/konfigureret, fejler
+det stille — reload er en bekvemmelighed, ikke en forudsætning: mtime-vagten nedenfor sikrer at VI
+aldrig overskriver Valdemars arbejde, og synken er idempotent, så en tabt skrivning/reload kommer
+igen ved næste kørsel.
 
 Notér uden plan_id (ældre end issue #96) synkes ikke — de rapporteres, se ensure_lecture for hvorfor
 et gæt på fag+uge blev afprøvet og forkastet.
@@ -39,14 +44,17 @@ Dry-run som standard, `--apply` udfører, `--selfcheck` kører den indbyggede te
 
 import json
 import re
+import ssl
 import tempfile
 import sys
 import time
 import unicodedata
+import urllib.request
 from pathlib import Path
 
 VAULT_ROOT = Path.home() / "ViaVault"
 DATA_JSON = VAULT_ROOT / ".obsidian" / "plugins" / "hold-course" / "data.json"
+LOCAL_REST_API_CONFIG = VAULT_ROOT / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
 
 # main.js: COLOR_PALETTE har 6 farver, og addClass sætter colorIndex = classes.length % længden.
 COLOR_PALETTE_SIZE = 6
@@ -65,9 +73,9 @@ COURSE_URL = "https://via.itslearning.com/Course/Course.aspx?CourseId={}"
 # Det er VORES konfiguration, ikke Valdemars data, så synken sætter code og colorIndex ved hver
 # kørsel. `name` sættes derimod kun ved oprettelsen og er hans at redigere.
 FAG_STYLE = {
-    "Musik":         {"symbol": "♪",  "colorIndex": 5},   # grøn
-    "Religion":      {"symbol": "♱",  "colorIndex": 0},   # amber/gul
-    "LivsOplysning": {"symbol": "⚖︎", "colorIndex": 2},   # coral/rød
+    "Musik":         {"symbol": "♪",  "colorIndex": 5, "itslearningCode": "LSmu-2527"},    # grøn
+    "Religion":      {"symbol": "♱",  "colorIndex": 0, "itslearningCode": "LSkr-2628"},    # amber/gul
+    "LivsOplysning": {"symbol": "⚖︎", "colorIndex": 2, "itslearningCode": "LSS24.1livs"},  # coral/rød
 }
 
 
@@ -249,11 +257,12 @@ def course_url(course_id: str) -> str:
 def ensure_class(sem: dict, fag: str, new_id, course_id: str = "") -> dict:
     # `code` er IKKE fagets navn med et symbol foran — det ville stå lige over/ved siden af
     # `name` (samme tekst to gange, kun det ene med ikon: bekræftet live 2026-08-27, "to titler").
-    # Kun symbolet alene her, `name` er fagets fulde navn og vises ét sted for sig.
-    # itslearnings eget kursusnavn ("LSmu-2527", set live 2026-08-28 på /Courses/36016/about) blev
-    # også overvejet som code og fravalgt: en ren VIA-administrativ kode siger intet på et blik.
+    # itslearnings eget kursusnavn blev ved samme lejlighed overvejet og fravalgt alene ("en ren
+    # VIA-administrativ kode siger intet på et blik") — men er siden (2026-08-28, se nedenfor)
+    # tilføjet SAMMEN MED symbolet, da symbolerne alene viste sig svære at skelne i praksis.
     style = FAG_STYLE.get(fag, {})
-    code = style.get("symbol", fag)
+    symbol = style.get("symbol", fag)
+    code = f"{symbol} {style['itslearningCode']}" if style.get("itslearningCode") else symbol
     url = course_url(course_id)
     cls = find_stamped(sem["classes"], "vswFag", fag)
     if cls:
@@ -526,6 +535,25 @@ def sync_task_completion(data: dict, vault_root: Path, dry_run: bool) -> tuple[l
     return checked, marked_done
 
 
+def trigger_obsidian_reload(vault_root: Path) -> None:
+    """Beder Obsidian genindlæse sig selv (`app:reload`) via Local REST API-pluginet, så Hold
+    Course viser den friske data.json med det samme i stedet for at vente på at Valdemar selv
+    reloader — se modul-docstringens "Kendt begrænsning". Kaldes kun af sync() lige efter den
+    faktisk har skrevet en ændret data.json. Fejler stille: Obsidian kører måske ikke lige nu,
+    Local REST API er måske ikke installeret, eller porten/nøglen er ukendt — ingen af de
+    tilfælde skal vælte selve synk-kørslen, reload er en bekvemmelighed oveni, ikke forudsætning."""
+    try:
+        config = json.loads(LOCAL_REST_API_CONFIG.read_text(encoding="utf-8"))
+        req = urllib.request.Request(
+            f"https://127.0.0.1:{config['port']}/commands/app%3Areload/",
+            method="POST",
+            headers={"Authorization": f"Bearer {config['apiKey']}"},
+        )
+        urllib.request.urlopen(req, context=ssl._create_unverified_context(), timeout=5)
+    except Exception as err:
+        print(f"Kunne ikke bede Obsidian genindlæse (Local REST API): {err}", file=sys.stderr)
+
+
 def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) -> int:
     if not data_path.exists():
         print(f"Hold Course' data.json findes ikke ({data_path}) — er pluginet installeret?", file=sys.stderr)
@@ -589,7 +617,8 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         return 0
 
     data_path.write_text(after, encoding="utf-8")
-    print("Skrevet. Hold Course viser det næste gang pluginet indlæses.")
+    trigger_obsidian_reload(vault_root)
+    print("Skrevet. Bedt Obsidian genindlæse (Local REST API) — fejler stille hvis det ikke lykkedes.")
     return 0
 
 
@@ -632,7 +661,7 @@ def selfcheck() -> int:
     sem = data["semesters"][0]
     assert sem["term"] == "Fall" and sem["year"] == 2026, sem
     cls = sem["classes"][0]
-    assert cls["code"] == "♪" and cls["name"] == "Musik" and cls["vswFag"] == "Musik", cls
+    assert cls["code"] == "♪ LSmu-2527" and cls["name"] == "Musik" and cls["vswFag"] == "Musik", cls
     assert cls["colorIndex"] == 5, cls  # kun sat ved oprettelsen, som defaulten for Musik
 
     # colorIndex rørt IGEN ved en senere kørsel: Hold Course har ingen farvevælger, kun en
@@ -641,7 +670,7 @@ def selfcheck() -> int:
     cls["colorIndex"] = 1
     data_recolor = sync_data(data, [plan], lambda: "MÅ-IKKE-BRUGES")
     assert data_recolor["semesters"][0]["classes"][0]["colorIndex"] == 1, "colorIndex blev overskrevet"
-    assert data_recolor["semesters"][0]["classes"][0]["code"] == "♪", "code følger stadig med"
+    assert data_recolor["semesters"][0]["classes"][0]["code"] == "♪ LSmu-2527", "code følger stadig med"
     lec = cls["lectures"][0]
     assert lec["title"] == "Musikforståelse" and lec["date"] == "2026-09-01", lec
     # "Lecture note" peger på [NOTE]-stubben, ikke på maskinens [PLAN].
