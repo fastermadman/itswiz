@@ -20,10 +20,40 @@ async function getVaultHandle() {
   return handle;
 }
 
+// macOS/Syncthing kan gemme et mappenavn i NFD (unicode-dekomponeret, fx "å" som to kodepunkter:
+// "a" + kombinerende ring) selvom vi selv altid arbejder med NFC-strenge (samme tekst, ét
+// kodepunkt) — synligt identisk, byte-forskelligt. getDirectoryHandle matcher eksakt på bytes, så
+// et create:false-opslag med vores NFC-streng kan kaste NotFoundError selvom mappen findes, bare
+// under en anden byte-repræsentation (bekræftet live 2026-08-28, issue #131: en RAW/MD-mappe der
+// havde været gennem Syncthing var NFD på disk, mens vores egen streng var NFC — moveDir() tolkede
+// den falske NotFoundError som "allerede flyttet" og rørte aldrig de rigtige filer).
+// Kører kun som fallback NÅR det eksakte opslag rent faktisk fejler — det almindelige tilfælde
+// (samme session skrev/læste mappen, ingen ekstern normalisering involveret) rammer aldrig denne
+// kode og opfører sig som før.
+async function findDirEntryNormalized(dir, name) {
+  const target = name.normalize("NFC");
+  for await (const [entryName, handle] of dir.entries()) {
+    if (handle.kind === "directory" && entryName.normalize("NFC") === target) return handle;
+  }
+  return null;
+}
+
+async function getDirectoryHandleTolerant(dir, name, { create = true } = {}) {
+  try {
+    return await dir.getDirectoryHandle(name, { create: false });
+  } catch (err) {
+    if (err.name !== "NotFoundError") throw err;
+    const found = await findDirEntryNormalized(dir, name);
+    if (found) return found;
+    if (create) return await dir.getDirectoryHandle(name, { create: true });
+    throw err;
+  }
+}
+
 async function getTargetDirectory(root, pathParts, { create = true } = {}) {
   let dir = root;
   for (const part of pathParts) {
-    dir = await dir.getDirectoryHandle(part, { create });
+    dir = await getDirectoryHandleTolerant(dir, part, { create });
   }
   return dir;
 }
@@ -98,7 +128,7 @@ async function moveDir(oldPath, newPath) {
   }
   let oldDir;
   try {
-    oldDir = await oldParentDir.getDirectoryHandle(oldName, { create: false });
+    oldDir = await getDirectoryHandleTolerant(oldParentDir, oldName, { create: false });
   } catch (err) {
     if (err.name === "NotFoundError") return;
     throw err;
