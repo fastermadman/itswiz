@@ -7,6 +7,17 @@
 const FAG_ROOT = "§ FAG";
 const NOTER_ROOT = "✎ NOTER";
 
+// Versionsmarkøren tvinger én genskrivning af alle lektionsplan-noter når frontmatter-skemaet
+// ændrer sig (se brugen i writePlanNotes), og koster ingenting bagefter. Bump den når frontmatter
+// får nye felter. (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER
+// selve autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene
+// frontmatter-ændringer.)
+//
+// Modulniveau, ikke kun lokal i writePlanNotes: runCollectAndDownload skal kunne sammenligne den
+// mod den senest GENNEMFØRTE version (issue #121) for at vide om en engangs-backfill er
+// nødvendig — se FRONTMATTER_VERSION_KEY og runCollectAndDownload.
+const FRONTMATTER_VERSION = 8; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113)
+
 // chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
 // hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
 // fra JS (issues.chromium.org/issues/40359474). File System Access API omgår det helt: brugeren
@@ -1199,13 +1210,9 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // forsvinde.
     // Bagsiden af det: et NYT frontmatter-felt når aldrig ud til noter hvis AUTO-indholdet er
     // uændret — en lektion uden Forberedelse ville aldrig få `forberedelse: false`, og basens
-    // `!= false`-filter ville så se et felt der slet ikke findes. Versionsmarkøren tvinger én
-    // genskrivning af alle lektionsplan-noter når skemaet ændrer sig, og koster ingenting bagefter.
-    // Bump den når frontmatter får nye felter. (Valdemars eget indhold uden for AUTO-markørerne
-    // bevares af spliceAutoSection, så genskrivningen er ufarlig.)
-    // (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER selve
-    // autoContent-strengen, så hashet skifter af sig selv. Bump kun ved rene frontmatter-ændringer.)
-    const FRONTMATTER_VERSION = 8; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113)
+    // `!= false`-filter ville så se et felt der slet ikke findes. Det er derfor FRONTMATTER_VERSION
+    // (modulniveau, se toppen af filen) tvinger én genskrivning ved et bump. (Valdemars eget
+    // indhold uden for AUTO-markørerne bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (prevRecord?.hash === currentHash) {
       // Indholdet er uændret, så resten af funktionen springes over — men weekFolder skal stadig
@@ -1957,6 +1964,21 @@ async function getSettings() {
 // en bunke USER_CANCELED downloads.
 let isRunning = false;
 
+// Issue #121: en kørsel dækker kun daysBack/daysForward omkring i dag (default 1/30), så et
+// FRONTMATTER_VERSION-bump genskriver aldrig noter fra før i går, uanset hvor mange gange
+// extensionen kører — versionsmarkøren i hashet lover en genskrivning den ikke kan holde for
+// noter uden for vinduet. Fandt live 2026-08-28: beskrivelse: (version 8) stod i 0 af 36
+// lektionsplan-noter, selvom koden var korrekt og havde kørt adskillige gange siden.
+//
+// Løsning: husk hvilken FRONTMATTER_VERSION der sidst blev gennemført. Er den forældet (eller
+// aldrig sat, fx første kørsel efter en frisk installation), udvider netop DÉN ene kørsel
+// tilbageblikket til BACKFILL_DAYS_BACK i stedet for settings' daysBack — bredt nok til at nå en
+// hel studieuddannelse tilbage, ikke kun indeværende semester. Bagefter falder kørslerne tilbage
+// til det normale, korte vindue. Ingen ekstra manuel indstilling at huske at ændre og ændre
+// tilbage, og ingen risiko for det (#113s driftsfælde) hvis Valdemar glemmer det.
+const FRONTMATTER_VERSION_KEY = "syncedFrontmatterVersion";
+const BACKFILL_DAYS_BACK = 400;
+
 async function runCollectAndDownload() {
   if (isRunning) {
     console.log("VIAstudyWiz: kørsel allerede i gang, springer over");
@@ -1964,11 +1986,18 @@ async function runCollectAndDownload() {
   }
   isRunning = true;
   try {
+    const { [FRONTMATTER_VERSION_KEY]: syncedVersion } = await chrome.storage.local.get(FRONTMATTER_VERSION_KEY);
+    const isBackfill = syncedVersion !== FRONTMATTER_VERSION;
+
     const { daysBack, daysForward } = await getSettings();
     const now = Math.floor(Date.now() / 1000);
-    const start = now - daysBack * 24 * 60 * 60;
+    const start = now - (isBackfill ? BACKFILL_DAYS_BACK : daysBack) * 24 * 60 * 60;
     const end = now + daysForward * 24 * 60 * 60;
+    if (isBackfill) {
+      console.log(`VIAstudyWiz: frontmatter-version ${syncedVersion ?? "(ingen)"} -> ${FRONTMATTER_VERSION}, backfiller ${BACKFILL_DAYS_BACK} dage tilbage`);
+    }
     await collectAndDownload(start, end);
+    if (isBackfill) await chrome.storage.local.set({ [FRONTMATTER_VERSION_KEY]: FRONTMATTER_VERSION });
   } catch (err) {
     console.error("VIAstudyWiz fejl:", err);
     notifyCriticalFailure(err);
