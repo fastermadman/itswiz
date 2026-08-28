@@ -414,10 +414,10 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
-    // Download FØR noteskrivning (issue #129): writePlanNotes skriver kun wikilinks til elementer
-    // der allerede er downloadet (downloadedIds), så et element skal have haft sit downloadforsøg
-    // inden noten for dets uge genereres — ellers ser et fejlet/endnu-ikke-forsøgt download
-    // "sundt" ud i noten, og Obsidian opretter en tom spøgelsesnote den dag nogen klikker linket.
+    // Download FØR noteskrivning (issue #129): writePlanNotes tjekker selv om hver materiale-fil
+    // reelt findes (existingMaterialeIds) før den skriver et wikilink til den, så downloadet skal
+    // have haft en chance for at ske FØRST — ellers ville et element der først lige er hentet
+    // denne kørsel altid mangle sit link én kørsel for sent.
     const filesOk = await downloadFileElements(result.plans, tab.id);
     // Spring noteskrivning over hvis tilladelsen allerede er væk — ingen grund til at forsøge at
     // skrive noter når vaulten alligevel ikke kan skrives til.
@@ -1104,6 +1104,25 @@ function summarizeAutoChange(oldAutoContent, newAutoContent) {
   return addedLine.length > 80 ? `${addedLine.slice(0, 80)}…` : addedLine;
 }
 
+// Et wikilink til et materiale må kun skrives hvis MD-filen det peger på RENT FAKTISK findes i
+// vaulten lige nu — downloadedElementIds (dedup-cachen i downloadFileElements) er ikke nok, den
+// siger kun "vi har forsøgt at downloade dette element.id engang", ikke "filen findes stadig på
+// den sti vi er ved at skrive". Cachen drifter væk fra virkeligheden når itslearning omdøber et
+// element eller flytter dets lektion til en anden uge — mdPath() afhænger af titel+weekFolder,
+// som begge kan ændre sig efter første download, mens element.id (det cachen er keyet på) består
+// (issue #128/#129, live-bekræftet: to elementer stod som downloadet i cachen uden at deres fil
+// nogensinde har eksisteret i vaulten). At tjekke reel eksistens her er den eneste kilde der ikke
+// kan blive forældet, uanset årsagen til driften.
+async function existingMaterialeIds(plan, courseName, weekFolder) {
+  const fileElements = (plan.elements ?? []).filter(
+    (el) => el.typeName !== "Link" && !NON_FILE_TYPE_NAMES.has(el.typeName)
+  );
+  const checks = await Promise.all(
+    fileElements.map(async (el) => [el.id, (await readFromVault(mdPath(courseName, weekFolder, el.title))) != null])
+  );
+  return new Set(checks.filter(([, exists]) => exists).map(([id]) => id));
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
 // AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
@@ -1115,13 +1134,6 @@ function summarizeAutoChange(oldAutoContent, newAutoContent) {
 // advarsels-badge'et.
 async function writePlanNotes(plans, tabId, syncTaskCompletion) {
   const records = await getPlanNoteRecords();
-  // Kun elementer der faktisk ER downloadet (denne kørsel eller en tidligere) må få et wikilink —
-  // downloadFileElements() kører nu FØR writePlanNotes (se runCollectAndDownload), så et element
-  // enten allerede findes i vaulten eller er lige blevet skrevet dertil. Uden dette tjek skrives
-  // linket ud fra plan.elements alene, og et fejlet/endnu-ikke-forsøgt download efterlader et
-  // "sundt"-udseende wikilink der peger på en fil der aldrig findes — Obsidian opretter så en tom
-  // note ved klik i stedet for at åbne den rigtige (issue #128/#129).
-  const downloadedIds = await getDownloadedIds();
 
   for (const [planKey, plan] of Object.entries(plans)) {
     const noteId = `plan:${planKey}`;
@@ -1133,6 +1145,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // værdi (courseDisplayName), da Seminarium.base filtrerer eksakt på den (issue #63).
     const fag = sanitizeFilename(courseFolderName(courseName));
     const fagField = courseDisplayName(courseName);
+    const existingIds = await existingMaterialeIds(plan, courseName, weekFolder);
 
     // planId'et er stabilt selv når itslearning redigerer start/stop-felterne på en eksisterende
     // plan i stedet for at oprette en ny (fx en reel udskydelse, live-bekræftet 2026-08-27 på
@@ -1162,7 +1175,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // (samme klasse som Forberedelse-elementernes SharePoint-links, issue #59), er MinerU-
     // renderingen ubrugelig til det, og RAW-filen findes kun på disken, ikke i noten.
     const materials = (plan.elements ?? [])
-      .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && downloadedIds.has(el.id)))
+      .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && existingIds.has(el.id)))
       .map((el) =>
         el.typeName === "Link"
           ? `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`
@@ -1171,7 +1184,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
     const literatureFiles = literature
-      ? matchLiteratureElements(literature, plan.elements ?? []).filter((el) => downloadedIds.has(el.id))
+      ? matchLiteratureElements(literature, plan.elements ?? []).filter((el) => existingIds.has(el.id))
       : [];
     const forberedelse = forberedelseElements(plan);
     // Samme tekst som AUTO-sektionens brødtekst nedenfor, men som eget felt: Hold Course-synken
@@ -1190,7 +1203,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Link/Mappe/Arbejdsopgave/Afleveringsopgave, samme filter som materials-listen bruger.
     const literatureFileTitles = new Set(literatureFiles.map((el) => el.title));
     const materialeFiler = (plan.elements ?? [])
-      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title) && downloadedIds.has(el.id));
+      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title) && existingIds.has(el.id));
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
