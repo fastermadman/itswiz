@@ -1105,20 +1105,23 @@ function summarizeAutoChange(oldAutoContent, newAutoContent) {
 }
 
 // Et wikilink til et materiale må kun skrives hvis MD-filen det peger på RENT FAKTISK findes i
-// vaulten lige nu — downloadedElementIds (dedup-cachen i downloadFileElements) er ikke nok, den
-// siger kun "vi har forsøgt at downloade dette element.id engang", ikke "filen findes stadig på
-// den sti vi er ved at skrive". Cachen drifter væk fra virkeligheden når itslearning omdøber et
-// element eller flytter dets lektion til en anden uge — mdPath() afhænger af titel+weekFolder,
-// som begge kan ændre sig efter første download, mens element.id (det cachen er keyet på) består
-// (issue #128/#129, live-bekræftet: to elementer stod som downloadet i cachen uden at deres fil
-// nogensinde har eksisteret i vaulten). At tjekke reel eksistens her er den eneste kilde der ikke
-// kan blive forældet, uanset årsagen til driften.
+// vaulten lige nu, MED indhold — downloadedElementIds (dedup-cachen i downloadFileElements) er
+// ikke nok, den siger kun "vi har forsøgt at downloade dette element.id engang", ikke "filen
+// findes stadig på den sti vi er ved at skrive". Cachen drifter væk fra virkeligheden når
+// itslearning omdøber et element eller flytter dets lektion til en anden uge — mdPath() afhænger
+// af titel+weekFolder, som begge kan ændre sig efter første download, mens element.id (det cachen
+// er keyet på) består (issue #128/#129, live-bekræftet: to elementer stod som downloadet i
+// cachen uden at deres fil nogensinde har eksisteret i vaulten).
+// Tom streng tæller IKKE som fundet: readFromVault returnerer "" (ikke null) for en 0-byte fil,
+// og en 0-byte .md er præcis Obsidians egen spøgelsesnote-signatur (oprettet ved klik på et dødt
+// wikilink) — uden dette tjek ville selve symptomet på bugbasen bekræfte sig selv som "fundet" og
+// linket blive stående for evigt.
 async function existingMaterialeIds(plan, courseName, weekFolder) {
   const fileElements = (plan.elements ?? []).filter(
     (el) => el.typeName !== "Link" && !NON_FILE_TYPE_NAMES.has(el.typeName)
   );
   const checks = await Promise.all(
-    fileElements.map(async (el) => [el.id, (await readFromVault(mdPath(courseName, weekFolder, el.title))) != null])
+    fileElements.map(async (el) => [el.id, ((await readFromVault(mdPath(courseName, weekFolder, el.title))) ?? "").trim().length > 0])
   );
   return new Set(checks.filter(([, exists]) => exists).map(([id]) => id));
 }
