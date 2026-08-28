@@ -16,7 +16,7 @@ const NOTER_ROOT = "✎ NOTER";
 // Modulniveau, ikke kun lokal i writePlanNotes: runCollectAndDownload skal kunne sammenligne den
 // mod den senest GENNEMFØRTE version (issue #121) for at vide om en engangs-backfill er
 // nødvendig — se FRONTMATTER_VERSION_KEY og runCollectAndDownload.
-const FRONTMATTER_VERSION = 8; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113)
+const FRONTMATTER_VERSION = 9; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129)
 
 // chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
 // hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
@@ -414,12 +414,18 @@ async function collectAndDownload(startUnix, endUnix) {
   if (settings.enableCalendarSync) await syncCalendar(result);
   let vaultPermissionMissing = false;
   if (settings.enableFileDownloads) {
+    // Download FØR noteskrivning (issue #129): writePlanNotes skriver kun wikilinks til elementer
+    // der allerede er downloadet (downloadedIds), så et element skal have haft sit downloadforsøg
+    // inden noten for dets uge genereres — ellers ser et fejlet/endnu-ikke-forsøgt download
+    // "sundt" ud i noten, og Obsidian opretter en tom spøgelsesnote den dag nogen klikker linket.
+    const filesOk = await downloadFileElements(result.plans, tab.id);
+    // Spring noteskrivning over hvis tilladelsen allerede er væk — ingen grund til at forsøge at
+    // skrive noter når vaulten alligevel ikke kan skrives til.
     const notesOk =
-      (await writePlanNotes(result.plans, tab.id, settings.enableTaskCompletionSync)) && (await writeTaskNotes(result.tasks ?? []));
-    // Spring downloads over hvis tilladelsen allerede er væk — ingen grund til at åbne skjulte
-    // faner og resolve download-URL'er for filer der alligevel ikke kan skrives.
-    const filesOk = notesOk && (await downloadFileElements(result.plans, tab.id));
-    vaultPermissionMissing = !filesOk;
+      filesOk &&
+      (await writePlanNotes(result.plans, tab.id, settings.enableTaskCompletionSync)) &&
+      (await writeTaskNotes(result.tasks ?? []));
+    vaultPermissionMissing = !filesOk || !notesOk;
   }
   await updateStatusBadge(vaultPermissionMissing);
   notifyErrorsIfAny();
@@ -1109,6 +1115,13 @@ function summarizeAutoChange(oldAutoContent, newAutoContent) {
 // advarsels-badge'et.
 async function writePlanNotes(plans, tabId, syncTaskCompletion) {
   const records = await getPlanNoteRecords();
+  // Kun elementer der faktisk ER downloadet (denne kørsel eller en tidligere) må få et wikilink —
+  // downloadFileElements() kører nu FØR writePlanNotes (se runCollectAndDownload), så et element
+  // enten allerede findes i vaulten eller er lige blevet skrevet dertil. Uden dette tjek skrives
+  // linket ud fra plan.elements alene, og et fejlet/endnu-ikke-forsøgt download efterlader et
+  // "sundt"-udseende wikilink der peger på en fil der aldrig findes — Obsidian opretter så en tom
+  // note ved klik i stedet for at åbne den rigtige (issue #128/#129).
+  const downloadedIds = await getDownloadedIds();
 
   for (const [planKey, plan] of Object.entries(plans)) {
     const noteId = `plan:${planKey}`;
@@ -1149,7 +1162,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // (samme klasse som Forberedelse-elementernes SharePoint-links, issue #59), er MinerU-
     // renderingen ubrugelig til det, og RAW-filen findes kun på disken, ikke i noten.
     const materials = (plan.elements ?? [])
-      .filter((el) => el.typeName === "Link" || !NON_FILE_TYPE_NAMES.has(el.typeName))
+      .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && downloadedIds.has(el.id)))
       .map((el) =>
         el.typeName === "Link"
           ? `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`
@@ -1157,7 +1170,9 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       );
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
-    const literatureFiles = literature ? matchLiteratureElements(literature, plan.elements ?? []) : [];
+    const literatureFiles = literature
+      ? matchLiteratureElements(literature, plan.elements ?? []).filter((el) => downloadedIds.has(el.id))
+      : [];
     const forberedelse = forberedelseElements(plan);
     // Samme tekst som AUTO-sektionens brødtekst nedenfor, men som eget felt: Hold Course-synken
     // (issue #113) læser kun frontmatter, ikke AUTO-blokken, og "Key Concepts & Lesson Goal" på
@@ -1175,7 +1190,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Link/Mappe/Arbejdsopgave/Afleveringsopgave, samme filter som materials-listen bruger.
     const literatureFileTitles = new Set(literatureFiles.map((el) => el.title));
     const materialeFiler = (plan.elements ?? [])
-      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title));
+      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title) && downloadedIds.has(el.id));
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
