@@ -916,9 +916,15 @@ function rawPath(courseName, weekFolder, title) {
 // watch_viastudywiz.py navngiver MD-noten efter RAW-filens stem (Path.stem, dvs. alt før sidste
 // "."), sanitized samme vej — se md_targets() i watchfolder/watch_viastudywiz.py. Title indeholder
 // typisk selve endelsen allerede (fx "Titel.docx"), så den skal strippes, ikke bare have .md
-// tilføjet oveni.
+// tilføjet oveni. Kun når titlen faktisk ender på en kendt endelse (samme liste som isPdf/isOffice
+// ved download, se downloadNewFiles) — ellers strimler et almindeligt punktum i titlen selv (fx
+// "... kap. 2") det forkert, fordi RAW-filen i det tilfælde får sin endelse tilføjet efter titlen,
+// ikke fra titlen selv (issue #116).
 function mdPath(courseName, weekFolder, title) {
-  const stem = sanitizeFilename(title).replace(/\.[^./]+$/, "");
+  const sanitized = sanitizeFilename(title);
+  const lower = sanitized.toLowerCase();
+  const knownExtension = [".pdf", ...OFFICE_EXTENSIONS].find((ext) => lower.endsWith(ext));
+  const stem = knownExtension ? sanitized.slice(0, -knownExtension.length) : sanitized;
   return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
 }
 
