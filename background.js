@@ -524,19 +524,17 @@ async function extractExtensionFromWopi(wopiContentsUrl) {
   }
 }
 
-// Matcher Valdemars eksisterende manuelle ugemappe-navngivning (fx "W34tirs"). Ren dato+ugedag —
-// intet fag-specifikt — så to forskellige lektioner i samme fag samme ugedag (fx Musik
-// formiddag/eftermiddag) ville ellers kollidere i weekFolderName() nedenfor, hvis ikke emnet
-// adskilte dem.
+// Ren ISO-dato (YYYY-MM-DD) fra plan.start — samme streng-slice-mønster som toGoogleDateTime,
+// da itslearning-tider ikke har noget tidszone-suffix (naiv lokal Europe/Copenhagen-væg-tid,
+// fx "2026-04-29T12:30:00.0000000"). En slice er robust uanset hvilken tidszone selve
+// browseren kører i, i modsætning til den tidligere `new Date(...)`-baserede
+// ISO-ugenummer-beregning (issue #135), som manglede årstal helt: "W35fre" for to forskellige
+// år regnede sig frem til NØJAGTIG samme vaultsti, så et gammelt semesters materiale kunne blive
+// forvekslet med indeværende semesters. Dato er årstals-unik i sig selv uden ekstra logik.
+// To forskellige lektioner samme dag (fx Musik formiddag/eftermiddag) adskilles stadig af emnet
+// i weekFolderName() nedenfor, samme princip som før.
 function weekFolderBase(plan) {
-  const date = new Date(plan.start);
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-  const dayAbbrev = ["søn", "man", "tirs", "ons", "tors", "fre", "lør"][date.getDay()];
-  return `W${week}${dayAbbrev}`;
+  return plan.start.slice(0, 10);
 }
 
 // plan.topic.name er strukturerede data fra itslearning (bekræftet live, ikke fritekst) —
