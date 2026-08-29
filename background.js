@@ -405,6 +405,15 @@ async function collectAndDownload(startUnix, endUnix) {
     args: [startUnix, endUnix],
   });
 
+  // Chrome kan resolve med result: null i stedet for at lade executeScript() rejecte, hvis
+  // collectRangeInPage kastede internt (fx fetchCourses der fik en login-side i stedet for JSON,
+  // dvs. en udløbet/ikke-logget-ind itslearning-session) — uden dette tjek crasher næste linje med
+  // en uforklarlig "Cannot read properties of null" i stedet for at pege på den reelle årsag
+  // (issue #134).
+  if (!result) {
+    throw new Error("Ingen data fra itslearning-fanen — tjek at du er logget ind på via.itslearning.com og prøv igen.");
+  }
+
   console.log(
     `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer, ${(result.tasks ?? []).length} opgaver med deadline`
   );
