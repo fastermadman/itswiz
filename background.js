@@ -1599,7 +1599,28 @@ async function downloadFileElements(plans, tabId) {
     }))
   );
 
-  const fileElements = matchingElements.filter(({ element }) => !downloadedIds.has(element.id));
+  // downloadedIds er en engangs-log ("blev hentet mindst én gang"), ikke en garanti for at
+  // filen stadig ligger i vaulten — en ugemappe-flytning (moveDirInVault), en manuel oprydning
+  // eller en Syncthing-konflikt kan have fjernet den siden. Uden dette tjek forbliver læsningen
+  // tabt for evigt: flaget forhindrer for altid et nyt downloadforsøg, uanset at filen er væk
+  // (live-eksempel 2026-08-29: "A Dahlbæk kap 10 Dans og bevægelse..." forsvandt fra disken,
+  // men blev aldrig hentet igen, fordi id'et allerede stod i downloadedIds). Kun elementer hvis
+  // titel selv bærer en kendt endelse (isPdf/isOffice) kan tjekkes her — rawPath() kræver
+  // endelsen, og "unknown type"-elementers endelse kendes først efter selve download-URL'en er
+  // resolvet nedenfor, så de stoler stadig kun på flaget.
+  const fileElements = [];
+  for (const item of matchingElements) {
+    const { courseName, weekFolder, element } = item;
+    if (!downloadedIds.has(element.id)) {
+      fileElements.push(item);
+      continue;
+    }
+    const titleLower = element.title.toLowerCase();
+    const hasKnownExtension = titleLower.endsWith(".pdf") || OFFICE_EXTENSIONS.some((ext) => titleLower.endsWith(ext));
+    if (!hasKnownExtension) continue;
+    const stillOnDisk = ((await readFromVault(rawPath(courseName, weekFolder, element.title))) ?? "").length > 0;
+    if (!stillOnDisk) fileElements.push(item);
+  }
 
   console.log(`VIAstudyWiz: ${fileElements.length} nye fil-elementer at behandle (efter dedup)`);
 
