@@ -1139,6 +1139,31 @@ async function existingMaterialeIds(plan, courseName, weekFolder) {
   return new Set(checks.filter(([, exists]) => exists).map(([id]) => id));
 }
 
+// Samme mønster som existingMaterialeIds, men for RAW-originalen — bruges kun til at afgøre om et
+// ekstra RAW-link er trygt at vise ved siden af MD-linket (Valdemars ønske: kunne åbne selve
+// PDF'en/docx'en direkte, ikke kun MinerU-konverteringen). rawPath(title) er kun pålidelig når
+// titlen selv bærer endelsen (isPdf/isOffice) — "unknown type"-elementer får deres endelse tilføjet
+// FØRST ved selve downloadet (se downloadFileElements), så et gæt her ville nogle gange pege på en
+// fil der aldrig eksisterer under det navn. At udelade linket for de elementer er derfor korrekt,
+// ikke en fejl.
+async function existingRawIds(plan, courseName, weekFolder) {
+  const fileElements = (plan.elements ?? []).filter(
+    (el) => el.typeName !== "Link" && !NON_FILE_TYPE_NAMES.has(el.typeName)
+  );
+  const checks = await Promise.all(
+    fileElements.map(async (el) => [el.id, ((await readFromVault(rawPath(courseName, weekFolder, el.title))) ?? "").length > 0])
+  );
+  return new Set(checks.filter(([, exists]) => exists).map(([id]) => id));
+}
+
+// [[fuld/sti/Titel.md]] viser hele stien som synlig linktekst i Obsidian — ulæseligt i en liste med
+// flere materialer. |alias giver kort, læsbar tekst uden at give slip på det fulde, entydige mål.
+function mdLink(courseName, weekFolder, title) {
+  const full = mdPath(courseName, weekFolder, title);
+  const alias = full.slice(full.lastIndexOf("/") + 1, -3);
+  return `[[${full}|${alias}]]`;
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
 // AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
@@ -1162,6 +1187,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const fag = sanitizeFilename(courseFolderName(courseName));
     const fagField = courseDisplayName(courseName);
     const existingIds = await existingMaterialeIds(plan, courseName, weekFolder);
+    const rawIds = await existingRawIds(plan, courseName, weekFolder);
 
     // planId'et er stabilt selv når itslearning redigerer start/stop-felterne på en eksisterende
     // plan i stedet for at oprette en ny (fx en reel udskydelse, live-bekræftet 2026-08-27 på
@@ -1182,21 +1208,24 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
         recordError(`Lektion flyttet (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): vault-materialer kunne ikke flyttes automatisk — ${err.message}`);
       }
     }
-    // Links til MD-noten (navigations-graf), ikke RAW-filen — RAW er bytes til enheder, ikke
-    // noget man klikker sig videre til fra en note (issue #26). Mappe/opgave-typer får aldrig en
-    // MD-modpart, så de udelades. Link-elementer nævnes som ren tekst (titlen er allerede synlig
-    // her) i stedet for en note — automatisk indholds-udtræk blev forsøgt og droppet igen, se #20.
-    // Suffikset til itslearning (issue #73) er en nødvendig vej tilbage til ORIGINALEN, ikke bare
-    // en genvej: viser et fil-element sig at være en skabelon man selv skal skrive i og aflevere
-    // (samme klasse som Forberedelse-elementernes SharePoint-links, issue #59), er MinerU-
-    // renderingen ubrugelig til det, og RAW-filen findes kun på disken, ikke i noten.
+    // Links til MD-noten (navigations-graf) er hovedlinket, men et ekstra RAW-link er tilføjet ved
+    // siden af (issue #135-opfølgning, Valdemars ønske) — MinerU-renderingen er ikke altid trofast
+    // mod originalens layout/billeder, og indtil nu var originalen kun tilgængelig via et ekstra
+    // klik ind i MD-notens eget kilde:-felt. Kun vist når RAW-filen rent faktisk findes under det
+    // gættede navn (existingRawIds, se dens kommentar for hvorfor "unknown type"-elementer udelades).
+    // Mappe/opgave-typer får aldrig en MD-modpart, så de udelades. Link-elementer nævnes som ren
+    // tekst (titlen er allerede synlig her) i stedet for en note — automatisk indholds-udtræk blev
+    // forsøgt og droppet igen, se #20. Suffikset til itslearning (issue #73) er en nødvendig vej
+    // tilbage til ORIGINALEN, ikke bare en genvej: viser et fil-element sig at være en skabelon man
+    // selv skal skrive i og aflevere (samme klasse som Forberedelse-elementernes SharePoint-links,
+    // issue #59), er MinerU-renderingen ubrugelig til det.
     const materials = (plan.elements ?? [])
       .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && existingIds.has(el.id)))
-      .map((el) =>
-        el.typeName === "Link"
-          ? `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`
-          : `- [[${mdPath(courseName, weekFolder, el.title)}]] · [itslearning](https://via.itslearning.com${el.url})`
-      );
+      .map((el) => {
+        if (el.typeName === "Link") return `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`;
+        const rawLink = rawIds.has(el.id) ? ` · [[${rawPath(courseName, weekFolder, el.title)}|RAW]]` : "";
+        return `- ${mdLink(courseName, weekFolder, el.title)}${rawLink} · [itslearning](https://via.itslearning.com${el.url})`;
+      });
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
     const literatureFiles = literature
@@ -1294,7 +1323,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       // parse brødteksten. `false` når matchLiteratureElements ikke fandt noget, samme mønster som
       // litteratur/forberedelse ovenfor.
       ...(literatureFiles.length
-        ? yamlBlockLines("litteratur_filer", literatureFiles.map((el) => `📎 [[${mdPath(courseName, weekFolder, el.title)}]]`).join("\n"))
+        ? yamlBlockLines("litteratur_filer", literatureFiles.map((el) => `📎 ${mdLink(courseName, weekFolder, el.title)}`).join("\n"))
         : ["litteratur_filer: false"]),
       // Kun titlerne, ikke indholdet: Properties-panelet og basens kolonne skal kunne læses på et
       // blik, og selve teksten står i AUTO-sektionen nedenfor. `false` frem for at udelade feltet,
@@ -1307,7 +1336,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       // underviseren aldrig udfylder litteratur-feltet (se kommentaren ved materialeFiler ovenfor).
       // Samme false-mønster som de øvrige felter.
       ...(materialeFiler.length
-        ? yamlBlockLines("materiale_filer", materialeFiler.map((el) => `📎 [[${mdPath(courseName, weekFolder, el.title)}]]`).join("\n"))
+        ? yamlBlockLines("materiale_filer", materialeFiler.map((el) => `📎 ${mdLink(courseName, weekFolder, el.title)}`).join("\n"))
         : ["materiale_filer: false"]),
       ...(beskrivelse ? yamlBlockLines("beskrivelse", beskrivelse) : ["beskrivelse: false"]),
       "---",
