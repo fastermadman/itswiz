@@ -159,6 +159,73 @@ def wikilink_target(line: str) -> str | None:
     return match.group(1) if match else None
 
 
+def wikilink_for(rel_path: str) -> str:
+    """Samme alias-form som background.js' mdLink(): filnavnet selv, ikke hele stien."""
+    return f"[[{rel_path}|{rel_path.rsplit('/', 1)[-1]}]]"
+
+
+def append_file_list_field(text: str, key: str, prefix: str, new_links: list[str]) -> str:
+    """Tilføjer nye 📎-linjer til et frontmatter-blokfelt (materiale_filer/litteratur_filer).
+    `key: false` bliver til `key: |` hvis feltet var tomt. Rører teksten slet ikke hvis feltet
+    ikke findes (ældre note-version uden feltet)."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line == f"{key}: false":
+            block = [f"{key}: |"] + [f"  {prefix} {link}" for link in new_links]
+            return "\n".join(lines[:i] + block + lines[i + 1:])
+        if line.strip() == f"{key}: |":
+            j = i + 1
+            while j < len(lines) and lines[j].startswith("  "):
+                j += 1
+            block = [f"  {prefix} {link}" for link in new_links]
+            return "\n".join(lines[:j] + block + lines[j:])
+    return text
+
+
+def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
+    """Selvhelbredende pas (issue #141): background.js skriver `materiale_filer: false` når en
+    fil ikke er MinerU-konverteret endnu på skrivetidspunktet — og den genskriver kun planer der
+    stadig ligger inden for sit korte itslearning-tidsvindue (daysBack: 1). Falder lektionen ud
+    af det vindue før konverteringen er færdig, retter background.js sig aldrig selv, og
+    materiale_filer: false står tilbage for evigt (bekræftet live: en hel BACKFILL_DAYS_BACK-kørsel
+    når slet ikke at blive genbesøgt af næste, kortvinduede kørsel).
+
+    Kører derfor helt uafhængigt af itslearning: for hver [PLAN]-note sammenlignes de allerede
+    linkede filer (materiale_filer + litteratur_filer) mod hvad der faktisk ligger i notens egen
+    MD-mappe — enhver fil dér uden et link bliver tilføjet til materiale_filer. Ingen forsøg på at
+    skelne materiale fra litteratur her (den klassifikation kræver itslearning-dataen, som denne
+    funktion bevidst ikke rører); begge felter giver alligevel samme Reading-opgave i Hold Course
+    (se sync_data), så klassifikationen er kosmetisk, ikke funktionel, for netop dette formål.
+    Idempotent og billig (samme mapper read_plans() alligevel scanner), sikkert at køre hvert minut."""
+    patched = []
+    for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
+        text = plan_path.read_text(encoding="utf-8")
+        fields = parse_frontmatter(text)
+        if fields.get("type") != "lektionsplan":
+            continue
+
+        linked = {wikilink_target(l) for l in prefixed_lines(fields.get("materiale_filer", ""), MATERIALE_FIL_PREFIX)}
+        linked |= {wikilink_target(l) for l in prefixed_lines(fields.get("litteratur_filer", ""), LITTERATUR_FIL_PREFIX)}
+
+        orphans = [
+            nfc(str(md.relative_to(vault_root)))
+            for md in sorted(plan_path.parent.glob("*.md"))
+            if md.name != plan_path.name
+        ]
+        orphans = [o for o in orphans if o not in linked]
+        if not orphans:
+            continue
+
+        updated = append_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
+                                          [wikilink_for(o) for o in orphans])
+        if updated == text:
+            continue
+        patched.append(str(plan_path.relative_to(vault_root)))
+        if apply:
+            plan_path.write_text(updated, encoding="utf-8")
+    return patched
+
+
 def read_tasks(vault_root: Path) -> list[dict]:
     """`type: opgave`-noterne extensionen skriver til NOTER/OPGAVER/ (writeTaskNotes i
     background.js): afleveringsopgaver med en rigtig deadline, som ikke hænger på en bestemt
@@ -637,6 +704,13 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         print(f"Hold Course' data.json findes ikke ({data_path}) — er pluginet installeret?", file=sys.stderr)
         return 1
 
+    patched = patch_pending_materiale(vault_root, apply)
+    if patched and not quiet:
+        label = "Rettet" if apply else "Ville rette (dry-run)"
+        print(f"{label}: {len(patched)} lektionsplan-note(r) fik nye materiale_filer-links (issue #141):")
+        for rel in patched:
+            print(f"  {rel}")
+
     plans, uden_plan_id = read_plans(vault_root)
     tasks = read_tasks(vault_root)
     before = data_path.read_text(encoding="utf-8")
@@ -1019,6 +1093,36 @@ def selfcheck() -> int:
     assert wikilink_target("[[sti/Titel.md]]") == "sti/Titel.md"
     assert wikilink_target("[[sti/Titel.md|Titel.md]]") == "sti/Titel.md"
     assert wikilink_target("[[sti/Titel (2026).pdf|Titel (web)]]") == "sti/Titel (2026).pdf"
+
+    # patch_pending_materiale (#141): en fil der lå i MD-mappen uden noget link i frontmatter
+    # (MinerU-konverteringen kom først efter background.js' tidsvindue lukkede) skal linkes ind,
+    # men en fil der ALLEREDE er nævnt i litteratur_filer skal ikke dubleres over i materiale_filer.
+    patch_root = Path(tempfile.mkdtemp())
+    week_dir = patch_root / "§ FAG" / "♪ Musik" / "MD" / "W36tirs"
+    week_dir.mkdir(parents=True)
+    plan_note = week_dir / "[PLAN] W36tirs.md"
+    plan_note.write_text(
+        "---\ntype: lektionsplan\nfag: Musik\n"
+        "litteratur_filer: |\n  📎 [[§ FAG/♪ Musik/MD/W36tirs/Allerede-linket.md]]\n"
+        "materiale_filer: false\n---\n\n<!-- AUTO:START -->\n# Titel\n<!-- AUTO:END -->\n",
+        encoding="utf-8",
+    )
+    (week_dir / "Allerede-linket.md").write_text("noget", encoding="utf-8")
+    (week_dir / "Ny-fil.md").write_text("noget nyt", encoding="utf-8")
+
+    patched_dry = patch_pending_materiale(patch_root, apply=False)
+    assert patched_dry == [str(plan_note.relative_to(patch_root))], patched_dry
+    assert "materiale_filer: false" in plan_note.read_text(encoding="utf-8"), "dry-run skrev alligevel"
+
+    patched = patch_pending_materiale(patch_root, apply=True)
+    assert patched == [str(plan_note.relative_to(patch_root))], patched
+    written = plan_note.read_text(encoding="utf-8")
+    assert "materiale_filer: |\n  📎 [[§ FAG/♪ Musik/MD/W36tirs/Ny-fil.md|Ny-fil.md]]" in written, written
+    assert "Allerede-linket.md" not in written.split("materiale_filer:")[1].split("---")[0], \
+        "allerede litteratur-linket fil blev dubleret ind i materiale_filer"
+
+    # Idempotent: ingen nye orphans tilbage efter patchen.
+    assert patch_pending_materiale(patch_root, apply=True) == []
 
     print("selfcheck ok")
     return 0
