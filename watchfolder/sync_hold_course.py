@@ -353,14 +353,35 @@ def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
     return lec
 
 
+def stable_key(vault_path: str) -> str:
+    """Ugemappen ("§ FAG/<fag>/<gren>/<ugemappe>/<fil>", parts[3]) er det eneste flygtige led i en
+    materialesti — den ændrer sig ved enhver ugedrift (#96) eller en navngivningsændring som #135.
+    At nøgle vswResKey/vswKey på HELE stien fik enhver sådan ændring til at fremstå som et helt
+    NYT bibliotekselement i Hold Course, i stedet for det samme materiale der bare er flyttet —
+    og fordi Hold Course-synken bevidst aldrig sletter noget selv (se modulets docstring), blev
+    den gamle nøgle stående som en spøgelses-dublet for evigt (#138, live 2026-08-30 lige efter
+    #135-migreringen: hver titel i Library dukkede op to gange). Fjerner kun selve ugemappe-leddet
+    — fag+gren+filnavn er stabilt og adskiller stadig forskellige fag/grene fra hinanden.
+    """
+    parts = vault_path.split("/")
+    if len(parts) >= 5:
+        return "/".join(parts[:3] + parts[4:])
+    return vault_path
+
+
 def ensure_resource(sem: dict, cls: dict, vault_path: str, new_id) -> dict:
-    res = find_stamped(sem.setdefault("resources", []), "vswResKey", vault_path)
+    key = stable_key(vault_path)
+    res = find_stamped(sem.setdefault("resources", []), "vswResKey", key)
     if res is None:
         res = {"id": new_id(), "title": Path(vault_path).stem, "author": "", "type": "",
                "classIds": [], "status": "unread", "vaultLink": vault_path, "url": "",
-               "notes": "", "vswResKey": vault_path}
+               "notes": "", "vswResKey": key}
         sem["resources"].append(res)
-    res["vaultLink"] = nfc(res.get("vaultLink", ""))
+    # I modsætning til assignment.linkedNote (Valdemars valg, overskrives aldrig) er vaultLink her
+    # ren maskin-bogføring af hvor materialet FAKTISK ligger nu — skal altid følge med når
+    # ugemappen flytter, ellers ville "Open note" pege på et dødt sted selvom #138-fixet korrekt
+    # undgik at oprette en dublet.
+    res["vaultLink"] = nfc(vault_path)
     if cls["id"] not in res.setdefault("classIds", []):
         res["classIds"].append(cls["id"])
     return res
@@ -440,7 +461,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
                 res = ensure_resource(sem, cls, target, new_id)
                 # linkedNote peger på selve materiale-noten, så "Open note" virker direkte fra
                 # opgaven uden omvejen om Library.
-                ensure_assignment(lec, f'{akey}|lit|{target}', res["title"], "Reading", due,
+                ensure_assignment(lec, f'{akey}|lit|{stable_key(target)}', res["title"], "Reading", due,
                                   res["id"], new_id, linked_note=target)
         else:
             # Ren litteratur-tekst uden filmatch: stadig en Reading-opgave, bare uden Library-link —
@@ -465,7 +486,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
             if not target:
                 continue
             res = ensure_resource(sem, cls, target, new_id)
-            ensure_assignment(lec, f'{akey}|mat|{target}', res["title"], "Reading", due,
+            ensure_assignment(lec, f'{akey}|mat|{stable_key(target)}', res["title"], "Reading", due,
                               res["id"], new_id, linked_note=target)
 
     # Afleveringsopgaver hænger på faget, ikke på en lektion — derfor klasse-niveau. De vises i
