@@ -1173,9 +1173,20 @@ async function existingRawIds(plan, courseName, weekFolder) {
 
 // [[fuld/sti/Titel.md]] viser hele stien som synlig linktekst i Obsidian — ulæseligt i en liste med
 // flere materialer. |alias giver kort, læsbar tekst uden at give slip på det fulde, entydige mål.
+// Aliasset er selve FILNAVNET inkl. ægte endelse (Valdemars ønske, 2026-08-30) — .md/.pdf/.pptx
+// osv. fortæller i sig selv om det er MinerU-noten eller originalfilen, uden at opdigte en
+// markør. rawLink() bruger samme princip; kun itslearning-linket (writePlanNotes) får en "(web)"-
+// markør i stedet, fordi det IKKE er en fil med en ægte endelse — at kalde den ".html" ville være
+// løgn om hvad linket rent faktisk peger på.
 function mdLink(courseName, weekFolder, title) {
   const full = mdPath(courseName, weekFolder, title);
-  const alias = full.slice(full.lastIndexOf("/") + 1, -3);
+  const alias = full.slice(full.lastIndexOf("/") + 1);
+  return `[[${full}|${alias}]]`;
+}
+
+function rawLink(courseName, weekFolder, title) {
+  const full = rawPath(courseName, weekFolder, title);
+  const alias = full.slice(full.lastIndexOf("/") + 1);
   return `[[${full}|${alias}]]`;
 }
 
@@ -1238,8 +1249,8 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && existingIds.has(el.id)))
       .map((el) => {
         if (el.typeName === "Link") return `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`;
-        const rawLink = rawIds.has(el.id) ? ` · [[${rawPath(courseName, weekFolder, el.title)}|RAW]]` : "";
-        return `- ${mdLink(courseName, weekFolder, el.title)}${rawLink} · [itslearning](https://via.itslearning.com${el.url})`;
+        const raw = rawIds.has(el.id) ? ` · ${rawLink(courseName, weekFolder, el.title)}` : "";
+        return `- ${mdLink(courseName, weekFolder, el.title)}${raw} · [${el.title} (web)](https://via.itslearning.com${el.url})`;
       });
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
