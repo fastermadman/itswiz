@@ -409,6 +409,40 @@ def ensure_assignment(owner: dict, key: str, title: str, atype: str, due: str, l
     return assign
 
 
+def prune_dead_links(data: dict, vault_root: Path) -> tuple[int, int]:
+    """Fjerner spøgelses-dubletter fra en tidligere stiændring (#138): en resource/assignment hvis
+    `vaultLink`/`linkedNote` peger på en fil der ikke længere findes. `stable_key()` (se ovenfor)
+    forhindrer NYE dubletter, men rydder ikke de gamle op — de blev oprettet dengang synken nøglede
+    på hele stien, og synken sletter bevidst aldrig noget selv. Kun stien afgør: et tomt
+    `linkedNote` er en aldrig-linket opgave, ikke en stale én, og røres ikke.
+    """
+    removed_res = removed_assign = 0
+    for sem in data.get("semesters", []):
+        alive_res_ids = set()
+        kept = []
+        for res in sem.get("resources", []):
+            if res.get("vaultLink") and not (vault_root / res["vaultLink"]).exists():
+                removed_res += 1
+                continue
+            alive_res_ids.add(res["id"])
+            kept.append(res)
+        sem["resources"] = kept
+
+        for cls in sem.get("classes", []):
+            owners = cls.get("lectures", []) + [cls]
+            for owner in owners:
+                kept = []
+                for a in owner.get("assignments", []):
+                    if a.get("linkedNote") and not (vault_root / a["linkedNote"]).exists():
+                        removed_assign += 1
+                        continue
+                    if a.get("linkedBook") and a["linkedBook"] not in alive_res_ids:
+                        a["linkedBook"] = ""
+                    kept.append(a)
+                owner["assignments"] = kept
+    return removed_res, removed_assign
+
+
 # ─── Synk ─────────────────────────────────────────────────────────────────────
 
 def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | None = None) -> dict:
@@ -589,6 +623,7 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     # FØR serialiseringen: vault -> Hold Course-retningen sætter status på opgaver i `merged`, og
     # de ændringer skal med i den data.json vi sammenligner og skriver.
     checked, marked_done = sync_task_completion(merged, vault_root, dry_run=not apply)
+    removed_res, removed_assign = prune_dead_links(merged, vault_root)
     after = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
 
     if uden_plan_id and not quiet:
@@ -611,6 +646,10 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         print(f"{label}: {len(marked_done)} Forberedelse-opgave(r) allerede krydset af i vaulten:")
         for titel in marked_done:
             print(f"  {titel}")
+    if (removed_res or removed_assign) and not quiet:
+        label = "Ryddet op" if apply else "Ville rydde op (dry-run)"
+        print(f"{label}: {removed_res} død(e) Library-post(er), {removed_assign} død(e) opgave(r) "
+              f"(pegede på filer der ikke længere findes).")
 
     if after == before:
         # Watch-scriptet kalder denne funktion hvert minut; uden quiet ville loggen fyldes med
@@ -832,6 +871,36 @@ def selfcheck() -> int:
     # in-progress er Valdemars egen vurdering og røres ikke, heller ikke selvom linjen mangler.
     assert lec_tc["assignments"][3]["status"] == "in-progress", lec_tc["assignments"][3]
     assert sync_task_completion(data_tc, stub_dir.parent, dry_run=False) == ([], [])
+
+    # prune_dead_links (#138): en gammel dublet der peger på en fil der ikke længere findes (fx
+    # efter en ugemappe-flytning, fra dengang synken nøglede på hele stien) skal væk, men en
+    # levende post med en fil der findes skal overleve, og en ikke-linket opgave (tomt linkedNote)
+    # skal ALDRIG fjernes.
+    findes_path = stub_dir / "findes.md"
+    findes_path.write_text("noget", encoding="utf-8")
+    findes_rel = str(findes_path.relative_to(stub_dir.parent))
+    data_prune = {"semesters": [{
+        "resources": [
+            {"id": "r-dod", "vaultLink": "findes/slet/ikke/gammel-sti.md"},
+            {"id": "r-god", "vaultLink": findes_rel},
+        ],
+        "classes": [{
+            "assignments": [{"vswKey": "a1", "linkedNote": "findes/slet/ikke/gammel-sti.md", "linkedBook": "r-dod"}],
+            "lectures": [{"assignments": [
+                {"vswKey": "a2", "linkedNote": findes_rel, "linkedBook": "r-god"},
+                {"vswKey": "a3", "linkedNote": ""},  # aldrig linket — skal overleve uændret
+            ]}],
+        }],
+    }]}
+    removed_res, removed_assign = prune_dead_links(data_prune, stub_dir.parent)
+    assert (removed_res, removed_assign) == (1, 1), (removed_res, removed_assign)
+    sem_p = data_prune["semesters"][0]
+    assert [r["id"] for r in sem_p["resources"]] == ["r-god"], sem_p["resources"]
+    assert sem_p["classes"][0]["assignments"] == [], sem_p["classes"][0]["assignments"]  # a1 fjernet
+    lec_p_assigns = sem_p["classes"][0]["lectures"][0]["assignments"]
+    assert [a["vswKey"] for a in lec_p_assigns] == ["a2", "a3"], lec_p_assigns
+    assert lec_p_assigns[0]["linkedBook"] == "r-god", lec_p_assigns
+    assert prune_dead_links(data_prune, stub_dir.parent) == (0, 0), "ikke idempotent"
 
     # class.courseUrl: udledt af plan_id'ets CourseID, verificeret URL-form (live 2026-08-28).
     ids8 = iter(f"u{n}" for n in range(100))
