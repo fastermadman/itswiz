@@ -95,6 +95,25 @@ async function readFile(path) {
   return await file.text();
 }
 
+// Tjekker kun EKSISTENS, uden at læse indholdet — bruges til at afgøre om en RAW-fil (ofte flere
+// MB PDF/docx) allerede findes, uden at sende hele dens indhold gennem chrome.runtime.sendMessage.
+// readFile() ville selv virke, men risikerer "Message exceeded maximum allowed size of 64MiB" ved
+// backfill over mange store filer på én gang — set live 2026-08-30 lige efter RAW-linket blev
+// tilføjet i background.js.
+async function fileExists(path) {
+  const parts = path.split("/");
+  const filename = parts.pop();
+  const root = await getVaultHandle();
+  const dir = await getTargetDirectory(root, parts);
+  try {
+    await dir.getFileHandle(filename, { create: false });
+    return true;
+  } catch (err) {
+    if (err.name === "NotFoundError") return false;
+    throw err;
+  }
+}
+
 async function copyRecursive(srcDir, destDir) {
   for await (const [name, handle] of srcDir.entries()) {
     if (handle.kind === "file") {
@@ -160,6 +179,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "moveDir") {
     moveDir(message.oldPath, message.newPath)
       .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: err.message, code: err.code }));
+    return true;
+  }
+  if (message.type === "fileExists") {
+    fileExists(message.path)
+      .then((exists) => sendResponse({ ok: true, exists }))
       .catch((err) => sendResponse({ ok: false, error: err.message, code: err.code }));
     return true;
   }

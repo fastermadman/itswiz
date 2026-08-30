@@ -58,6 +58,21 @@ async function readFromVault(path) {
   return response.text;
 }
 
+// Tjekker kun om filen findes, uden at læse indholdet — brug denne frem for readFromVault når
+// indholdet ikke skal bruges til noget (fx RAW-filer, ofte flere MB, hvor readFromVault risikerer
+// "Message exceeded maximum allowed size of 64MiB" ved backfill over mange store filer, set live
+// 2026-08-30).
+async function existsInVault(path) {
+  await ensureOffscreenDocument();
+  const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "fileExists", path });
+  if (!response?.ok) {
+    throw Object.assign(new Error(response?.error ?? "Ukendt fejl ved eksistens-tjek i offscreen-dokumentet"), {
+      code: response?.code,
+    });
+  }
+  return response.exists;
+}
+
 // Flytter en hel ugemappe (RAW/MD, inkl. konverterede materialer og _attachments) — bruges når en
 // lektion er blevet udskudt til en anden dato (issue #96, se writePlanNotes). No-op hvis
 // kildemappen ikke findes.
@@ -1151,7 +1166,7 @@ async function existingRawIds(plan, courseName, weekFolder) {
     (el) => el.typeName !== "Link" && !NON_FILE_TYPE_NAMES.has(el.typeName)
   );
   const checks = await Promise.all(
-    fileElements.map(async (el) => [el.id, ((await readFromVault(rawPath(courseName, weekFolder, el.title))) ?? "").length > 0])
+    fileElements.map(async (el) => [el.id, await existsInVault(rawPath(courseName, weekFolder, el.title))])
   );
   return new Set(checks.filter(([, exists]) => exists).map(([id]) => id));
 }
