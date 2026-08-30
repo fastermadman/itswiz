@@ -415,15 +415,32 @@ def prune_dead_links(data: dict, vault_root: Path) -> tuple[int, int]:
     forhindrer NYE dubletter, men rydder ikke de gamle op — de blev oprettet dengang synken nøglede
     på hele stien, og synken sletter bevidst aldrig noget selv. Kun stien afgør: et tomt
     `linkedNote` er en aldrig-linket opgave, ikke en stale én, og røres ikke.
+
+    Fanger også EKSAKTE vaultLink-dubletter (to resources med identisk sti) — opstår hvis to
+    sync-processer skriver samtidig (fundet 2026-08-30: en manuel `--apply` kørt oveni den
+    kørende watch-daemon). Ingen filsti-check nødvendig her, kun vaultLink-lighed; den ældste af
+    de to bevares og resten af opgavernes linkedBook peges om til den.
     """
     removed_res = removed_assign = 0
     for sem in data.get("semesters", []):
         alive_res_ids = set()
+        seen_by_link = {}
+        id_remap = {}
         kept = []
         for res in sem.get("resources", []):
-            if res.get("vaultLink") and not (vault_root / res["vaultLink"]).exists():
+            link = res.get("vaultLink")
+            if link and not (vault_root / link).exists():
                 removed_res += 1
                 continue
+            if link and link in seen_by_link:
+                id_remap[res["id"]] = seen_by_link[link]["id"]
+                for cid in res.get("classIds", []):
+                    if cid not in seen_by_link[link].setdefault("classIds", []):
+                        seen_by_link[link]["classIds"].append(cid)
+                removed_res += 1
+                continue
+            if link:
+                seen_by_link[link] = res
             alive_res_ids.add(res["id"])
             kept.append(res)
         sem["resources"] = kept
@@ -436,6 +453,8 @@ def prune_dead_links(data: dict, vault_root: Path) -> tuple[int, int]:
                     if a.get("linkedNote") and not (vault_root / a["linkedNote"]).exists():
                         removed_assign += 1
                         continue
+                    if a.get("linkedBook") in id_remap:
+                        a["linkedBook"] = id_remap[a["linkedBook"]]
                     if a.get("linkedBook") and a["linkedBook"] not in alive_res_ids:
                         a["linkedBook"] = ""
                     kept.append(a)
@@ -901,6 +920,25 @@ def selfcheck() -> int:
     assert [a["vswKey"] for a in lec_p_assigns] == ["a2", "a3"], lec_p_assigns
     assert lec_p_assigns[0]["linkedBook"] == "r-god", lec_p_assigns
     assert prune_dead_links(data_prune, stub_dir.parent) == (0, 0), "ikke idempotent"
+
+    # Eksakt vaultLink-dublet (to processer der skrev samtidig, live 2026-08-30): den ældste
+    # bevares, classIds flettes, og en opgave der pegede på den yngre id'es flyttes med over.
+    data_race = {"semesters": [{
+        "resources": [
+            {"id": "r-first", "vaultLink": findes_rel, "classIds": ["c1"]},
+            {"id": "r-second", "vaultLink": findes_rel, "classIds": ["c2"]},
+        ],
+        "classes": [{
+            "assignments": [{"vswKey": "b1", "linkedNote": "", "linkedBook": "r-second"}],
+            "lectures": [],
+        }],
+    }]}
+    removed_res_r, removed_assign_r = prune_dead_links(data_race, stub_dir.parent)
+    assert (removed_res_r, removed_assign_r) == (1, 0), (removed_res_r, removed_assign_r)
+    sem_r = data_race["semesters"][0]
+    assert [r["id"] for r in sem_r["resources"]] == ["r-first"], sem_r["resources"]
+    assert sem_r["resources"][0]["classIds"] == ["c1", "c2"], sem_r["resources"][0]
+    assert sem_r["classes"][0]["assignments"][0]["linkedBook"] == "r-first", sem_r["classes"][0]["assignments"]
 
     # class.courseUrl: udledt af plan_id'ets CourseID, verificeret URL-form (live 2026-08-28).
     ids8 = iter(f"u{n}" for n in range(100))
