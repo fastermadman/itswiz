@@ -25,6 +25,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -616,11 +617,37 @@ def scan_existing() -> None:
             process_document(doc_path)
 
 
+# Merge-logikken for Syncthing-konfliktfiler (Titel.sync-conflict-<dato>-<enhed>.md) hører hjemme
+# i ViaVault selv, ikke her — den arbejder på vaultens egen git-historik og har intet med
+# itslearning/MinerU at gøre (se ViaVault/.scripts/resolve_sync_conflict.py). Men denne watcher er
+# den eneste proces der allerede overvåger HELE vaulten rekursivt, så den er den naturlige trigger:
+# launchd's WatchPaths blev overvejet og droppet igen, fordi den ikke pålideligt fanger ændringer
+# dybt nede i et træ med hundredvis af ugemapper, kun de eksplicit angivne stier selv.
+SYNC_CONFLICT_SCRIPT = Path.home() / "ViaVault" / ".scripts" / "resolve_sync_conflict.py"
+
+
+def resolve_sync_conflict(conflict_path: Path) -> None:
+    if not SYNC_CONFLICT_SCRIPT.exists():
+        return
+    result = subprocess.run(
+        [sys.executable, str(SYNC_CONFLICT_SCRIPT), str(conflict_path)],
+        capture_output=True, text=True,
+    )
+    for line in result.stdout.splitlines():
+        print(line, flush=True)
+    if result.stderr:
+        print(f"resolve_sync_conflict.py fejlede: {result.stderr.strip()}", file=sys.stderr, flush=True)
+
+
 class DocumentHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
         path = Path(event.src_path)
+        if "sync-conflict-" in path.name:
+            time.sleep(2)  # lad Syncthing blive helt færdig med at skrive konflikt-filen
+            resolve_sync_conflict(path)
+            return
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             return
         if not in_raw_branch(path):
@@ -843,6 +870,34 @@ def selfcheck() -> int:
                 assert "Anden ny tekst." in ny_md.read_text(encoding="utf-8")
         finally:
             VAULT_ROOT = old_root
+
+    # resolve_sync_conflict(): kalder ViaVaults egen merge-script som subprocess. Peger
+    # SYNC_CONFLICT_SCRIPT på en lille fixture i stedet for det rigtige script, så testen ikke
+    # afhænger af at ~/ViaVault findes/er et git-repo på maskinen der kører selvtjekket.
+    global SYNC_CONFLICT_SCRIPT
+    old_script = SYNC_CONFLICT_SCRIPT
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_script = Path(tmp) / "fake_resolve.py"
+        fake_script.write_text(
+            "import sys\n"
+            "print(f'Flettet og løst: {sys.argv[1]}')\n",
+            encoding="utf-8",
+        )
+        SYNC_CONFLICT_SCRIPT = fake_script
+        try:
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                resolve_sync_conflict(Path("note.sync-conflict-20260830-120000-ABC123.md"))
+            assert "Flettet og løst" in buf.getvalue(), buf.getvalue()
+
+            # Manglende script (fx ViaVault ikke sat op endnu) må aldrig kaste en exception —
+            # daemonens hovedopgave (MinerU-konvertering) skal fortsætte uanset.
+            SYNC_CONFLICT_SCRIPT = Path(tmp) / "findes-ikke.py"
+            resolve_sync_conflict(Path("note.sync-conflict-20260830-120000-ABC123.md"))
+        finally:
+            SYNC_CONFLICT_SCRIPT = old_script
 
     print("selfcheck ok")
     return 0
