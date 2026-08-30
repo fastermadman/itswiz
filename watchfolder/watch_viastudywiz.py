@@ -344,6 +344,18 @@ def _printed_page_number(page_blocks: list[dict]) -> str | None:
     return other_texts[0] if other_texts else None
 
 
+# MinerU finder fodnote-teksten fint (page_footnote-blokke, issue #142) — den blev bare aldrig
+# hentet ud herfra og skrevet til noten. Fodnote-nummerering nulstiller typisk pr. side i en bog
+# (Rosa1.pdf har fx flere "1"-fodnoter på forskellige sider), så de skal placeres side for side
+# ved insert_page_markers' eksisterende sidemarkør, ikke samlet i én flad liste i bunden af noten.
+def _page_footnotes(page_blocks: list[dict]) -> list[str]:
+    return [
+        text
+        for block in page_blocks
+        if block.get("type") == "page_footnote" and (text := (block.get("text") or "").strip())
+    ]
+
+
 # #101: content_list.json's blokke har hver deres egen bbox (bekræftet ved inspektion af rå
 # API-output) — en dobbeltside-scans to fysiske sider kan derfor skelnes ud fra om blokkens
 # koordinat ligger i den ene eller anden halvdel af PDF-siden. Kun relevant når der faktisk ER
@@ -469,6 +481,7 @@ def insert_page_markers(
     result = full_md_text
     search_pos = 0
     pending_label: str | None = None
+    pending_footnotes: list[str] = []
 
     for page_idx in sorted(pages):
         page_blocks = pages[page_idx]
@@ -486,16 +499,25 @@ def insert_page_markers(
             # markøren før hele linjen, ellers splittes fx overskriftens "#" fra sin egen tekst.
             line_start = result.rfind("\n", 0, idx) + 1
             if pending_label is not None:
-                marker = f"\n\n*— side {pending_label} —*\n\n---\n\n"
+                marker = _format_page_marker(pending_label, pending_footnotes)
                 result = result[:line_start] + marker + result[line_start:]
                 idx += len(marker)
             pending_label = _printed_page_number(group) or str(page_idx + 1)
+            pending_footnotes = _page_footnotes(group)
             search_pos = idx + len(anchor)
 
     if pending_label is not None:
-        result = result.rstrip("\n") + f"\n\n*— side {pending_label} —*\n"
+        result = result.rstrip("\n") + _format_page_marker(pending_label, pending_footnotes, trailing_rule=False)
 
     return result
+
+
+def _format_page_marker(label: str, footnotes: list[str], trailing_rule: bool = True) -> str:
+    trailer = "\n\n---\n\n" if trailing_rule else "\n"
+    if footnotes:
+        notes = "\n\n".join(footnotes)
+        return f"\n\n---\n{notes}\n\n*— side {label} —*{trailer}"
+    return f"\n\n*— side {label} —*{trailer}"
 
 
 # Adskilt fra integrate_output() så highlight-beskyttelsen kan testes uden netværk (selfcheck).
@@ -710,6 +732,31 @@ def selfcheck() -> int:
         # Manglende/korrupt content_list.json må aldrig vælte konverteringen — bare uændret markdown.
         missing = root / "does-not-exist.json"
         assert insert_page_markers(md, missing) == md
+
+        # Fodnoter (issue #142): MinerU finder dem fint (page_footnote-blokke), men de blev
+        # aldrig skrevet til noten. Skal stå indrammet af --- LIGE over sidens egen markør — og
+        # to forskellige sider må ikke blande deres fodnoter sammen, selvom begge nummererer
+        # deres første fodnote "1" (almindeligt i en bog der nulstiller pr. side).
+        blocks_fn = [
+            {"type": "text", "page_idx": 0, "text": "Side et."},
+            {"type": "page_footnote", "page_idx": 0, "text": "1 Side ets egen fodnote."},
+            {"type": "page_number", "page_idx": 0, "text": "10"},
+            {"type": "text", "page_idx": 1, "text": "Side to."},
+            {"type": "page_footnote", "page_idx": 1, "text": "1 Side tos egen fodnote — IKKE samme som side ets."},
+            {"type": "page_number", "page_idx": 1, "text": "11"},
+            {"type": "text", "page_idx": 2, "text": "Side tre, ingen fodnoter."},
+        ]
+        content_list_fn = root / "content_list_fn.json"
+        content_list_fn.write_text(json.dumps(blocks_fn), encoding="utf-8")
+        md_fn = "Side et.\n\nSide to.\n\nSide tre, ingen fodnoter."
+        marked_fn = insert_page_markers(md_fn, content_list_fn)
+        assert "1 Side ets egen fodnote." in marked_fn, marked_fn
+        assert "1 Side tos egen fodnote — IKKE samme som side ets." in marked_fn, marked_fn
+        assert marked_fn.index("Side et.") < marked_fn.index("1 Side ets egen") < marked_fn.index("*— side 10 —*"), marked_fn
+        assert marked_fn.index("*— side 10 —*") < marked_fn.index("Side to.") < marked_fn.index("1 Side tos egen") < marked_fn.index("*— side 11 —*"), marked_fn
+        assert marked_fn.index("*— side 11 —*") < marked_fn.index("Side tre"), marked_fn
+        # Ingen fodnote-side skal aldrig indsætte et tomt --- --- -par.
+        assert "1 Side ets egen fodnote.\n\n*— side 10 —*" in marked_fn, marked_fn
 
         # Dobbeltside-scanning: to page_number-blokke på samme page_idx (opslag), vilkårlig
         # rækkefølge i JSON'en — skal give en sorteret range, ikke bare den første fundne.
