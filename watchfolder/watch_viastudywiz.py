@@ -25,8 +25,10 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from datetime import datetime
@@ -63,6 +65,13 @@ POLL_TIMEOUT_S = 20 * 60
 UPLOAD_TIMEOUT_S = 20 * 60
 UPLOAD_RETRIES = 3
 UPLOAD_RETRY_BACKOFF_S = 30
+
+# Hver enkelt HTTP-kald har sin egen timeout ovenfor, men intet fangede tidligere hvis
+# process_document() som HELHED hang længere end summen af dem — live-observeret 2+ timers
+# fastlåsning uden ny log-linje (issue #143). Loftet er den teoretiske værst-tænkelige sti
+# (alle upload-forsøg + poll) plus luft til zip-download/diskskrivning, så den kun rammer reelle
+# hæng, ikke langsomme-men-normale konverteringer.
+PROCESS_TIMEOUT_S = UPLOAD_TIMEOUT_S * UPLOAD_RETRIES + POLL_TIMEOUT_S + 10 * 60
 
 # Cache af MinerU's rå zip-svar, nøglet på dokumentets sha256 (#99). Beskytter mod at et
 # scriptnedbrud MELLEM et vellykket (betalt) MinerU-kald og det færdige lokale output tvinger et
@@ -609,11 +618,52 @@ def process_document(doc_path: Path) -> None:
         error_marker_path(doc_path).write_text(str(exc), encoding="utf-8")
 
 
+# Tråden kan ikke dræbes udefra hvis den hænger i et blokerende kald uden egen timeout, men
+# join() med timeout sikrer at hovedtråden altid kommer videre til næste fil i køen — den
+# hængende baggrundstråd dør for sig selv når dens eget kald til sidst timer ud (#143).
+def process_document_with_watchdog(doc_path: Path) -> None:
+    thread = threading.Thread(target=process_document, args=(doc_path,), daemon=True)
+    thread.start()
+    thread.join(PROCESS_TIMEOUT_S)
+    if thread.is_alive():
+        print(
+            f"Timeout ({PROCESS_TIMEOUT_S}s) ved behandling af {doc_path.name} — markeret som "
+            "fejlet, fortsætter til næste fil (issue #143)",
+            file=sys.stderr,
+            flush=True,
+        )
+        error_marker_path(doc_path).write_text(
+            f"Timeout efter {PROCESS_TIMEOUT_S}s (issue #143)", encoding="utf-8"
+        )
+
+
 def scan_existing() -> None:
     """Fanger filer der allerede lå der før scriptet startede (watchdog ser kun nye events)."""
     for doc_path in sorted(VAULT_ROOT.glob(f"**/{RAW_DIR_NAME}/**/*")):
         if doc_path.is_file() and doc_path.suffix.lower() in SUPPORTED_SUFFIXES:
-            process_document(doc_path)
+            process_document_with_watchdog(doc_path)
+
+
+# Merge-logikken for Syncthing-konfliktfiler (Titel.sync-conflict-<dato>-<enhed>.md) hører hjemme
+# i ViaVault selv, ikke her — den arbejder på vaultens egen git-historik og har intet med
+# itslearning/MinerU at gøre (se ViaVault/.scripts/resolve_sync_conflict.py). Men denne watcher er
+# den eneste proces der allerede overvåger HELE vaulten rekursivt, så den er den naturlige trigger:
+# launchd's WatchPaths blev overvejet og droppet igen, fordi den ikke pålideligt fanger ændringer
+# dybt nede i et træ med hundredvis af ugemapper, kun de eksplicit angivne stier selv.
+SYNC_CONFLICT_SCRIPT = Path.home() / "ViaVault" / ".scripts" / "resolve_sync_conflict.py"
+
+
+def resolve_sync_conflict(conflict_path: Path) -> None:
+    if not SYNC_CONFLICT_SCRIPT.exists():
+        return
+    result = subprocess.run(
+        [sys.executable, str(SYNC_CONFLICT_SCRIPT), str(conflict_path)],
+        capture_output=True, text=True,
+    )
+    for line in result.stdout.splitlines():
+        print(line, flush=True)
+    if result.stderr:
+        print(f"resolve_sync_conflict.py fejlede: {result.stderr.strip()}", file=sys.stderr, flush=True)
 
 
 class DocumentHandler(FileSystemEventHandler):
@@ -621,12 +671,16 @@ class DocumentHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         path = Path(event.src_path)
+        if "sync-conflict-" in path.name:
+            time.sleep(2)  # lad Syncthing blive helt færdig med at skrive konflikt-filen
+            resolve_sync_conflict(path)
+            return
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             return
         if not in_raw_branch(path):
             return
         time.sleep(2)  # lad downloadet blive helt færdigskrevet før vi rører den
-        process_document(path)
+        process_document_with_watchdog(path)
 
 
 def sync_hold_course_quietly() -> None:
@@ -843,6 +897,50 @@ def selfcheck() -> int:
                 assert "Anden ny tekst." in ny_md.read_text(encoding="utf-8")
         finally:
             VAULT_ROOT = old_root
+
+    # process_document_with_watchdog() (#143): en fil der hænger længere end loftet skal
+    # markeres som fejlet og give hovedtråden fri igen, i stedet for at blokere for evigt.
+    import unittest.mock
+
+    global PROCESS_TIMEOUT_S
+    old_timeout, PROCESS_TIMEOUT_S = PROCESS_TIMEOUT_S, 0.1
+    with tempfile.TemporaryDirectory() as tmp:
+        stuck_doc = Path(tmp) / "haenger.pdf"
+        stuck_doc.write_bytes(b"")
+        with unittest.mock.patch(
+            "__main__.process_document", side_effect=lambda p: time.sleep(10)
+        ):
+            process_document_with_watchdog(stuck_doc)
+        assert error_marker_path(stuck_doc).exists(), "timeout-markør blev ikke skrevet"
+    PROCESS_TIMEOUT_S = old_timeout
+
+    # resolve_sync_conflict(): kalder ViaVaults egen merge-script som subprocess. Peger
+    # SYNC_CONFLICT_SCRIPT på en lille fixture i stedet for det rigtige script, så testen ikke
+    # afhænger af at ~/ViaVault findes/er et git-repo på maskinen der kører selvtjekket.
+    global SYNC_CONFLICT_SCRIPT
+    old_script = SYNC_CONFLICT_SCRIPT
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_script = Path(tmp) / "fake_resolve.py"
+        fake_script.write_text(
+            "import sys\n"
+            "print(f'Flettet og løst: {sys.argv[1]}')\n",
+            encoding="utf-8",
+        )
+        SYNC_CONFLICT_SCRIPT = fake_script
+        try:
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                resolve_sync_conflict(Path("note.sync-conflict-20260830-120000-ABC123.md"))
+            assert "Flettet og løst" in buf.getvalue(), buf.getvalue()
+
+            # Manglende script (fx ViaVault ikke sat op endnu) må aldrig kaste en exception —
+            # daemonens hovedopgave (MinerU-konvertering) skal fortsætte uanset.
+            SYNC_CONFLICT_SCRIPT = Path(tmp) / "findes-ikke.py"
+            resolve_sync_conflict(Path("note.sync-conflict-20260830-120000-ABC123.md"))
+        finally:
+            SYNC_CONFLICT_SCRIPT = old_script
 
     print("selfcheck ok")
     return 0
