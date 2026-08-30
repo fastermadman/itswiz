@@ -1148,8 +1148,12 @@ async function existingMaterialeIds(plan, courseName, weekFolder) {
   const fileElements = (plan.elements ?? []).filter(
     (el) => el.typeName !== "Link" && !NON_FILE_TYPE_NAMES.has(el.typeName)
   );
+  // existsInVault, ikke readFromVault: samme "Message exceeded maximum allowed size of 64MiB"-
+  // risiko som eksistingRawIds havde (bce06b1) — en MinerU-konverteret MD-note er sjældent stor,
+  // men ved en bred backfill (400 dage, FRONTMATTER_VERSION-bump) summer nok af dem sig op til at
+  // ramme grænsen. Indholdet bruges alligevel ikke her, kun om noten findes.
   const checks = await Promise.all(
-    fileElements.map(async (el) => [el.id, ((await readFromVault(mdPath(courseName, weekFolder, el.title))) ?? "").trim().length > 0])
+    fileElements.map(async (el) => [el.id, await existsInVault(mdPath(courseName, weekFolder, el.title))])
   );
   return new Set(checks.filter(([, exists]) => exists).map(([id]) => id));
 }
@@ -1671,7 +1675,7 @@ async function downloadFileElements(plans, tabId) {
     const titleLower = element.title.toLowerCase();
     const hasKnownExtension = titleLower.endsWith(".pdf") || OFFICE_EXTENSIONS.some((ext) => titleLower.endsWith(ext));
     if (!hasKnownExtension) continue;
-    const stillOnDisk = ((await readFromVault(rawPath(courseName, weekFolder, element.title))) ?? "").length > 0;
+    const stillOnDisk = await existsInVault(rawPath(courseName, weekFolder, element.title));
     if (!stillOnDisk) fileElements.push(item);
   }
 
