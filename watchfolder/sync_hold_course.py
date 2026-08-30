@@ -151,7 +151,11 @@ def note_stub_path(plan_path: str) -> str:
 
 
 def wikilink_target(line: str) -> str | None:
-    match = re.match(r'^\[\[(.+?)\]\]$', line)
+    """`[[sti|alias]]` -> "sti". Uden pipe-håndtering ville et alias (Valdemars pæne visningstekst,
+    fx "Titel.md" eller "Titel (web)") blive en del af selve stien og fejlagtigt matche som en
+    død fil — se prune_dead_links().
+    """
+    match = re.match(r'^\[\[([^|\]]+)(?:\|.*)?\]\]$', line)
     return match.group(1) if match else None
 
 
@@ -1009,6 +1013,12 @@ def selfcheck() -> int:
     # `false`-felter og dublet-noter giver ingenting.
     assert prefixed_lines("false", "▥") == []
     assert parse_frontmatter("---\ntype: dublet\nplan_id: \"1:1\"\n---\n")["type"] == "dublet"
+
+    # wikilink_target: pipe-alias (Valdemars pæne visningstekst, 2026-08-30) må ikke blive en del
+    # af stien — ellers matcher den aldrig en rigtig fil og prune_dead_links() sletter den.
+    assert wikilink_target("[[sti/Titel.md]]") == "sti/Titel.md"
+    assert wikilink_target("[[sti/Titel.md|Titel.md]]") == "sti/Titel.md"
+    assert wikilink_target("[[sti/Titel (2026).pdf|Titel (web)]]") == "sti/Titel (2026).pdf"
 
     print("selfcheck ok")
     return 0
