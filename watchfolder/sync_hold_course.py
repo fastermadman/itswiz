@@ -54,6 +54,7 @@ from pathlib import Path
 
 VAULT_ROOT = Path.home() / "ViaVault"
 DATA_JSON = VAULT_ROOT / ".obsidian" / "plugins" / "hold-course" / "data.json"
+ONYX_DATA_JSON = VAULT_ROOT / ".obsidian-onyx" / "plugins" / "hold-course" / "data.json"
 LOCAL_REST_API_CONFIG = VAULT_ROOT / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
 
 # main.js: COLOR_PALETTE har 6 farver, og addClass sætter colorIndex = classes.length % længden.
@@ -699,6 +700,48 @@ def trigger_obsidian_reload(vault_root: Path) -> None:
         print(f"Kunne ikke bede Obsidian genindlæse (Local REST API): {err}", file=sys.stderr)
 
 
+def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> None:
+    """Propagerer den friske Mac-tilstand ind i Boox' egen data.json (issue #146).
+
+    Boox' `.obsidian-onyx`-kopi bliver aldrig rørt af selve sync()-flowet, så
+    `prune_dead_links()`s rettelser lander kun på Mac. Kopien er dog ikke bare en
+    biprodukt-kopi — install.sh's kommentar ("Boox og Mac har med vilje hver sine
+    indstillinger") er reel: `settings.einkMode` er bevidst forskellig pr. enhed
+    (Boox: true, Mac: false, bekræftet 2026-08-31). Alt andet (semesters,
+    currentSemesterId, dataVersion) skal derimod være identisk — det er det
+    `prune_dead_links()` retter. Løsningen er derfor et selektivt reconcile, ikke
+    en fuld overskrivning: tag Mac's friske data, bevar Boox' eget `settings` —
+    hele objektet, ikke kun einkMode, så andre nuværende/fremtidige device-lokale
+    felter i settings også er sikre.
+
+    ponytail: `install.sh` symlinker Mac's main.js (altid nyeste), men Boox' kopi
+    kræver et manuelt install.sh-kør + Syncthing-tur — Boox' pluginkode kan altså
+    lagge bag Mac's. Reconcilen her tjekker ikke om Boox' kode faktisk forstår det
+    skema den får. Bliver et reelt problem først hvis en fremtidig main.js-ændring
+    laver et brydende skift i semesters/classes-formen; opgraderingsvejen er da
+    at gate reconcile_onyx på en fælles skema-version pluginet selv skriver.
+    """
+    if not onyx_path.exists():
+        return  # Boox-kopien findes ikke på denne maskine — intet at reconcilere
+    onyx_before = onyx_path.read_text(encoding="utf-8")
+    onyx_mtime = onyx_path.stat().st_mtime
+    onyx_data = json.loads(onyx_before)
+    reconciled = dict(merged, settings=onyx_data.get("settings", merged.get("settings")))
+    onyx_after = json.dumps(reconciled, indent=2, ensure_ascii=False) + "\n"
+    if onyx_after == onyx_before:
+        return
+    if not apply:
+        if not quiet:
+            print("Ville også reconcilere .obsidian-onyx/data.json (Boox) — dry-run.")
+        return
+    if onyx_path.stat().st_mtime != onyx_mtime:
+        print("Boox' data.json ændrede sig undervejs — springer reconcile over, prøver igen næste kørsel.")
+        return
+    onyx_path.write_text(onyx_after, encoding="utf-8")
+    if not quiet:
+        print("Reconcileret .obsidian-onyx/data.json (Boox) — eget settings-felt bevaret.")
+
+
 def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) -> int:
     if not data_path.exists():
         print(f"Hold Course' data.json findes ikke ({data_path}) — er pluginet installeret?", file=sys.stderr)
@@ -747,6 +790,11 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         label = "Ryddet op" if apply else "Ville rydde op (dry-run)"
         print(f"{label}: {removed_res} død(e) Library-post(er), {removed_assign} død(e) opgave(r) "
               f"(pegede på filer der ikke længere findes).")
+
+    # Kører uanset om Mac's egen data.json ændrede sig denne omgang: Boox kan sagtens sakke
+    # bagud fra en TIDLIGERE kørsel (før dette reconcile-trin fandtes, eller efter en fejlet
+    # Syncthing-tur), og det retter sig ikke af sig selv bare fordi Mac er ajour lige nu.
+    reconcile_onyx(ONYX_DATA_JSON, merged, apply, quiet)
 
     if after == before:
         # Watch-scriptet kalder denne funktion hvert minut; uden quiet ville loggen fyldes med
@@ -1123,6 +1171,31 @@ def selfcheck() -> int:
 
     # Idempotent: ingen nye orphans tilbage efter patchen.
     assert patch_pending_materiale(patch_root, apply=True) == []
+
+    # reconcile_onyx (issue #146): Boox' eget settings-felt (einkMode m.m.) skal overleve,
+    # resten skal blive Mac's friske data.
+    onyx_path = patch_root / "onyx-data.json"
+    onyx_path.write_text(json.dumps({"currentSemesterId": "gammel", "semesters": [], "dataVersion": 1,
+                                      "settings": {"einkMode": True}}), encoding="utf-8")
+    fresh = {"currentSemesterId": "ny", "semesters": [{"stub": True}], "dataVersion": 2,
+             "settings": {"einkMode": False}}
+    reconcile_onyx(onyx_path, fresh, apply=True, quiet=True)
+    onyx_result = json.loads(onyx_path.read_text(encoding="utf-8"))
+    assert onyx_result["currentSemesterId"] == "ny", onyx_result
+    assert onyx_result["semesters"] == [{"stub": True}], onyx_result
+    assert onyx_result["settings"] == {"einkMode": True}, "Boox' eget settings-felt blev overskrevet"
+
+    # Idempotent: en gentaget reconcile mod samme friske data ændrer intet.
+    before_mtime = onyx_path.stat().st_mtime
+    reconcile_onyx(onyx_path, fresh, apply=True, quiet=True)
+    assert onyx_path.stat().st_mtime == before_mtime, "reconcile skrev selvom intet ændrede sig"
+
+    # dry-run rører ikke filen.
+    reconcile_onyx(onyx_path, dict(fresh, dataVersion=3), apply=False, quiet=True)
+    assert json.loads(onyx_path.read_text(encoding="utf-8"))["dataVersion"] == 2, "dry-run skrev alligevel"
+
+    # Findes Boox-kopien slet ikke på denne maskine, skal reconcile være en stille no-op.
+    reconcile_onyx(patch_root / "findes-ikke.json", fresh, apply=True, quiet=True)
 
     print("selfcheck ok")
     return 0
