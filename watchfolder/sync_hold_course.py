@@ -285,6 +285,35 @@ def find_stamped(items, key, value):
     return next((it for it in items if it.get(key) == value), None)
 
 
+def relocate_stamped(data: dict, list_name: str, key: str, value, target_cls: dict) -> None:
+    """Flytter et allerede eksisterende lecture/assignment-objekt ind i `target_cls`, hvis det ligger
+    i en ANDEN klasse (typisk et forkert semester fra tiden før #126 fordelte retroaktivt). Uden
+    dette bliver objektet duplikeret: find_stamped i target_cls finder intet og opretter et nyt,
+    mens originalen bliver stående som spøgelse i sit gamle (forkerte) semester (fundet #146).
+
+    Findes objektet ALLEREDE i target_cls (fra en tidligere kørsel der duplikerede før denne
+    funktion fandtes), er den ekstra kopi et rent duplikat af synkens egne felter — den kasseres
+    i stedet for at blive flyttet ind ved siden af, ellers fordobles listen ved hver kørsel.
+
+    Kan også ligge dobbelt INDE i target_cls selv (to objekter med samme nøgle side om side, fra
+    før relocate_stamped fandtes) — de ekstra fjernes her, kun den første beholdes."""
+    own = target_cls.setdefault(list_name, [])
+    own_matches = [it for it in own if it.get(key) == value]
+    for extra in own_matches[1:]:
+        own.remove(extra)
+    already = own_matches[0] if own_matches else None
+    for sem in data.get("semesters", []):
+        for cls in sem.get("classes", []):
+            if cls is target_cls:
+                continue
+            item = find_stamped(cls.get(list_name, []), key, value)
+            if item:
+                cls[list_name].remove(item)
+                if not already:
+                    target_cls.setdefault(list_name, []).append(item)
+                return
+
+
 def semester_name(plans: list[dict]) -> tuple[str, str, int]:
     dates = sorted(p["start"][:10] for p in plans if p.get("start"))
     year, month = (int(dates[0][:4]), int(dates[0][5:7])) if dates else (time.localtime().tm_year, time.localtime().tm_mon)
@@ -600,6 +629,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         # plan_id er "<courseId>:<planId>" (background.js: planKey) — første halvdel er det
         # CourseID class.courseUrl skal pege på.
         cls = ensure_class(sem, plan["fag"], new_id, plan["plan_id"].split(":")[0])
+        relocate_stamped(data, "lectures", "vswPlanId", plan["plan_id"], cls)
         lec = ensure_lecture(cls, plan, new_id)
         due = lec["date"]
         # Opgavernes nøgle hænger på lektionens EGET id, ikke på plan_id eller dato: id'et er det
@@ -659,6 +689,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
                 continue
 
         cls = ensure_class(sem, task["fag"], new_id)
+        relocate_stamped(data, "assignments", "vswKey", f'opgave|{task["_element_id"]}', cls)
         ensure_assignment(cls, f'opgave|{task["_element_id"]}', task["_title"], "Writing",
                           task["deadline"][:10], "", new_id, linked_note=task["_path"])
 
@@ -1055,6 +1086,23 @@ def selfcheck() -> int:
     assert read2["linkedBook"] == "", read2
     assert read2["title"].startswith("Frede V Nielsen"), read2
     assert data2["semesters"][0]["resources"] == [], data2["semesters"][0]["resources"]
+
+    # En lektion der allerede sidder i et FORKERT semester (fra tiden før #126) flyttes til det
+    # rigtige i stedet for at blive duplikeret — live-fundet #146: 66 Musik-lektioner tilbage til
+    # 2025 stod stadig i Efterår 2026 OVENI de nyoprettede kopier i deres rigtige semestre.
+    stale_plan = dict(fm, start="2025-08-13 08:15:00")
+    ids_stale = iter(f"stale{n}" for n in range(100))
+    data_stale = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2},
+                           [stale_plan], lambda: next(ids_stale))
+    wrong_sem = data_stale["semesters"][0]
+    assert wrong_sem["term"] == "Fall" and wrong_sem["year"] == 2025, wrong_sem
+    ny_plan = dict(fm)  # samme plan_id, dato tilbage i "Efterår 2026" (fm's egen 2026-09-01)
+    data_stale = sync_data(data_stale, [ny_plan], lambda: "MÅ-IKKE-BRUGES")
+    assert len(data_stale["semesters"]) == 2, data_stale["semesters"]
+    all_lectures = [l for s in data_stale["semesters"] for c in s["classes"] for l in c["lectures"]]
+    assert len(all_lectures) == 1, "lektionen blev duplikeret på tværs af semestre"
+    assert data_stale["semesters"][1]["classes"][0]["lectures"][0]["date"] == "2026-09-01"
+    assert data_stale["semesters"][0]["classes"][0]["lectures"] == [], "gammel semester skal tømmes"
 
     # To reelle lektioner samme dag i samme fag (Musik torsdag: 08:15 og 12:25) deler `uge`-værdi
     # og SKAL blive to lektioner. Regressionsvagt mod den uge-baserede fallback der flettede dem.
