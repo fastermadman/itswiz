@@ -300,24 +300,57 @@ def term_year_for_date(date: str) -> tuple[str, int]:
     return ("Fall", year) if month >= 7 else ("Spring", year)
 
 
-def ensure_semester(data: dict, plans: list[dict], new_id) -> dict:
-    sem = find_stamped(data.setdefault("semesters", []), "vswSync", True)
-    if sem:
-        return sem
-    # Har Valdemar allerede oprettet et semester, adopteres det frem for at lave et dubletsemester
-    # ved siden af — han skal ikke sidde med to der ligner hinanden i semester-skifteren.
-    sem = next((s for s in data["semesters"] if s["id"] == data.get("currentSemesterId")), None) \
-        or (data["semesters"][0] if data["semesters"] else None)
-    if sem is None:
-        name, term, year = semester_name(plans)
-        sem = {"id": new_id(), "name": name, "term": term, "year": year, "classes": [], "resources": []}
-        data["semesters"].append(sem)
-    sem["vswSync"] = True
-    sem.setdefault("classes", [])
-    sem.setdefault("resources", [])
-    if not data.get("currentSemesterId"):
-        data["currentSemesterId"] = sem["id"]
-    return sem
+def semester_name_for_term_year(term: str, year: int) -> str:
+    """Dansk navn for semester ud fra term + year."""
+    if term == "Fall":
+        return f"Efterår {year}"
+    elif term == "Spring":
+        return f"Forår {year}"
+    return f"{term} {year}"
+
+
+def ensure_all_semesters(data: dict, plans: list[dict], tasks: list[dict], new_id) -> dict:
+    """Opretter alle nødvendige semestre retroaktivt. Returnerer dict der mapper (term, year) -> semester-objekt.
+
+    Ikke-vswSync semestre behandles som brugerens egne (adopteres). Alle lektioner/opgaver fordeles
+    efter deres dato, ikke til ét hardkodet semester."""
+    from datetime import datetime
+
+    data.setdefault("semesters", [])
+
+    # Identificer alle semestre der skal være til stede (ud fra planerne/opgaverne)
+    needed_terms = set()
+    for plan in plans:
+        if plan.get("start"):
+            needed_terms.add(term_year_for_date(plan["start"][:10]))
+    for task in tasks:
+        if task.get("deadline"):
+            needed_terms.add(term_year_for_date(task["deadline"][:10]))
+
+    # Hvis der slet ingen planer/opgaver, brug indeværende semester som fallback
+    if not needed_terms:
+        year, month = datetime.now().year, datetime.now().month
+        needed_terms.add(("Fall", year) if month >= 7 else ("Spring", year))
+
+    # Byg eller adoptér semestre
+    term_year_to_sem = {}
+    for term, year in sorted(needed_terms):
+        # Find eksisterende semester (vswSync eller user-created)
+        sem = next((s for s in data["semesters"] if s.get("term") == term and s.get("year") == year), None)
+        if sem:
+            term_year_to_sem[(term, year)] = sem
+        else:
+            # Opret nyt
+            name = semester_name_for_term_year(term, year)
+            sem = {"id": new_id(), "name": name, "term": term, "year": year, "classes": [], "resources": []}
+            data["semesters"].append(sem)
+            term_year_to_sem[(term, year)] = sem
+
+    # Sæt currentSemesterId til nuværende semester hvis ikke sat
+    if not data.get("currentSemesterId") and data["semesters"]:
+        data["currentSemesterId"] = data["semesters"][0]["id"]
+
+    return term_year_to_sem
 
 
 def course_url(course_id: str) -> str:
@@ -537,7 +570,10 @@ def prune_dead_links(data: dict, vault_root: Path) -> tuple[int, int]:
 # ─── Synk ─────────────────────────────────────────────────────────────────────
 
 def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | None = None) -> dict:
-    """Fletter plans ind i en data.json-struktur. Ren funktion — al I/O ligger i sync()."""
+    """Fletter plans ind i en data.json-struktur. Ren funktion — al I/O ligger i sync().
+
+    Fordeler lektioner/opgaver til deres rigtige semester baseret på dato (issue #126).
+    Opretter semestre retroaktivt efter behov."""
     counter = [0]
     new_id = new_id or (lambda: generate_id(counter))
     data.setdefault("semesters", [])
@@ -546,27 +582,21 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     if not plans and not tasks:
         return data
 
-    sem = ensure_semester(data, plans, new_id)
-
-    # Kun DETTE semesters lektioner/opgaver synkes ind i det (issue #125, fundet live 2026-08-28
-    # efter #121s backfill). Et itslearning-rum kan strække sig over mere end ét semester —
-    # Musik (courseId 36016) havde lektioner tilbage til 2025-08-13, samme fag: og samme rum som
-    # indeværende semesters undervisning. Uden dette filter fletter en bredere backfill (eller et
-    # rum der reelt løber flere semestre) ældre lektioner ind i samme Hold Course-fag, og hver af
-    # dem bliver en frisk, aldrig-før-set opgave med status not-started — som øjeblikkeligt tæller
-    # som Overdue på tværs af dashboard, Assignments-liste og kalender (samme
-    # getAllAssignments-mekanisme som gjorde tovejs-fuldførelsen nødvendig, bare i stor skala: 125
-    # af 137 Musik-opgaver blev Overdue af én kørsel).
-    #
-    # Filtreres kun når semestret allerede har term/year (altid sandt for et semester denne synk
-    # selv har oprettet, se ensure_semester/semester_name) — mangler de, er det tryggere at lade
-    # alt igennem end at gætte på en semestergrænse.
-    if sem.get("term") and sem.get("year"):
-        target = (sem["term"], sem["year"])
-        plans = [p for p in plans if p.get("start") and term_year_for_date(p["start"][:10]) == target]
-        tasks = [t for t in tasks if t.get("deadline") and term_year_for_date(t["deadline"][:10]) == target]
+    # Opretter/adoptér alle nødvendige semestre
+    term_year_to_sem = ensure_all_semesters(data, plans, tasks, new_id)
 
     for plan in sorted(plans, key=lambda p: (p["fag"], p.get("start", ""))):
+        if not plan.get("start"):
+            continue
+        # Find det rigtige semester for denne lektion
+        target_term_year = term_year_for_date(plan["start"][:10])
+        sem = term_year_to_sem.get(target_term_year)
+        if not sem:
+            # Fallback hvis término ikke er kendt (bør ikke ske efter ensure_all_semesters)
+            sem = term_year_to_sem.get(next(iter(term_year_to_sem)))
+            if not sem:
+                continue
+
         # plan_id er "<courseId>:<planId>" (background.js: planKey) — første halvdel er det
         # CourseID class.courseUrl skal pege på.
         cls = ensure_class(sem, plan["fag"], new_id, plan["plan_id"].split(":")[0])
@@ -617,6 +647,17 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     # Afleveringsopgaver hænger på faget, ikke på en lektion — derfor klasse-niveau. De vises i
     # Hold Courses Assignments-liste og kalender uden at blive klistret på en tilfældig lektion.
     for task in sorted(tasks, key=lambda t: (t["fag"], t.get("deadline", ""))):
+        if not task.get("deadline"):
+            continue
+        # Find det rigtige semester for denne opgave
+        target_term_year = term_year_for_date(task["deadline"][:10])
+        sem = term_year_to_sem.get(target_term_year)
+        if not sem:
+            # Fallback hvis término ikke er kendt
+            sem = term_year_to_sem.get(next(iter(term_year_to_sem)))
+            if not sem:
+                continue
+
         cls = ensure_class(sem, task["fag"], new_id)
         ensure_assignment(cls, f'opgave|{task["_element_id"]}', task["_title"], "Writing",
                           task["deadline"][:10], "", new_id, linked_note=task["_path"])
@@ -803,12 +844,20 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
             print(f"{len(plans)} lektionsplan-noter — Hold Course er allerede opdateret.")
         return 0
 
-    sem = find_stamped(data["semesters"], "vswSync", True) or {}
-    lectures = sum(len(c.get("lectures", [])) for c in sem.get("classes", []))
-    assignments = sum(len(l.get("assignments", [])) for c in sem.get("classes", []) for l in c.get("lectures", [])) \
-        + sum(len(c.get("assignments", [])) for c in sem.get("classes", []))
-    print(f"{len(plans)} lektionsplan-noter + {len(tasks)} opgave-noter -> {len(sem.get('classes', []))} fag, "
-          f"{lectures} lektioner, {assignments} opgaver, {len(sem.get('resources', []))} Library-poster.")
+    # Rapportér statistik på tværs af alle semestre (ikke kun ét)
+    total_classes = 0
+    total_lectures = 0
+    total_assignments = 0
+    total_resources = 0
+    for sem in data.get("semesters", []):
+        total_classes += len(sem.get("classes", []))
+        total_lectures += sum(len(c.get("lectures", [])) for c in sem.get("classes", []))
+        total_assignments += sum(len(l.get("assignments", [])) for c in sem.get("classes", []) for l in c.get("lectures", [])) \
+            + sum(len(c.get("assignments", [])) for c in sem.get("classes", []))
+        total_resources += len(sem.get("resources", []))
+
+    print(f"{len(plans)} lektionsplan-noter + {len(tasks)} opgave-noter -> {total_classes} fag, "
+          f"{total_lectures} lektioner, {total_assignments} opgaver, {total_resources} Library-poster.")
 
     if not apply:
         print("Dry-run. Kør med --apply for at skrive data.json.")
@@ -827,7 +876,84 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     return 0
 
 
+def init_semesters_retroactively(data_path: Path, from_year_month: str = "2024-07") -> int:
+    """Opretter semestre retroaktivt fra angivet måned til nu, uden at røre lektioner.
+    Bruges til at få plads til gamle ressourcer længere ned.
+    Eksempel: python sync_hold_course.py --init-semesters 2024-07"""
+    from datetime import datetime
+
+    if not data_path.exists():
+        print(f"data.json findes ikke ({data_path})", file=sys.stderr)
+        return 1
+
+    data = json.loads(data_path.read_text(encoding="utf-8"))
+    data.setdefault("semesters", [])
+
+    # Parse start-dato
+    try:
+        start_year, start_month = map(int, from_year_month.split("-"))
+    except ValueError:
+        print(f"Ugyldigt format: {from_year_month} (brug YYYY-MM, fx 2024-07)", file=sys.stderr)
+        return 1
+
+    # Generér alle semestre fra start til nu
+    now_year, now_month = datetime.now().year, datetime.now().month
+    counter = [0]
+    new_id = lambda: generate_id(counter)
+
+    created = []
+    for year in range(start_year, now_year + 1):
+        for month_start in [1, 7]:  # Forår (1) og Efterår (7)
+            if (year, month_start) < (start_year, start_month):
+                continue
+            if (year, month_start) > (now_year, now_month):
+                continue
+
+            term = "Fall" if month_start >= 7 else "Spring"
+            name = semester_name_for_term_year(term, year)
+
+            # Check om semester allerede findes
+            existing = next((s for s in data["semesters"]
+                            if s.get("term") == term and s.get("year") == year), None)
+            if existing:
+                continue
+
+            # Opret nyt semester
+            sem = {
+                "id": new_id(),
+                "name": name,
+                "term": term,
+                "year": year,
+                "classes": [],
+                "resources": []
+            }
+            data["semesters"].append(sem)
+            created.append(name)
+
+    if not created:
+        print(f"Alle semestre fra {from_year_month} til nu findes allerede.")
+        return 0
+
+    # Skriv tilbage
+    before = data_path.read_text(encoding="utf-8")
+    after = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+    if after == before:
+        print("Ingen ændringer.")
+        return 0
+
+    data_path.write_text(after, encoding="utf-8")
+    print(f"Oprettet {len(created)} semester(e):")
+    for name in created:
+        print(f"  ✓ {name}")
+    return 0
+
+
 def main() -> int:
+    if "--init-semesters" in sys.argv:
+        idx = sys.argv.index("--init-semesters")
+        from_date = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "2024-07"
+        return init_semesters_retroactively(DATA_JSON, from_date)
     return sync(VAULT_ROOT, DATA_JSON, apply="--apply" in sys.argv)
 
 
