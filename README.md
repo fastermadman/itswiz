@@ -218,3 +218,16 @@ launchctl load ~/Library/LaunchAgents/com.valdemar.viastudywiz-watchfolder.plist
 ```
 
 Log: `~/Library/Logs/viastudywiz-watchfolder.log`.
+
+## Udvikling — selvtjek
+
+`watchfolder/sync_hold_course.py` og `watchfolder/engangsscripts/repeg_plan_frontmatter_links.py`
+har indbyggede tests (`--selfcheck`, kun stdlib, kræver ikke vaulten). Aktivér `pre-push`-hooket
+så et push blokeres hvis de fejler:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Hooket (`.githooks/pre-push`) kører begge selvtjek. Var brudt uset i uger efter enhed-migreringen
+(#139) — derfor denne vagt.
