@@ -40,7 +40,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from watch_viastudywiz import (  # noqa: E402
     ATTACHMENTS_DIR_NAME,
