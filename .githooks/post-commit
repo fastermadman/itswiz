@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# graphify-hook-start
+# Auto-run graphify-rs AST extraction on commit (code-only, no LLM)
+if command -v graphify-rs >/dev/null 2>&1; then
+  graphify-rs build --code-only --output graphify-out &
+fi
+# graphify-hook-end
