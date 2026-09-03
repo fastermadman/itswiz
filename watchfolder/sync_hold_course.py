@@ -54,6 +54,7 @@ from pathlib import Path
 
 VAULT_ROOT = Path.home() / "ViaVault"
 DATA_JSON = VAULT_ROOT / ".obsidian" / "plugins" / "hold-course" / "data.json"
+ONYX_DATA_JSON = VAULT_ROOT / ".obsidian-onyx" / "plugins" / "hold-course" / "data.json"
 LOCAL_REST_API_CONFIG = VAULT_ROOT / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
 
 # main.js: COLOR_PALETTE har 6 farver, og addClass sætter colorIndex = classes.length % længden.
@@ -284,6 +285,35 @@ def find_stamped(items, key, value):
     return next((it for it in items if it.get(key) == value), None)
 
 
+def relocate_stamped(data: dict, list_name: str, key: str, value, target_cls: dict) -> None:
+    """Flytter et allerede eksisterende lecture/assignment-objekt ind i `target_cls`, hvis det ligger
+    i en ANDEN klasse (typisk et forkert semester fra tiden før #126 fordelte retroaktivt). Uden
+    dette bliver objektet duplikeret: find_stamped i target_cls finder intet og opretter et nyt,
+    mens originalen bliver stående som spøgelse i sit gamle (forkerte) semester (fundet #146).
+
+    Findes objektet ALLEREDE i target_cls (fra en tidligere kørsel der duplikerede før denne
+    funktion fandtes), er den ekstra kopi et rent duplikat af synkens egne felter — den kasseres
+    i stedet for at blive flyttet ind ved siden af, ellers fordobles listen ved hver kørsel.
+
+    Kan også ligge dobbelt INDE i target_cls selv (to objekter med samme nøgle side om side, fra
+    før relocate_stamped fandtes) — de ekstra fjernes her, kun den første beholdes."""
+    own = target_cls.setdefault(list_name, [])
+    own_matches = [it for it in own if it.get(key) == value]
+    for extra in own_matches[1:]:
+        own.remove(extra)
+    already = own_matches[0] if own_matches else None
+    for sem in data.get("semesters", []):
+        for cls in sem.get("classes", []):
+            if cls is target_cls:
+                continue
+            item = find_stamped(cls.get(list_name, []), key, value)
+            if item:
+                cls[list_name].remove(item)
+                if not already:
+                    target_cls.setdefault(list_name, []).append(item)
+                return
+
+
 def semester_name(plans: list[dict]) -> tuple[str, str, int]:
     dates = sorted(p["start"][:10] for p in plans if p.get("start"))
     year, month = (int(dates[0][:4]), int(dates[0][5:7])) if dates else (time.localtime().tm_year, time.localtime().tm_mon)
@@ -299,24 +329,57 @@ def term_year_for_date(date: str) -> tuple[str, int]:
     return ("Fall", year) if month >= 7 else ("Spring", year)
 
 
-def ensure_semester(data: dict, plans: list[dict], new_id) -> dict:
-    sem = find_stamped(data.setdefault("semesters", []), "vswSync", True)
-    if sem:
-        return sem
-    # Har Valdemar allerede oprettet et semester, adopteres det frem for at lave et dubletsemester
-    # ved siden af — han skal ikke sidde med to der ligner hinanden i semester-skifteren.
-    sem = next((s for s in data["semesters"] if s["id"] == data.get("currentSemesterId")), None) \
-        or (data["semesters"][0] if data["semesters"] else None)
-    if sem is None:
-        name, term, year = semester_name(plans)
-        sem = {"id": new_id(), "name": name, "term": term, "year": year, "classes": [], "resources": []}
-        data["semesters"].append(sem)
-    sem["vswSync"] = True
-    sem.setdefault("classes", [])
-    sem.setdefault("resources", [])
-    if not data.get("currentSemesterId"):
-        data["currentSemesterId"] = sem["id"]
-    return sem
+def semester_name_for_term_year(term: str, year: int) -> str:
+    """Dansk navn for semester ud fra term + year."""
+    if term == "Fall":
+        return f"Efterår {year}"
+    elif term == "Spring":
+        return f"Forår {year}"
+    return f"{term} {year}"
+
+
+def ensure_all_semesters(data: dict, plans: list[dict], tasks: list[dict], new_id) -> dict:
+    """Opretter alle nødvendige semestre retroaktivt. Returnerer dict der mapper (term, year) -> semester-objekt.
+
+    Ikke-vswSync semestre behandles som brugerens egne (adopteres). Alle lektioner/opgaver fordeles
+    efter deres dato, ikke til ét hardkodet semester."""
+    from datetime import datetime
+
+    data.setdefault("semesters", [])
+
+    # Identificer alle semestre der skal være til stede (ud fra planerne/opgaverne)
+    needed_terms = set()
+    for plan in plans:
+        if plan.get("start"):
+            needed_terms.add(term_year_for_date(plan["start"][:10]))
+    for task in tasks:
+        if task.get("deadline"):
+            needed_terms.add(term_year_for_date(task["deadline"][:10]))
+
+    # Hvis der slet ingen planer/opgaver, brug indeværende semester som fallback
+    if not needed_terms:
+        year, month = datetime.now().year, datetime.now().month
+        needed_terms.add(("Fall", year) if month >= 7 else ("Spring", year))
+
+    # Byg eller adoptér semestre
+    term_year_to_sem = {}
+    for term, year in sorted(needed_terms):
+        # Find eksisterende semester (vswSync eller user-created)
+        sem = next((s for s in data["semesters"] if s.get("term") == term and s.get("year") == year), None)
+        if sem:
+            term_year_to_sem[(term, year)] = sem
+        else:
+            # Opret nyt
+            name = semester_name_for_term_year(term, year)
+            sem = {"id": new_id(), "name": name, "term": term, "year": year, "classes": [], "resources": []}
+            data["semesters"].append(sem)
+            term_year_to_sem[(term, year)] = sem
+
+    # Sæt currentSemesterId til nuværende semester hvis ikke sat
+    if not data.get("currentSemesterId") and data["semesters"]:
+        data["currentSemesterId"] = data["semesters"][0]["id"]
+
+    return term_year_to_sem
 
 
 def course_url(course_id: str) -> str:
@@ -536,7 +599,10 @@ def prune_dead_links(data: dict, vault_root: Path) -> tuple[int, int]:
 # ─── Synk ─────────────────────────────────────────────────────────────────────
 
 def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | None = None) -> dict:
-    """Fletter plans ind i en data.json-struktur. Ren funktion — al I/O ligger i sync()."""
+    """Fletter plans ind i en data.json-struktur. Ren funktion — al I/O ligger i sync().
+
+    Fordeler lektioner/opgaver til deres rigtige semester baseret på dato (issue #126).
+    Opretter semestre retroaktivt efter behov."""
     counter = [0]
     new_id = new_id or (lambda: generate_id(counter))
     data.setdefault("semesters", [])
@@ -545,30 +611,25 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     if not plans and not tasks:
         return data
 
-    sem = ensure_semester(data, plans, new_id)
-
-    # Kun DETTE semesters lektioner/opgaver synkes ind i det (issue #125, fundet live 2026-08-28
-    # efter #121s backfill). Et itslearning-rum kan strække sig over mere end ét semester —
-    # Musik (courseId 36016) havde lektioner tilbage til 2025-08-13, samme fag: og samme rum som
-    # indeværende semesters undervisning. Uden dette filter fletter en bredere backfill (eller et
-    # rum der reelt løber flere semestre) ældre lektioner ind i samme Hold Course-fag, og hver af
-    # dem bliver en frisk, aldrig-før-set opgave med status not-started — som øjeblikkeligt tæller
-    # som Overdue på tværs af dashboard, Assignments-liste og kalender (samme
-    # getAllAssignments-mekanisme som gjorde tovejs-fuldførelsen nødvendig, bare i stor skala: 125
-    # af 137 Musik-opgaver blev Overdue af én kørsel).
-    #
-    # Filtreres kun når semestret allerede har term/year (altid sandt for et semester denne synk
-    # selv har oprettet, se ensure_semester/semester_name) — mangler de, er det tryggere at lade
-    # alt igennem end at gætte på en semestergrænse.
-    if sem.get("term") and sem.get("year"):
-        target = (sem["term"], sem["year"])
-        plans = [p for p in plans if p.get("start") and term_year_for_date(p["start"][:10]) == target]
-        tasks = [t for t in tasks if t.get("deadline") and term_year_for_date(t["deadline"][:10]) == target]
+    # Opretter/adoptér alle nødvendige semestre
+    term_year_to_sem = ensure_all_semesters(data, plans, tasks, new_id)
 
     for plan in sorted(plans, key=lambda p: (p["fag"], p.get("start", ""))):
+        if not plan.get("start"):
+            continue
+        # Find det rigtige semester for denne lektion
+        target_term_year = term_year_for_date(plan["start"][:10])
+        sem = term_year_to_sem.get(target_term_year)
+        if not sem:
+            # Fallback hvis término ikke er kendt (bør ikke ske efter ensure_all_semesters)
+            sem = term_year_to_sem.get(next(iter(term_year_to_sem)))
+            if not sem:
+                continue
+
         # plan_id er "<courseId>:<planId>" (background.js: planKey) — første halvdel er det
         # CourseID class.courseUrl skal pege på.
         cls = ensure_class(sem, plan["fag"], new_id, plan["plan_id"].split(":")[0])
+        relocate_stamped(data, "lectures", "vswPlanId", plan["plan_id"], cls)
         lec = ensure_lecture(cls, plan, new_id)
         due = lec["date"]
         # Opgavernes nøgle hænger på lektionens EGET id, ikke på plan_id eller dato: id'et er det
@@ -616,7 +677,19 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     # Afleveringsopgaver hænger på faget, ikke på en lektion — derfor klasse-niveau. De vises i
     # Hold Courses Assignments-liste og kalender uden at blive klistret på en tilfældig lektion.
     for task in sorted(tasks, key=lambda t: (t["fag"], t.get("deadline", ""))):
+        if not task.get("deadline"):
+            continue
+        # Find det rigtige semester for denne opgave
+        target_term_year = term_year_for_date(task["deadline"][:10])
+        sem = term_year_to_sem.get(target_term_year)
+        if not sem:
+            # Fallback hvis término ikke er kendt
+            sem = term_year_to_sem.get(next(iter(term_year_to_sem)))
+            if not sem:
+                continue
+
         cls = ensure_class(sem, task["fag"], new_id)
+        relocate_stamped(data, "assignments", "vswKey", f'opgave|{task["_element_id"]}', cls)
         ensure_assignment(cls, f'opgave|{task["_element_id"]}', task["_title"], "Writing",
                           task["deadline"][:10], "", new_id, linked_note=task["_path"])
 
@@ -699,6 +772,48 @@ def trigger_obsidian_reload(vault_root: Path) -> None:
         print(f"Kunne ikke bede Obsidian genindlæse (Local REST API): {err}", file=sys.stderr)
 
 
+def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> None:
+    """Propagerer den friske Mac-tilstand ind i Boox' egen data.json (issue #146).
+
+    Boox' `.obsidian-onyx`-kopi bliver aldrig rørt af selve sync()-flowet, så
+    `prune_dead_links()`s rettelser lander kun på Mac. Kopien er dog ikke bare en
+    biprodukt-kopi — install.sh's kommentar ("Boox og Mac har med vilje hver sine
+    indstillinger") er reel: `settings.einkMode` er bevidst forskellig pr. enhed
+    (Boox: true, Mac: false, bekræftet 2026-08-31). Alt andet (semesters,
+    currentSemesterId, dataVersion) skal derimod være identisk — det er det
+    `prune_dead_links()` retter. Løsningen er derfor et selektivt reconcile, ikke
+    en fuld overskrivning: tag Mac's friske data, bevar Boox' eget `settings` —
+    hele objektet, ikke kun einkMode, så andre nuværende/fremtidige device-lokale
+    felter i settings også er sikre.
+
+    ponytail: `install.sh` symlinker Mac's main.js (altid nyeste), men Boox' kopi
+    kræver et manuelt install.sh-kør + Syncthing-tur — Boox' pluginkode kan altså
+    lagge bag Mac's. Reconcilen her tjekker ikke om Boox' kode faktisk forstår det
+    skema den får. Bliver et reelt problem først hvis en fremtidig main.js-ændring
+    laver et brydende skift i semesters/classes-formen; opgraderingsvejen er da
+    at gate reconcile_onyx på en fælles skema-version pluginet selv skriver.
+    """
+    if not onyx_path.exists():
+        return  # Boox-kopien findes ikke på denne maskine — intet at reconcilere
+    onyx_before = onyx_path.read_text(encoding="utf-8")
+    onyx_mtime = onyx_path.stat().st_mtime
+    onyx_data = json.loads(onyx_before)
+    reconciled = dict(merged, settings=onyx_data.get("settings", merged.get("settings")))
+    onyx_after = json.dumps(reconciled, indent=2, ensure_ascii=False) + "\n"
+    if onyx_after == onyx_before:
+        return
+    if not apply:
+        if not quiet:
+            print("Ville også reconcilere .obsidian-onyx/data.json (Boox) — dry-run.")
+        return
+    if onyx_path.stat().st_mtime != onyx_mtime:
+        print("Boox' data.json ændrede sig undervejs — springer reconcile over, prøver igen næste kørsel.")
+        return
+    onyx_path.write_text(onyx_after, encoding="utf-8")
+    if not quiet:
+        print("Reconcileret .obsidian-onyx/data.json (Boox) — eget settings-felt bevaret.")
+
+
 def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) -> int:
     if not data_path.exists():
         print(f"Hold Course' data.json findes ikke ({data_path}) — er pluginet installeret?", file=sys.stderr)
@@ -748,6 +863,11 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         print(f"{label}: {removed_res} død(e) Library-post(er), {removed_assign} død(e) opgave(r) "
               f"(pegede på filer der ikke længere findes).")
 
+    # Kører uanset om Mac's egen data.json ændrede sig denne omgang: Boox kan sagtens sakke
+    # bagud fra en TIDLIGERE kørsel (før dette reconcile-trin fandtes, eller efter en fejlet
+    # Syncthing-tur), og det retter sig ikke af sig selv bare fordi Mac er ajour lige nu.
+    reconcile_onyx(ONYX_DATA_JSON, merged, apply, quiet)
+
     if after == before:
         # Watch-scriptet kalder denne funktion hvert minut; uden quiet ville loggen fyldes med
         # "allerede opdateret" og skjule de kørsler der reelt skete noget i.
@@ -755,12 +875,20 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
             print(f"{len(plans)} lektionsplan-noter — Hold Course er allerede opdateret.")
         return 0
 
-    sem = find_stamped(data["semesters"], "vswSync", True) or {}
-    lectures = sum(len(c.get("lectures", [])) for c in sem.get("classes", []))
-    assignments = sum(len(l.get("assignments", [])) for c in sem.get("classes", []) for l in c.get("lectures", [])) \
-        + sum(len(c.get("assignments", [])) for c in sem.get("classes", []))
-    print(f"{len(plans)} lektionsplan-noter + {len(tasks)} opgave-noter -> {len(sem.get('classes', []))} fag, "
-          f"{lectures} lektioner, {assignments} opgaver, {len(sem.get('resources', []))} Library-poster.")
+    # Rapportér statistik på tværs af alle semestre (ikke kun ét)
+    total_classes = 0
+    total_lectures = 0
+    total_assignments = 0
+    total_resources = 0
+    for sem in data.get("semesters", []):
+        total_classes += len(sem.get("classes", []))
+        total_lectures += sum(len(c.get("lectures", [])) for c in sem.get("classes", []))
+        total_assignments += sum(len(l.get("assignments", [])) for c in sem.get("classes", []) for l in c.get("lectures", [])) \
+            + sum(len(c.get("assignments", [])) for c in sem.get("classes", []))
+        total_resources += len(sem.get("resources", []))
+
+    print(f"{len(plans)} lektionsplan-noter + {len(tasks)} opgave-noter -> {total_classes} fag, "
+          f"{total_lectures} lektioner, {total_assignments} opgaver, {total_resources} Library-poster.")
 
     if not apply:
         print("Dry-run. Kør med --apply for at skrive data.json.")
@@ -779,7 +907,84 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     return 0
 
 
+def init_semesters_retroactively(data_path: Path, from_year_month: str = "2024-07") -> int:
+    """Opretter semestre retroaktivt fra angivet måned til nu, uden at røre lektioner.
+    Bruges til at få plads til gamle ressourcer længere ned.
+    Eksempel: python sync_hold_course.py --init-semesters 2024-07"""
+    from datetime import datetime
+
+    if not data_path.exists():
+        print(f"data.json findes ikke ({data_path})", file=sys.stderr)
+        return 1
+
+    data = json.loads(data_path.read_text(encoding="utf-8"))
+    data.setdefault("semesters", [])
+
+    # Parse start-dato
+    try:
+        start_year, start_month = map(int, from_year_month.split("-"))
+    except ValueError:
+        print(f"Ugyldigt format: {from_year_month} (brug YYYY-MM, fx 2024-07)", file=sys.stderr)
+        return 1
+
+    # Generér alle semestre fra start til nu
+    now_year, now_month = datetime.now().year, datetime.now().month
+    counter = [0]
+    new_id = lambda: generate_id(counter)
+
+    created = []
+    for year in range(start_year, now_year + 1):
+        for month_start in [1, 7]:  # Forår (1) og Efterår (7)
+            if (year, month_start) < (start_year, start_month):
+                continue
+            if (year, month_start) > (now_year, now_month):
+                continue
+
+            term = "Fall" if month_start >= 7 else "Spring"
+            name = semester_name_for_term_year(term, year)
+
+            # Check om semester allerede findes
+            existing = next((s for s in data["semesters"]
+                            if s.get("term") == term and s.get("year") == year), None)
+            if existing:
+                continue
+
+            # Opret nyt semester
+            sem = {
+                "id": new_id(),
+                "name": name,
+                "term": term,
+                "year": year,
+                "classes": [],
+                "resources": []
+            }
+            data["semesters"].append(sem)
+            created.append(name)
+
+    if not created:
+        print(f"Alle semestre fra {from_year_month} til nu findes allerede.")
+        return 0
+
+    # Skriv tilbage
+    before = data_path.read_text(encoding="utf-8")
+    after = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+    if after == before:
+        print("Ingen ændringer.")
+        return 0
+
+    data_path.write_text(after, encoding="utf-8")
+    print(f"Oprettet {len(created)} semester(e):")
+    for name in created:
+        print(f"  ✓ {name}")
+    return 0
+
+
 def main() -> int:
+    if "--init-semesters" in sys.argv:
+        idx = sys.argv.index("--init-semesters")
+        from_date = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "2024-07"
+        return init_semesters_retroactively(DATA_JSON, from_date)
     return sync(VAULT_ROOT, DATA_JSON, apply="--apply" in sys.argv)
 
 
@@ -881,6 +1086,23 @@ def selfcheck() -> int:
     assert read2["linkedBook"] == "", read2
     assert read2["title"].startswith("Frede V Nielsen"), read2
     assert data2["semesters"][0]["resources"] == [], data2["semesters"][0]["resources"]
+
+    # En lektion der allerede sidder i et FORKERT semester (fra tiden før #126) flyttes til det
+    # rigtige i stedet for at blive duplikeret — live-fundet #146: 66 Musik-lektioner tilbage til
+    # 2025 stod stadig i Efterår 2026 OVENI de nyoprettede kopier i deres rigtige semestre.
+    stale_plan = dict(fm, start="2025-08-13 08:15:00")
+    ids_stale = iter(f"stale{n}" for n in range(100))
+    data_stale = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2},
+                           [stale_plan], lambda: next(ids_stale))
+    wrong_sem = data_stale["semesters"][0]
+    assert wrong_sem["term"] == "Fall" and wrong_sem["year"] == 2025, wrong_sem
+    ny_plan = dict(fm)  # samme plan_id, dato tilbage i "Efterår 2026" (fm's egen 2026-09-01)
+    data_stale = sync_data(data_stale, [ny_plan], lambda: "MÅ-IKKE-BRUGES")
+    assert len(data_stale["semesters"]) == 2, data_stale["semesters"]
+    all_lectures = [l for s in data_stale["semesters"] for c in s["classes"] for l in c["lectures"]]
+    assert len(all_lectures) == 1, "lektionen blev duplikeret på tværs af semestre"
+    assert data_stale["semesters"][1]["classes"][0]["lectures"][0]["date"] == "2026-09-01"
+    assert data_stale["semesters"][0]["classes"][0]["lectures"] == [], "gammel semester skal tømmes"
 
     # To reelle lektioner samme dag i samme fag (Musik torsdag: 08:15 og 12:25) deler `uge`-værdi
     # og SKAL blive to lektioner. Regressionsvagt mod den uge-baserede fallback der flettede dem.
@@ -1123,6 +1345,31 @@ def selfcheck() -> int:
 
     # Idempotent: ingen nye orphans tilbage efter patchen.
     assert patch_pending_materiale(patch_root, apply=True) == []
+
+    # reconcile_onyx (issue #146): Boox' eget settings-felt (einkMode m.m.) skal overleve,
+    # resten skal blive Mac's friske data.
+    onyx_path = patch_root / "onyx-data.json"
+    onyx_path.write_text(json.dumps({"currentSemesterId": "gammel", "semesters": [], "dataVersion": 1,
+                                      "settings": {"einkMode": True}}), encoding="utf-8")
+    fresh = {"currentSemesterId": "ny", "semesters": [{"stub": True}], "dataVersion": 2,
+             "settings": {"einkMode": False}}
+    reconcile_onyx(onyx_path, fresh, apply=True, quiet=True)
+    onyx_result = json.loads(onyx_path.read_text(encoding="utf-8"))
+    assert onyx_result["currentSemesterId"] == "ny", onyx_result
+    assert onyx_result["semesters"] == [{"stub": True}], onyx_result
+    assert onyx_result["settings"] == {"einkMode": True}, "Boox' eget settings-felt blev overskrevet"
+
+    # Idempotent: en gentaget reconcile mod samme friske data ændrer intet.
+    before_mtime = onyx_path.stat().st_mtime
+    reconcile_onyx(onyx_path, fresh, apply=True, quiet=True)
+    assert onyx_path.stat().st_mtime == before_mtime, "reconcile skrev selvom intet ændrede sig"
+
+    # dry-run rører ikke filen.
+    reconcile_onyx(onyx_path, dict(fresh, dataVersion=3), apply=False, quiet=True)
+    assert json.loads(onyx_path.read_text(encoding="utf-8"))["dataVersion"] == 2, "dry-run skrev alligevel"
+
+    # Findes Boox-kopien slet ikke på denne maskine, skal reconcile være en stille no-op.
+    reconcile_onyx(patch_root / "findes-ikke.json", fresh, apply=True, quiet=True)
 
     print("selfcheck ok")
     return 0
