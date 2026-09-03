@@ -46,18 +46,32 @@ def rewrite_block(text: str, key: str, prefix: str, idx: dict, log: list) -> str
         j += 1
 
     kept: list[str] = []
+    seen: set[str] = set()                                    # NFC-normaliseret, dedup på tværs af ø/æ/å
     for ln in lines[i + 1:j]:
         raw = ln.strip()
         if not raw:
             continue
         body = raw[len(prefix):].strip() if raw.startswith(prefix) else raw
         tgt = s.wikilink_target(body)
+        base = (tgt or body).rsplit("/", 1)[-1]
+        if base.startswith(("[PLAN] ", "[NOTE] ")):           # issue #158: søskende-note i delt
+            log.append(("drop", tgt or body, None))           # enhedsmappe — aldrig ægte materiale
+            continue
+        key_nfc = s.nfc(tgt) if tgt else None
+        if key_nfc and key_nfc in seen:
+            log.append(("drop", tgt, None))                   # dublet (NFD/NFC-lækage fra #158)
+            continue
         if tgt and (s.VAULT_ROOT / s.nfc(tgt)).exists():
             kept.append(ln)                                   # lever — urørt
+            seen.add(key_nfc)
             continue
         new = rl.resolve(tgt, idx) if tgt else None
         if new:
+            if s.nfc(new) in seen:
+                log.append(("drop", tgt, None))               # opløste til en allerede-beholdt fil
+                continue
             kept.append(f"  {prefix} {s.wikilink_for(new)}")
+            seen.add(s.nfc(new))
             log.append(("repeg", tgt, new))
         else:
             log.append(("drop", tgt or body, None))
@@ -126,6 +140,22 @@ def selfcheck() -> int:
     out2 = rewrite_block(t2, "materiale_filer", s.MATERIALE_FIL_PREFIX, {}, [])
     assert "materiale_filer: false" in out2 and "Kun død" not in out2, out2
     assert "type: lektionsplan" in out2, out2
+
+    # issue #158: søskende-[PLAN]/[NOTE]-noter fjernes selv når filen findes; en NFD/NFC-dublet der
+    # opløser til den samme fil som en allerede-beholdt linje fjernes (kun én linje tilbage).
+    import unicodedata as _u
+    old = "§ FAG/♪ Musik/MD/Gammel/Rigtig fil.md"
+    t3 = ("---\nmateriale_filer: |\n"
+          f"  📎 [[{old}|Rigtig fil.md]]\n"
+          f"  📎 [[{_u.normalize('NFD', old)}|Rigtig fil.md]]\n"
+          "  📎 [[§ FAG/♪ Musik/MD/Gammel/[PLAN] 2026-09-09 - Enhed.md|[PLAN] …]]\n"
+          "  📎 [[§ FAG/♪ Musik/NOTER/x/[NOTE] 2026-09-09.md]]\n"
+          "---\n")
+    log3: list = []
+    out3 = rewrite_block(t3, "materiale_filer", s.MATERIALE_FIL_PREFIX, idx, log3)
+    assert "[PLAN] " not in out3 and "[NOTE] " not in out3, out3
+    assert out3.count("📎 [[") == 1, out3
+    assert sorted(a for a, *_ in log3) == ["drop", "drop", "drop", "repeg"], log3
     print("selfcheck ok")
     return 0
 

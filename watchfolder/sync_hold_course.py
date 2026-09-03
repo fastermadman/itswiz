@@ -198,7 +198,12 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     skelne materiale fra litteratur her (den klassifikation kræver itslearning-dataen, som denne
     funktion bevidst ikke rører); begge felter giver alligevel samme Reading-opgave i Hold Course
     (se sync_data), så klassifikationen er kosmetisk, ikke funktionel, for netop dette formål.
-    Idempotent og billig (samme mapper read_plans() alligevel scanner), sikkert at køre hvert minut."""
+    Idempotent og billig (samme mapper read_plans() alligevel scanner), sikkert at køre hvert minut.
+
+    Efter enhed-migreringen (#150/#155) ligger ALLE en enheds [PLAN]-noter + _forløb.md i samme
+    MD/<enhed>/-mappe. Kun ægte materiale tælles som "manglende link": søskende-[PLAN]/[NOTE]-noter
+    og _*-filer filtreres fra, og linked-mængden NFC-normaliseres på begge sider (ü/æ/ø/å i
+    mappenavne gav ellers NFD/NFC-mismatch og monotont voksende selvreferencer — issue #158)."""
     patched = []
     for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         text = plan_path.read_text(encoding="utf-8")
@@ -206,13 +211,18 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
         if fields.get("type") != "lektionsplan":
             continue
 
-        linked = {wikilink_target(l) for l in prefixed_lines(fields.get("materiale_filer", ""), MATERIALE_FIL_PREFIX)}
-        linked |= {wikilink_target(l) for l in prefixed_lines(fields.get("litteratur_filer", ""), LITTERATUR_FIL_PREFIX)}
+        linked = {
+            nfc(t)
+            for key, pfx in (("materiale_filer", MATERIALE_FIL_PREFIX), ("litteratur_filer", LITTERATUR_FIL_PREFIX))
+            for l in prefixed_lines(fields.get(key, ""), pfx)
+            if (t := wikilink_target(l))
+        }
 
         orphans = [
             nfc(str(md.relative_to(vault_root)))
             for md in sorted(plan_path.parent.glob("*.md"))
-            if md.name != plan_path.name
+            if nfc(md.name) != nfc(plan_path.name)
+            and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
         ]
         orphans = [o for o in orphans if o not in linked]
         if not orphans:
@@ -1177,6 +1187,13 @@ def selfcheck() -> int:
     assert _strip_genereret(fl_text) == _strip_genereret(render_forloeb(fl_sem, fl_cls, "2099-01-01T00:00:00"))
     assert iso_week("") == "—" and enhed_from_link("") == "—"
 
+    # note_stub_path() slår op i den ægte VAULT_ROOT for at afgøre om [NOTE]-stubben findes på disk.
+    # Her testes kun at vaultLink peger på stub-FORMEN (MD->NOTER, [PLAN]->[NOTE]) — uafhængigt af
+    # hvad der tilfældigvis ligger i vaulten. Fallback-grenen ('findes ikke -> selve planen') testes
+    # separat via _real_note_stub_path længere nede.
+    _real_note_stub_path = note_stub_path
+    globals()["note_stub_path"] = lambda p: p.replace("/MD/", "/NOTER/").replace("[PLAN] ", "[NOTE] ")
+
     plan = dict(fm, _path="§ FAG/♪ Musik/MD/W36tirs - Musikforståelse/[PLAN] W36tirs - Musikforståelse.md")
     ids = iter(f"id{n}" for n in range(100))
     data = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [plan], lambda: next(ids))
@@ -1251,13 +1268,13 @@ def selfcheck() -> int:
     # En lektion der allerede sidder i et FORKERT semester (fra tiden før #126) flyttes til det
     # rigtige i stedet for at blive duplikeret — live-fundet #146: 66 Musik-lektioner tilbage til
     # 2025 stod stadig i Efterår 2026 OVENI de nyoprettede kopier i deres rigtige semestre.
-    stale_plan = dict(fm, start="2025-08-13 08:15:00")
+    stale_plan = dict(fm, start="2025-08-13 08:15:00", _path="§ FAG/♪ Musik/MD/Musikforståelse/[PLAN] W33ons.md")
     ids_stale = iter(f"stale{n}" for n in range(100))
     data_stale = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2},
                            [stale_plan], lambda: next(ids_stale))
     wrong_sem = data_stale["semesters"][0]
     assert wrong_sem["term"] == "Fall" and wrong_sem["year"] == 2025, wrong_sem
-    ny_plan = dict(fm)  # samme plan_id, dato tilbage i "Efterår 2026" (fm's egen 2026-09-01)
+    ny_plan = dict(fm, _path=stale_plan["_path"])  # samme plan_id, dato tilbage i "Efterår 2026" (fm's egen 2026-09-01)
     data_stale = sync_data(data_stale, [ny_plan], lambda: "MÅ-IKKE-BRUGES")
     assert len(data_stale["semesters"]) == 2, data_stale["semesters"]
     all_lectures = [l for s in data_stale["semesters"] for c in s["classes"] for l in c["lectures"]]
@@ -1465,6 +1482,7 @@ def selfcheck() -> int:
 
     # Findes stubben ikke, falder vi tilbage til selve planen
     # Findes stubben ikke, falder vi tilbage til selve planen frem for et dødt link.
+    globals()["note_stub_path"] = _real_note_stub_path
     assert note_stub_path("findes/slet/ikke/MD/x/[PLAN] x.md") == "findes/slet/ikke/MD/x/[PLAN] x.md"
 
     # `false`-felter og dublet-noter giver ingenting.
@@ -1506,6 +1524,26 @@ def selfcheck() -> int:
 
     # Idempotent: ingen nye orphans tilbage efter patchen.
     assert patch_pending_materiale(patch_root, apply=True) == []
+
+    # issue #158: delt enhedsmappe — søskende-[PLAN]/[NOTE]-noter + _forløb.md må ALDRIG linkes
+    # ind, og et allerede-linket materiale med NFD-kodet ø/å i stien må ikke gen-tilføjes hver kørsel.
+    enhed = patch_root / "§ FAG" / "♱ Religion" / "MD" / "Løgstrup og myndighed"
+    enhed.mkdir(parents=True)
+    nfd = unicodedata.normalize("NFD", "§ FAG/♱ Religion/MD/Løgstrup og myndighed/Løgstrup uddrag.md")
+    p1 = enhed / "[PLAN] 2026-09-09 - Løgstrup og myndighed.md"
+    p1.write_text("---\ntype: lektionsplan\nfag: Religion\n"
+                  f"materiale_filer: |\n  📎 [[{nfd}|Løgstrup uddrag.md]]\n---\n", encoding="utf-8")
+    (enhed / "[PLAN] 2026-09-16 - Løgstrup og myndighed.md").write_text(
+        "---\ntype: lektionsplan\nfag: Religion\nmateriale_filer: false\n---\n", encoding="utf-8")
+    (enhed / "[NOTE] 2026-09-09.md").write_text("stub", encoding="utf-8")
+    (enhed / "_forløb.md").write_text("---\nkilde: hold-course-sync\n---\n", encoding="utf-8")
+    (enhed / "Løgstrup uddrag.md").write_text("materiale", encoding="utf-8")
+
+    for _ in range(3):
+        patch_pending_materiale(patch_root, apply=True)
+    got = p1.read_text(encoding="utf-8")
+    assert "[PLAN] 2026-09-16" not in got and "[NOTE] 2026-09-09" not in got and "_forløb.md" not in got, got
+    assert got.count("📎 [[") == 1, ("NFD/NFC-lækage — materiale gen-tilføjet", got)
 
     # reconcile_onyx (issue #146): Boox' eget settings-felt (einkMode m.m.) skal overleve,
     # resten skal blive Mac's friske data.
