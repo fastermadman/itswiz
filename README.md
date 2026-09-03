@@ -230,4 +230,6 @@ git config core.hooksPath .githooks
 ```
 
 Hooket (`.githooks/pre-push`) kører begge selvtjek. Var brudt uset i uger efter enhed-migreringen
-(#139) — derfor denne vagt.
+(#139) — derfor denne vagt. `.githooks/` indeholder også `post-commit`/`post-checkout` der kører
+graphify-rs (springes over hvis `graphify-rs` ikke er installeret), så `core.hooksPath` ikke slår
+dem fra.
