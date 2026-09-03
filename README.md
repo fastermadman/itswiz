@@ -149,11 +149,11 @@ kode-afhængighed — rørt af Obsidian/QuickAdd, ikke af denne extension. Se
 brugsvejledning, og `12-notestruktur-egne-noter.md` i ValdiVault for
 arkitekturbegrundelsen.
 
-Migrering af en gammel flad vault: `watchfolder/migrate_to_raw_md.py` (dry-run
-som standard, `--apply` udfører, `--selfcheck` kører de indbyggede tests).
+Migrering af en gammel flad vault: `watchfolder/engangsscripts/migrate_to_raw_md.py`
+(dry-run som standard, `--apply` udfører, `--selfcheck` kører de indbyggede tests).
 Samme mønster for retroaktiv emne-tilføjelse til ugemapper
-(`watchfolder/backfill_week_topics.py`) og frontmatter-berigelse af
-eksisterende noter (`watchfolder/enrich_existing_notes.py`).
+(`watchfolder/engangsscripts/backfill_week_topics.py`) og frontmatter-berigelse af
+eksisterende noter (`watchfolder/engangsscripts/enrich_existing_notes.py`).
 
 ## Afleveringsopgaver
 
