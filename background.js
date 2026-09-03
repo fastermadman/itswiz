@@ -546,23 +546,59 @@ async function extractExtensionFromWopi(wopiContentsUrl) {
 // ISO-ugenummer-beregning (issue #135), som manglede årstal helt: "W35fre" for to forskellige
 // år regnede sig frem til NØJAGTIG samme vaultsti, så et gammelt semesters materiale kunne blive
 // forvekslet med indeværende semesters. Dato er årstals-unik i sig selv uden ekstra logik.
-// To forskellige lektioner samme dag (fx Musik formiddag/eftermiddag) adskilles stadig af emnet
-// i weekFolderName() nedenfor, samme princip som før.
+// Bruges til `dato:`-frontmatterfeltet og til NOTER-grenens "<dato> - <emne>".
 function weekFolderBase(plan) {
   return plan.start.slice(0, 10);
 }
 
-// plan.topic.name er strukturerede data fra itslearning (bekræftet live, ikke fritekst) —
-// tilføjes når den findes, så mappen selv fortæller hvad lektionen handlede om
-// ("W34tors - Skolens formål"). Løser samtidig kollisionen ovenfor: to lektioner samme ugedag har
-// (næsten altid) hver sit emne, og får dermed hver sin mappe uden ekstra "A"/"B"-mærkning.
-//
-// Kun tilføjet fremadrettet: eksisterende mapper i vaulten hedder stadig bare "W34tors" uden
-// emne. Migreret retroaktivt med watchfolder/backfill_week_topics.py.
+// Frontmatter-tid (issue #154): tre adskilte felter afledt af plan.start, i stedet for det gamle
+// sammenblandede "uge: W38fre". Date.UTC(y,m,d) er tidszone-sikkert (i modsætning til
+// new Date(<lokal streng>), jf. #135) — vi regner kun på kalenderdato, aldrig klokkeslæt.
+const DAYS_DA = ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"];
+
+function ymd(plan) {
+  return plan.start.slice(0, 10).split("-").map(Number); // [y, m, d]
+}
+
+function isoWeek(plan) {
+  const [y, m, d] = ymd(plan);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const dayNum = dt.getUTCDay() || 7; // man=1 … søn=7
+  dt.setUTCDate(dt.getUTCDate() + 4 - dayNum); // ISO: uge tilhører sin torsdag
+  const yearStart = Date.UTC(dt.getUTCFullYear(), 0, 1);
+  const week = Math.ceil((dt.getTime() - yearStart) / 86400000 / 7 + 1 / 7);
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function weekdayDa(plan) {
+  const [y, m, d] = ymd(plan);
+  return DAYS_DA[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+}
+
+// De tre tids-linjer der før var "uge: <dato>" — samme tre linjer i [PLAN]- og [NOTE]-frontmatter.
+function timeFrontmatterLines(plan) {
+  return [`uge: ${isoWeek(plan)}`, `ugedag: ${weekdayDa(plan)}`, `dato: ${weekFolderBase(plan)}`];
+}
+
+// NOTER/-grenen: fortsat "<dato> - <emne>" pr. lektion. Valdemars egne noter er filet efter
+// lejlighed (levetids-reglen, ValdiVault 12-notestruktur-egne-noter.md), i modsætning til
+// RAW/MD nedenfor der files efter enhed.
 function weekFolderName(plan) {
   const base = weekFolderBase(plan);
   const topic = plan.topic?.name?.trim();
   return topic ? `${base} - ${sanitizeFilename(topic)}` : base;
+}
+
+// RAW/- og MD-grenen: files efter ENHED (itslearnings `topic`), ikke lektionsdato — flere
+// lektioner i samme forløb deler mappe, så genbrugt materiale ligger ét sted og ikke som
+// per-uge redirect-noter. Se ValdiVault 15-vault-fillayout-enhedsmapper.md + issue #148/#149/#150.
+// Lektion uden brugbart emne falder tilbage til dato (samme fallback som før).
+// TOPIC_DISPLAY_NAMES normaliserer forurenede topics (underviser-navne, logistik) — samme
+// hånd-vedligeholdte mønster som COURSE_DISPLAY_NAMES.
+function enhedFolder(plan) {
+  const topic = plan.topic?.name?.trim();
+  if (!topic) return weekFolderBase(plan);
+  return sanitizeFilename(TOPIC_DISPLAY_NAMES[topic] ?? topic);
 }
 
 // Returnerer { url, fileName } — Viewer.aspx-kaldet bærer ALTID en FileName-parameter (fx
@@ -1007,10 +1043,10 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
       "---",
       "type: note",
       `fag: ${courseDisplayName(courseName)}`,
-      `uge: ${weekFolderBase(plan)}`,
+      ...timeFrontmatterLines(plan),
       ...(topic ? [`emne: "${topic}"`] : []),
-      // uge (W33fre) sorterer alfabetisk og scrambler ugedagene — start er den universelle,
-      // kronologiske nøgle, samme lærepenge som Seminarium.base's sorteringsfejl i issue #65.
+      // uge er ISO (2026-W38), årstals-unik; ugedag/dato er egne felter (#154). start er stadig
+      // den universelle kronologiske nøgle, samme lærepenge som Seminarium.base's sorteringsfejl (#65).
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
       `kilde: "[[${kildeStem}]]"`,
       "tags: []",
@@ -1210,7 +1246,8 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const noteId = `plan:${planKey}`;
     if (!plan) continue;
 
-    const weekFolder = weekFolderName(plan);
+    // RAW/MD files efter enhed; NOTER-stubben nedenfor får fortsat "<dato> - <emne>".
+    const weekFolder = enhedFolder(plan);
     const courseName = plan.courseName ?? "ukendt-fag";
     // Symbol-navnet er kun til selve mappestien — fag:-feltet nedenfor skal blive ved den rene
     // værdi (courseDisplayName), da Seminarium.base filtrerer eksakt på den (issue #63).
@@ -1222,9 +1259,9 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // planId'et er stabilt selv når itslearning redigerer start/stop-felterne på en eksisterende
     // plan i stedet for at oprette en ny (fx en reel udskydelse, live-bekræftet 2026-08-27 på
     // Religion: den fortrængte lektions plan beholdt sit id, kun datoen ændrede sig — mens selve
-    // tidsspunktet fik en NY placeholder-plan). weekFolderName() er dato-afledt, så en udskudt
-    // lektion regner sig frem til en ny mappe her — uden dette flyttes de allerede hentede filer
-    // aldrig med, og bliver stående i den gamle ugemappe for evigt (issue #96).
+    // tidsspunktet fik en NY placeholder-plan). enhedFolder() er emne-afledt, så en udskudt
+    // lektion der bliver i samme enhed rammer samme mappe (ingen flytning nødvendig); skifter
+    // den emne, flyttes de allerede hentede filer med her, ellers bliver de stående (issue #96).
     let prevRecord = planNoteRecord(records, noteId);
     if (prevRecord?.weekFolder && prevRecord.weekFolder !== weekFolder) {
       try {
@@ -1283,7 +1320,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
     const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/[PLAN] ${weekFolder}.md`;
-    const stubOk = await writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse, tabId, syncTaskCompletion);
+    const stubOk = await writeLectureNoteStub(plan, weekFolderName(plan), lektionsplanPath, forberedelse, tabId, syncTaskCompletion);
     if (!stubOk) return false;
 
     // Ligger i AUTO-blokken, så underviserens rettelser følger med (issue #61) — i modsætning til
@@ -1331,11 +1368,10 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const frontmatter = [
       "---",
       `fag: ${fagField}`,
-      `uge: ${weekFolderBase(plan)}`,
+      ...timeFrontmatterLines(plan),
       ...(topic ? [`emne: "${topic}"`] : []),
-      // Intet separat dato:-felt — det var bare start's første 10 tegn, kun til stede på
-      // lektionsplan-noter (materiale-noter fra watchfolderen har ingen dato:, men har altid
-      // start:). Basens visdato-formel læser start direkte og virker derfor på alle rækketyper.
+      // uge/ugedag/dato er adskilte felter afledt af plan.start (#154). start/stop nedenfor har
+      // klokkeslættet oveni og er den universelle kronologiske nøgle til Bases.
       // Lektionens rigtige tidspunkt (ikke lokale-bookingens) — se toGoogleDateTime/syncCalendar
       // for hvorfor plan.start/stop er den pålidelige kilde.
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
@@ -1626,7 +1662,7 @@ async function downloadFileElements(plans, tabId) {
     .flatMap((plan) =>
       (plan.elements ?? []).map((el) => ({
         courseName: plan.courseName ?? "ukendt-fag",
-        weekFolder: weekFolderName(plan),
+        weekFolder: enhedFolder(plan),
         element: el,
       }))
     );
@@ -1739,6 +1775,15 @@ const COURSE_DISPLAY_NAMES = {
   "LStek-f26": "Teknologiforståelse",
   "LSS24.1pæd.ad": "PædAd",
 };
+
+// itslearning-topic -> mappenavn i RAW/MD (enhedFolder). Kun til at rydde op i forurenede
+// topics — Musik har underviser-navne og logistik i topic-listen. Tom entry = brug topic som det er.
+// Kandidater fundet i dry-run (migrate_to_enhed_mapper.py), Valdemar udfylder de rigtige mål:
+//   "Underviser Klaus Glüsing", "Underviser Lone Sonne", "Anne Katrine Christensen" (underviser-navne)
+//   "LMS KULTURFESTIVAL Silkeborg 2025", "Studietur", "Selvstudie", "Opfinderdag", "JEPPEs undervisning"
+// Samme tabel speciles ind i migrate_to_enhed_mapper.py's TOPIC_OVERRIDES så migrering og
+// fremadrettet skrivning er enige.
+const TOPIC_DISPLAY_NAMES = {};
 
 const CALENDAR_EVENT_MAP_KEY = "calendarEventMap";
 const TIME_ZONE = "Europe/Copenhagen";
