@@ -8,11 +8,14 @@ medmindre en fremtidig session bekræfter at ingen anden note refererer den samm
 
 ## Udløb for enhed-migrerings-klyngen (#149–#155)
 
-`migrate_to_enhed_mapper.py`, `relink_holdcourse_enhed.py`, `repeg_plan_frontmatter_links.py` og
-følge-fixene hører sammen om ét skift (dato-mapper → enhed-mapper). Hele klyngen kan slettes i én
-commit når **begge** er sandt: æraen er >6 måneder gammel (~marts 2026), og intet åbent issue
-refererer #149–#155. Se #165 for retirering af repeg/relink-paret specifikt (afventer at #164 er
-lukket og recovery verificeret).
+`migrate_to_enhed_mapper.py` og følge-fixene hører sammen om ét skift (dato-mapper → enhed-mapper).
+Hele klyngen kan slettes i én commit når **begge** er sandt: æraen er >6 måneder gammel
+(~marts 2026), og intet åbent issue refererer #149–#155.
+
+`relink_holdcourse_enhed.py` + `repeg_plan_frontmatter_links.py` (data.json- og frontmatter-repeg)
+blev retireret i #165 da recovery var verificeret stabil (#164) — deres arbejde er engangs og løber
+aldrig igen. Git-historikken har dem hvis en gammel backup-restore nogensinde skulle kræve en
+gentagelse.
 
 ## Søskende der ikke afløser hinanden
 
