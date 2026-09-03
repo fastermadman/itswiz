@@ -2,8 +2,7 @@
 # Blokerer push hvis watchfolder/-selvtjekket fejler — så en brudt selfcheck ikke kan
 # stå rød uset i ugevis (issue #139/#160). Aktivér én gang:  git config core.hooksPath .githooks
 #
-# Selvtjekkene bruger kun stdlib og må IKKE afhænge af ~/ViaVault (var præcis fejlen i #139).
+# Selvtjekket bruger kun stdlib og må IKKE afhænge af ~/ViaVault (var præcis fejlen i #139).
 set -e
 root=$(git rev-parse --show-toplevel)
 python3 "$root/watchfolder/sync_hold_course.py" --selfcheck
-python3 "$root/watchfolder/engangsscripts/repeg_plan_frontmatter_links.py" --selfcheck
