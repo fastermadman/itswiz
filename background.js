@@ -546,9 +546,38 @@ async function extractExtensionFromWopi(wopiContentsUrl) {
 // ISO-ugenummer-beregning (issue #135), som manglede årstal helt: "W35fre" for to forskellige
 // år regnede sig frem til NØJAGTIG samme vaultsti, så et gammelt semesters materiale kunne blive
 // forvekslet med indeværende semesters. Dato er årstals-unik i sig selv uden ekstra logik.
-// Bruges til `uge:`-frontmatterfeltet (ren dato) og til NOTER-grenens "<dato> - <emne>".
+// Bruges til `dato:`-frontmatterfeltet og til NOTER-grenens "<dato> - <emne>".
 function weekFolderBase(plan) {
   return plan.start.slice(0, 10);
+}
+
+// Frontmatter-tid (issue #154): tre adskilte felter afledt af plan.start, i stedet for det gamle
+// sammenblandede "uge: W38fre". Date.UTC(y,m,d) er tidszone-sikkert (i modsætning til
+// new Date(<lokal streng>), jf. #135) — vi regner kun på kalenderdato, aldrig klokkeslæt.
+const DAYS_DA = ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"];
+
+function ymd(plan) {
+  return plan.start.slice(0, 10).split("-").map(Number); // [y, m, d]
+}
+
+function isoWeek(plan) {
+  const [y, m, d] = ymd(plan);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const dayNum = dt.getUTCDay() || 7; // man=1 … søn=7
+  dt.setUTCDate(dt.getUTCDate() + 4 - dayNum); // ISO: uge tilhører sin torsdag
+  const yearStart = Date.UTC(dt.getUTCFullYear(), 0, 1);
+  const week = Math.ceil((dt.getTime() - yearStart) / 86400000 / 7 + 1 / 7);
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function weekdayDa(plan) {
+  const [y, m, d] = ymd(plan);
+  return DAYS_DA[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+}
+
+// De tre tids-linjer der før var "uge: <dato>" — samme tre linjer i [PLAN]- og [NOTE]-frontmatter.
+function timeFrontmatterLines(plan) {
+  return [`uge: ${isoWeek(plan)}`, `ugedag: ${weekdayDa(plan)}`, `dato: ${weekFolderBase(plan)}`];
 }
 
 // NOTER/-grenen: fortsat "<dato> - <emne>" pr. lektion. Valdemars egne noter er filet efter
@@ -1014,10 +1043,10 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
       "---",
       "type: note",
       `fag: ${courseDisplayName(courseName)}`,
-      `uge: ${weekFolderBase(plan)}`,
+      ...timeFrontmatterLines(plan),
       ...(topic ? [`emne: "${topic}"`] : []),
-      // uge (W33fre) sorterer alfabetisk og scrambler ugedagene — start er den universelle,
-      // kronologiske nøgle, samme lærepenge som Seminarium.base's sorteringsfejl i issue #65.
+      // uge er ISO (2026-W38), årstals-unik; ugedag/dato er egne felter (#154). start er stadig
+      // den universelle kronologiske nøgle, samme lærepenge som Seminarium.base's sorteringsfejl (#65).
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
       `kilde: "[[${kildeStem}]]"`,
       "tags: []",
@@ -1339,11 +1368,10 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const frontmatter = [
       "---",
       `fag: ${fagField}`,
-      `uge: ${weekFolderBase(plan)}`,
+      ...timeFrontmatterLines(plan),
       ...(topic ? [`emne: "${topic}"`] : []),
-      // Intet separat dato:-felt — det var bare start's første 10 tegn, kun til stede på
-      // lektionsplan-noter (materiale-noter fra watchfolderen har ingen dato:, men har altid
-      // start:). Basens visdato-formel læser start direkte og virker derfor på alle rækketyper.
+      // uge/ugedag/dato er adskilte felter afledt af plan.start (#154). start/stop nedenfor har
+      // klokkeslættet oveni og er den universelle kronologiske nøgle til Bases.
       // Lektionens rigtige tidspunkt (ikke lokale-bookingens) — se toGoogleDateTime/syncCalendar
       // for hvorfor plan.start/stop er den pålidelige kilde.
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,

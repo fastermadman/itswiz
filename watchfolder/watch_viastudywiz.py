@@ -136,11 +136,25 @@ def enrich_from_plan_note(week_dir: Path) -> dict[str, str]:
         return {}
     text = notes[0].read_text(encoding="utf-8")
     fields = {}
-    for key in ("emne", "uge", "start", "stop"):
+    for key in ("emne", "uge", "ugedag", "dato", "start", "stop"):
         value = read_frontmatter_field(text, key)
         if value:
             fields[key] = value
     return fields
+
+
+_DAYS_DA = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
+
+
+def time_fields_from_start(start: str) -> dict[str, str]:
+    """"2026-09-18 08:15:00" -> {uge: "2026-W38", ugedag: "fredag", dato: "2026-09-18"}.
+    Fallback når lektionsplan-noten mangler (#154)."""
+    try:
+        dt = datetime.fromisoformat(start.strip())
+    except ValueError:
+        return {}
+    y, w, wd = dt.isocalendar()
+    return {"uge": f"{y}-W{w:02d}", "ugedag": _DAYS_DA[wd - 1], "dato": dt.strftime("%Y-%m-%d")}
 
 
 # "hentet:" — lokal væg-tid i samme tidszone som extensionens egen formatNow() (TIME_ZONE), samme
@@ -167,17 +181,20 @@ _DATE_OR_WEEK = re.compile(r"^(\d{4}-\d{2}-\d{2}|W\d{1,2}[a-zæøå]+)", re.IGNO
 def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -> str:
     raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
     folder = doc_path.parent.name
-    prefix, _, folder_emne = folder.partition(" - ")
+    _, _, folder_emne = folder.partition(" - ")
     md_week_dir = raw_root.parent / MD_DIR_NAME / doc_path.parent.relative_to(raw_root)
 
     fields = enrich_from_plan_note(md_week_dir)
     # enhed-mappe: hele navnet er emnet; dato-fallback-mappe (intet topic): intet emne.
     emne = fields.get("emne") or folder_emne or ("" if _DATE_OR_WEEK.fullmatch(folder) else folder)
-    uge = fields.get("uge") or (prefix if _DATE_OR_WEEK.match(prefix) else "")
+
+    # uge/ugedag/dato: fra lektionsplan-noten, ellers udledt af start, ellers udeladt (#154).
+    time_fields = {k: fields[k] for k in ("uge", "ugedag", "dato") if k in fields}
+    if not time_fields and fields.get("start"):
+        time_fields = time_fields_from_start(fields["start"])
 
     lines = [f"fag: {plain_fag(raw_root.parent.name)}\n"]
-    if uge:
-        lines.append(f"uge: {uge}\n")
+    lines += [f"{k}: {time_fields[k]}\n" for k in ("uge", "ugedag", "dato") if k in time_fields]
     lines.append(f"type: {note_type}\n")
     lines.append(f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n')
     lines.append(f'hentet: "{format_now()}"\n')
@@ -731,16 +748,17 @@ def selfcheck() -> int:
         raw_pdf.parent.mkdir(parents=True)
         raw_pdf.write_bytes(b"")
 
-        # Uden lektionsplan-note: emne genbruges fra mappenavnet, ingen start/stop.
+        # Uden lektionsplan-note: emne genbruges fra mappenavnet; uge/ugedag/dato har ingen
+        # kilde (mappenavnet er ikke længere en, #150/#154), så de udelades.
         global VAULT_ROOT
         old_root, VAULT_ROOT = VAULT_ROOT, root
         try:
             fm = frontmatter(raw_pdf)
-            assert "uge: W34tors\n" in fm, fm
             assert 'emne: "Når børn synger."' in fm, fm
-            assert "start:" not in fm, fm
+            assert "uge:" not in fm and "start:" not in fm, fm
 
-            # Med lektionsplan-note ved siden af: emne + start/stop kommer derfra i stedet.
+            # Med lektionsplan-note ved siden af: emne + start/stop derfra, og uge/ugedag/dato
+            # udledes af start når planen kun har start (ikke de tre felter eksplicit).
             md_dir = root / "Musik" / MD_DIR_NAME / "W34tors - Når børn synger."
             md_dir.mkdir(parents=True)
             (md_dir / "[PLAN] W34tors - Når børn synger..md").write_text(
@@ -750,7 +768,7 @@ def selfcheck() -> int:
             fm = frontmatter(raw_pdf)
             assert 'emne: "Når børn synger. (fra plan)"' in fm, fm
             assert 'start: "2026-08-20 08:15:00"' in fm, fm
-            assert 'stop: "2026-08-20 12:00:00"' in fm, fm
+            assert "uge: 2026-W34\n" in fm and "ugedag: torsdag\n" in fm and "dato: 2026-08-20\n" in fm, fm
         finally:
             VAULT_ROOT = old_root
 
@@ -880,21 +898,33 @@ def selfcheck() -> int:
 
         assert _extract_running_header([]) is None
 
-        # frontmatter() på enhed-mapper (#150): "<enhed>" er ikke "<dato> - <emne>".
+        # frontmatter() på enhed-mapper (#150) + adskilte tids-felter (#154).
         import unittest.mock as _m
 
+        assert time_fields_from_start("2026-09-18 08:15:00") == {
+            "uge": "2026-W38", "ugedag": "fredag", "dato": "2026-09-18"
+        }
+        # uge 1 tilhører sit år, ikke det foregående (ISO) — årstals-unik, jf. #135.
+        assert time_fields_from_start("2025-12-29 09:00:00")["uge"] == "2026-W01"
+
         enhed_doc = VAULT_ROOT / "§ FAG/♪ Musik/RAW/Musikforståelse/Frede.pdf"
-        with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={"emne": "Musikforståelse", "uge": "2026-08-25"}):
+        with _m.patch(f"{__name__}.enrich_from_plan_note",
+                      return_value={"emne": "Musikforståelse", "uge": "2026-W35",
+                                    "ugedag": "tirsdag", "dato": "2026-08-25"}):
             fm = frontmatter(enhed_doc)
-        assert "uge: 2026-08-25\n" in fm, fm            # fra lektionsplan-noten, ikke mappenavnet
+        assert "uge: 2026-W35\n" in fm and "ugedag: tirsdag\n" in fm and "dato: 2026-08-25\n" in fm, fm
         assert 'emne: "Musikforståelse"\n' in fm, fm
         assert "\nuge: Musikforståelse" not in fm, fm   # enhed-navnet må ALDRIG blive uge
 
-        # Dato-fallback-mappe (lektion uden topic): uge fra mappenavnet, intet emne.
+        # Kun start i plan-noten -> uge/ugedag/dato udledes.
+        with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={"start": "2026-09-18 08:15:00"}):
+            fm2 = frontmatter(enhed_doc)
+        assert "uge: 2026-W38\n" in fm2 and "ugedag: fredag\n" in fm2 and "dato: 2026-09-18\n" in fm2, fm2
+
+        # Ingen plan-note, dato-fallback-mappe: ingen tids-felter (mappenavnet er ikke en kilde).
         with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={}):
-            fm2 = frontmatter(VAULT_ROOT / "§ FAG/♪ Musik/RAW/2026-04-15/Noget.pdf")
-        assert "uge: 2026-04-15\n" in fm2, fm2
-        assert "emne:" not in fm2, fm2
+            fm3 = frontmatter(VAULT_ROOT / "§ FAG/♪ Musik/RAW/2026-04-15/Noget.pdf")
+        assert "uge:" not in fm3 and "emne:" not in fm3, fm3
 
         # md_targets uændret: MD-mappen spejler RAW-mappen uanset navneform.
         md, att = md_targets(enhed_doc)

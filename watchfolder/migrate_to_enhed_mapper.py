@@ -32,6 +32,7 @@ Rækkefølge ved --apply (10-notens opskrift):
   5. launchctl load …; genindlæs extension
 """
 
+import datetime as _dt
 import hashlib
 import re
 import shutil
@@ -312,14 +313,45 @@ def _link_patterns(plan: Plan):
     return pats
 
 
-def count_link_rewrites(plan: Plan, md_roots: list[Path]) -> int:
+_DAYS_DA = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
+_UGE_LINE = re.compile(r"^uge:.*$", re.M)
+_START_LINE = re.compile(r'^start:\s*"?([\d :.-]+?)"?\s*$', re.M)
+_OLD_UGE = re.compile(r"^uge:\s*(W\d|20\d\d-\d\d-\d\d)", re.M)
+
+
+def normalize_time_fm(text: str) -> str:
+    """`uge: W38fre` / `uge: 2026-09-18` -> tre felter `uge: 2026-W38` / `ugedag:` / `dato:`
+    udledt af `start:`. Kun i frontmatter-blokken, kun når `start:` findes (#154)."""
+    fm_m = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    if not fm_m:
+        return text
+    fm = fm_m.group(1)
+    if not _OLD_UGE.search(fm):
+        return text
+    sm = _START_LINE.search(fm)
+    if not sm:
+        return text
+    try:
+        d = _dt.datetime.fromisoformat(sm.group(1).strip())
+    except ValueError:
+        return text
+    y, w, wd = d.isocalendar()
+    triple = f"uge: {y}-W{w:02d}\nugedag: {_DAYS_DA[wd - 1]}\ndato: {d:%Y-%m-%d}"
+    new_fm = _UGE_LINE.sub(triple, fm, count=1)
+    return text[: fm_m.start(1)] + new_fm + text[fm_m.end(1) :]
+
+
+def count_rewrites(plan: Plan, md_roots: list[Path]) -> tuple[int, int]:
     pats = _link_patterns(plan)
-    hit = 0
+    links = time = 0
     for root in md_roots:
         for md in root.rglob("*.md"):
-            if any(p.search(nfc(md.read_text(encoding="utf-8", errors="replace"))) for p, _, _ in pats):
-                hit += 1
-    return hit
+            t = nfc(md.read_text(encoding="utf-8", errors="replace"))
+            if any(p.search(t) for p, _, _ in pats):
+                links += 1
+            if normalize_time_fm(t) != t:
+                time += 1
+    return links, time
 
 
 def apply_link_rewrites(plan: Plan, md_roots: list[Path]) -> None:
@@ -338,7 +370,7 @@ def apply_link_rewrites(plan: Plan, md_roots: list[Path]) -> None:
             t = md.read_text(encoding="utf-8")
             # NFC-normalisér hele noten: wikilink-match kræver samme form som de NFC'de mappenavne,
             # og NFC er den kanoniske form extensionen selv skriver (#131).
-            nt = rewrite(nfc(t))
+            nt = normalize_time_fm(rewrite(nfc(t)))
             if nt != t:
                 md.write_text(nt, encoding="utf-8")
 
@@ -424,14 +456,15 @@ def main() -> int:
                 print(f"    <- {rel(s)}", file=sys.stderr)
         return 1
 
-    n_links = count_link_rewrites(plan, md_roots + [f / "NOTER" for f in fag_dirs if (f / "NOTER").is_dir()])
-    print(f"\n{n_links} .md-filer har wikilinks der skal skrives om (MD/ + NOTER/).")
+    rewrite_roots = md_roots + [f / "NOTER" for f in fag_dirs if (f / "NOTER").is_dir()]
+    n_links, n_time = count_rewrites(plan, rewrite_roots)
+    print(f"\n{n_links} .md-filer får wikilinks skrevet om · {n_time} får uge/ugedag/dato normaliseret (MD/ + NOTER/).")
 
     if not apply:
         print("\nDry-run. Kør med --apply for at udføre (stop watcher + snapshot først).")
         return 0
 
-    link_roots = md_roots + [f / "NOTER" for f in fag_dirs if (f / "NOTER").is_dir()]
+    link_roots = rewrite_roots
 
     for p in plan.ghost_delete:
         p.unlink()
@@ -517,6 +550,19 @@ def selfcheck() -> int:
     assert not JUNK_ENHED.match("Musikforståelse")
 
     assert SYNC_CONFLICT.search("Rosa.sync-conflict-20260830-130241-7XYEA2C.md")
+
+    # normalize_time_fm (#154): W38fre / ISO-dato i uge: -> tre felter udledt af start:
+    n1 = normalize_time_fm('---\nfag: R\nuge: W38fre\ntype: materiale\nstart: "2026-09-18 08:15:00"\n---\n\nbody')
+    assert "uge: 2026-W38\n" in n1 and "ugedag: fredag\n" in n1 and "dato: 2026-09-18\n" in n1, n1
+    assert "W38fre" not in n1
+    n2 = normalize_time_fm('---\nfag: M\nuge: 2026-08-25\nstart: "2026-08-25 12:25:00"\n---\n')
+    assert "uge: 2026-W35\n" in n2 and "ugedag: tirsdag\n" in n2, n2
+    # ingen uge: at normalisere -> uændret
+    same = '---\nfag: X\ntype: note\nstart: "2026-08-25 12:25:00"\n---\n'
+    assert normalize_time_fm(same) == same
+    # uge: men ingen start: -> uændret (kan ikke udlede)
+    nostart = '---\nfag: X\nuge: W38fre\n---\n'
+    assert normalize_time_fm(nostart) == nostart
 
     print("selfcheck ok")
     return 0
