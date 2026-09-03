@@ -136,7 +136,7 @@ def enrich_from_plan_note(week_dir: Path) -> dict[str, str]:
         return {}
     text = notes[0].read_text(encoding="utf-8")
     fields = {}
-    for key in ("emne", "start", "stop"):
+    for key in ("emne", "uge", "start", "stop"):
         value = read_frontmatter_field(text, key)
         if value:
             fields[key] = value
@@ -157,27 +157,35 @@ def plain_fag(folder_name: str) -> str:
     return folder_name
 
 
+# RAW/MD-mappen hedder nu "<enhed>" (background.js' enhedFolder), ikke "<dato> - <emne>".
+# `uge:` og `emne:` hentes derfor fra lektionsplan-noten (enrich_from_plan_note); mappe-navnet
+# bruges kun som fallback hvis den note mangler (kalender-sync slået fra) eller endnu ikke er
+# migreret ("<dato> - <emne>"-form).
+_DATE_OR_WEEK = re.compile(r"^(\d{4}-\d{2}-\d{2}|W\d{1,2}[a-zæøå]+)", re.IGNORECASE)
+
+
 def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -> str:
     raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
-    uge, _, folder_emne = doc_path.parent.name.partition(" - ")
+    folder = doc_path.parent.name
+    prefix, _, folder_emne = folder.partition(" - ")
     md_week_dir = raw_root.parent / MD_DIR_NAME / doc_path.parent.relative_to(raw_root)
 
     fields = enrich_from_plan_note(md_week_dir)
-    emne = fields.get("emne") or folder_emne
-    extra_lines = [f'emne: "{emne}"\n'] if emne else []
-    extra_lines += [f'{key}: "{fields[key]}"\n' for key in ("start", "stop") if key in fields]
+    # enhed-mappe: hele navnet er emnet; dato-fallback-mappe (intet topic): intet emne.
+    emne = fields.get("emne") or folder_emne or ("" if _DATE_OR_WEEK.fullmatch(folder) else folder)
+    uge = fields.get("uge") or (prefix if _DATE_OR_WEEK.match(prefix) else "")
 
-    return (
-        "---\n"
-        f"fag: {plain_fag(raw_root.parent.name)}\n"
-        f"uge: {uge}\n"
-        f"type: {note_type}\n"
-        f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n'
-        f'hentet: "{format_now()}"\n'
-        f"{''.join(extra_lines)}"
-        f"{extra}"
-        "---\n\n"
-    )
+    lines = [f"fag: {plain_fag(raw_root.parent.name)}\n"]
+    if uge:
+        lines.append(f"uge: {uge}\n")
+    lines.append(f"type: {note_type}\n")
+    lines.append(f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n')
+    lines.append(f'hentet: "{format_now()}"\n')
+    if emne:
+        lines.append(f'emne: "{emne}"\n')
+    lines += [f'{key}: "{fields[key]}"\n' for key in ("start", "stop") if key in fields]
+
+    return "---\n" + "".join(lines) + extra + "---\n\n"
 
 
 def md_targets(doc_path: Path) -> tuple[Path, Path]:
@@ -871,6 +879,27 @@ def selfcheck() -> int:
         assert _extract_running_header(inconsistent) is None
 
         assert _extract_running_header([]) is None
+
+        # frontmatter() på enhed-mapper (#150): "<enhed>" er ikke "<dato> - <emne>".
+        import unittest.mock as _m
+
+        enhed_doc = VAULT_ROOT / "§ FAG/♪ Musik/RAW/Musikforståelse/Frede.pdf"
+        with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={"emne": "Musikforståelse", "uge": "2026-08-25"}):
+            fm = frontmatter(enhed_doc)
+        assert "uge: 2026-08-25\n" in fm, fm            # fra lektionsplan-noten, ikke mappenavnet
+        assert 'emne: "Musikforståelse"\n' in fm, fm
+        assert "\nuge: Musikforståelse" not in fm, fm   # enhed-navnet må ALDRIG blive uge
+
+        # Dato-fallback-mappe (lektion uden topic): uge fra mappenavnet, intet emne.
+        with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={}):
+            fm2 = frontmatter(VAULT_ROOT / "§ FAG/♪ Musik/RAW/2026-04-15/Noget.pdf")
+        assert "uge: 2026-04-15\n" in fm2, fm2
+        assert "emne:" not in fm2, fm2
+
+        # md_targets uændret: MD-mappen spejler RAW-mappen uanset navneform.
+        md, att = md_targets(enhed_doc)
+        assert md == VAULT_ROOT / "§ FAG/♪ Musik/MD/Musikforståelse/Frede.md", md
+        assert att == VAULT_ROOT / "§ FAG/♪ Musik/MD/Musikforståelse/_attachments/Frede", att
 
         # write_conversion(): highlights i eksisterende MD beskyttes mod overskrivning (#42).
         old_root, VAULT_ROOT = VAULT_ROOT, root
