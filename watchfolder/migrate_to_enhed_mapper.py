@@ -319,9 +319,10 @@ _START_LINE = re.compile(r'^start:\s*"?([\d :.-]+?)"?\s*$', re.M)
 _OLD_UGE = re.compile(r"^uge:\s*(W\d|20\d\d-\d\d-\d\d)", re.M)
 
 
-def normalize_time_fm(text: str) -> str:
-    """`uge: W38fre` / `uge: 2026-09-18` -> tre felter `uge: 2026-W38` / `ugedag:` / `dato:`
-    udledt af `start:`. Kun i frontmatter-blokken, kun når `start:` findes (#154)."""
+def normalize_time_fm(text: str, fallback_date: str | None = None) -> str:
+    """`uge: W38fre` / `uge: 2026-09-18` -> tre felter `uge: 2026-W38` / `ugedag:` / `dato:`.
+    Dato tages fra `start:` i frontmatteren, ellers fra `fallback_date` (fx NOTER-mappens
+    dato-præfiks). Uden nogen af delene: uændret (#154)."""
     fm_m = re.match(r"---\n(.*?)\n---\n", text, re.S)
     if not fm_m:
         return text
@@ -329,16 +330,24 @@ def normalize_time_fm(text: str) -> str:
     if not _OLD_UGE.search(fm):
         return text
     sm = _START_LINE.search(fm)
-    if not sm:
-        return text
+    raw = sm.group(1).strip() if sm else (fallback_date or "")
     try:
-        d = _dt.datetime.fromisoformat(sm.group(1).strip())
+        d = _dt.datetime.fromisoformat(raw)
     except ValueError:
         return text
     y, w, wd = d.isocalendar()
     triple = f"uge: {y}-W{w:02d}\nugedag: {_DAYS_DA[wd - 1]}\ndato: {d:%Y-%m-%d}"
     new_fm = _UGE_LINE.sub(triple, fm, count=1)
     return text[: fm_m.start(1)] + new_fm + text[fm_m.end(1) :]
+
+
+def folder_fallback_date(md: Path) -> str | None:
+    """Dato-præfiks fra nærmeste "<dato> - <emne>"-mappe (NOTER/ er stadig på den form)."""
+    for parent in md.parents:
+        m = re.match(r"^(\d{4}-\d{2}-\d{2}) - ", parent.name)
+        if m:
+            return m.group(1)
+    return None
 
 
 def count_rewrites(plan: Plan, md_roots: list[Path]) -> tuple[int, int]:
@@ -349,7 +358,7 @@ def count_rewrites(plan: Plan, md_roots: list[Path]) -> tuple[int, int]:
             t = nfc(md.read_text(encoding="utf-8", errors="replace"))
             if any(p.search(t) for p, _, _ in pats):
                 links += 1
-            if normalize_time_fm(t) != t:
+            if normalize_time_fm(t, folder_fallback_date(md)) != t:
                 time += 1
     return links, time
 
@@ -370,7 +379,7 @@ def apply_link_rewrites(plan: Plan, md_roots: list[Path]) -> None:
             t = md.read_text(encoding="utf-8")
             # NFC-normalisér hele noten: wikilink-match kræver samme form som de NFC'de mappenavne,
             # og NFC er den kanoniske form extensionen selv skriver (#131).
-            nt = normalize_time_fm(rewrite(nfc(t)))
+            nt = normalize_time_fm(rewrite(nfc(t)), folder_fallback_date(md))
             if nt != t:
                 md.write_text(nt, encoding="utf-8")
 
@@ -487,21 +496,23 @@ def main() -> int:
 
     apply_link_rewrites(plan, link_roots)
 
+    # Ryd tømte kilde-mapper — også dem der kun har .DS_Store / tomme _attachments/ tilbage.
     for fag in fag_dirs:
         for branch_name in MIGRATED_BRANCHES:
             branch = fag / branch_name
             if not branch.is_dir():
                 continue
             for folder in sorted(branch.iterdir()):
-                if (
-                    folder.is_dir()
-                    and classify_folder(folder.name) == "migrate"
-                    and not any(folder.iterdir())
-                ):
-                    folder.rmdir()
+                if folder.is_dir() and classify_folder(folder.name) == "migrate" and not _has_real_content(folder):
+                    shutil.rmtree(folder)
 
     print("Færdig. Kør watch_viastudywiz.py --selfcheck og verificér i Obsidian.")
     return 0
+
+
+def _has_real_content(folder: Path) -> bool:
+    """True hvis mappen indeholder mindst én fil der ikke er .DS_Store."""
+    return any(p.is_file() and p.name != ".DS_Store" for p in folder.rglob("*"))
 
 
 def selfcheck() -> int:
@@ -534,6 +545,7 @@ def selfcheck() -> int:
     plan.folder_moves = [("♪ Musik", "2026-08-25 - Musikforståelse", "Musikforståelse",
                           {"Resonans": "Resonans (2026-08-25)"})]
     class _T:
+        parents = ()
         def __init__(s, txt): s.txt = txt
         def read_text(s, **k): return s.txt
         def write_text(s, v, **k): s.txt = v
@@ -563,6 +575,10 @@ def selfcheck() -> int:
     # uge: men ingen start: -> uændret (kan ikke udlede)
     nostart = '---\nfag: X\nuge: W38fre\n---\n'
     assert normalize_time_fm(nostart) == nostart
+    # ...men med fallback-dato (fx NOTER-mappens præfiks) udledes de tre alligevel
+    assert "uge: 2026-W38\n" in normalize_time_fm(nostart, "2026-09-18")
+    assert folder_fallback_date(Path("§ FAG/♱ Religion/NOTER/2026-09-02 - Emne/[NOTE] x.md")) == "2026-09-02"
+    assert folder_fallback_date(Path("§ FAG/♪ Musik/MD/Ledelse/note.md")) is None
 
     print("selfcheck ok")
     return 0
