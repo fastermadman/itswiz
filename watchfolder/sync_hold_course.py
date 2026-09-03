@@ -50,6 +50,7 @@ import sys
 import time
 import unicodedata
 import urllib.request
+from datetime import date as _date
 from pathlib import Path
 
 VAULT_ROOT = Path.home() / "ViaVault"
@@ -814,6 +815,124 @@ def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> N
         print("Reconcileret .obsidian-onyx/data.json (Boox) — eget settings-felt bevaret.")
 
 
+# ─── _forløb.md: holdbarheds-spejl (issue #152) ───────────────────────────────
+#
+# En genereret markdown-serialisering af hvert forløb, så vault-mappen ALENE — uden Obsidian,
+# uden Hold Course-pluginet — lader en læser rekonstruere hvad der skete i hvert fag. Ren
+# envejs-serialisering af `merged`: ingen ny tilstand, aldrig læst tilbage (data.json forbliver
+# autoritativ). Skrives kun når indholdet faktisk ændrede sig, så en minut-tick der intet
+# ændrede ikke rører mtime og ikke afbryder Valdemar.
+
+FORLOEB_HEADER = "> Genereret fil — rediger ikke; ret i Hold Course."
+
+
+def iso_week(date: str) -> str:
+    """"2026-08-12" -> "2026-W33". Samme ISO-uge-form som frontmatterens `uge:` (#154)."""
+    try:
+        y, w, _ = _date.fromisoformat(date[:10]).isocalendar()
+        return f"{y}-W{w:02d}"
+    except (ValueError, TypeError):
+        return "—"
+
+
+def enhed_from_link(link: str) -> str:
+    """Enhedsnavnet fra en `§ FAG/<fag>/MD/<enhed>/<fil>`-sti (#150). "—" hvis stien ikke har
+    formen (fx tom, eller Valdemars egen note et andet sted hen)."""
+    parts = (link or "").split("/")
+    if "MD" in parts:
+        i = parts.index("MD")
+        if i + 2 < len(parts):
+            return parts[i + 1]
+    return "—"
+
+
+def _cell(text: str) -> str:
+    return (text or "—").replace("|", "\\|").replace("\n", " ")
+
+
+def render_forloeb(sem: dict, cls: dict, genereret: str) -> str:
+    fag = cls.get("vswFag") or cls.get("name") or ""
+    out = [
+        "---", f"fag: {fag}", f"semester: {sem.get('name', '')}",
+        f"genereret: {genereret}", "kilde: hold-course-sync", "---", "",
+        FORLOEB_HEADER, "",
+        "| dato | uge | enhed | titel | status | materialer | opgaver + frist |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for lec in sorted(cls.get("lectures", []), key=lambda l: (l.get("date", ""), l.get("title", ""))):
+        readings, opgaver = [], []
+        for a in lec.get("assignments", []):
+            if a.get("type") == "Reading":
+                tgt = a.get("linkedNote") or ""
+                if tgt:
+                    readings.append(f"[[{tgt}|{Path(tgt).stem}]]")
+            else:
+                due = a.get("dueDate", "")
+                opgaver.append(f"{a.get('title', '')} — {due} ({a.get('status', '')})"
+                               if due else f"{a.get('title', '')} ({a.get('status', '')})")
+        row = [lec.get("date", ""), iso_week(lec.get("date", "")),
+               enhed_from_link(lec.get("vaultLink") or lec.get("vswVaultLink") or ""),
+               lec.get("title", ""), lec.get("status", ""),
+               "<br>".join(dict.fromkeys(readings)), "<br>".join(opgaver)]
+        out.append("| " + " | ".join(_cell(c) for c in row) + " |")
+
+    if cls.get("assignments"):
+        out += ["", "## Afleveringer (uden lektion)", "",
+                "| titel | frist | status | note |", "| --- | --- | --- | --- |"]
+        for a in sorted(cls["assignments"], key=lambda a: (a.get("dueDate", ""), a.get("title", ""))):
+            note = a.get("linkedNote") or ""
+            out.append("| " + " | ".join(_cell(c) for c in [
+                a.get("title", ""), a.get("dueDate", ""), a.get("status", ""),
+                f"[[{note}|{Path(note).stem}]]" if note else ""]) + " |")
+    return "\n".join(out) + "\n"
+
+
+def _strip_genereret(text: str) -> str:
+    return re.sub(r"^genereret: .*$", "genereret:", text, count=1, flags=re.M)
+
+
+def forloeb_path(vault_root: Path, sem: dict, cls: dict, multi: bool) -> Path | None:
+    """`§ FAG/<fag>/_forløb.md`, eller `_HoldCourse/<semester>.md` når samme fag har klasser i
+    flere semestre (Musik: rummet løber over årsskiftet, #125). None hvis fag-mappen ikke findes
+    på denne maskine — spejlet hører hjemme ved siden af materialet, ikke i løs luft."""
+    fag = cls.get("vswFag") or cls.get("name") or ""
+    style = FAG_STYLE.get(fag)
+    if not style:
+        return None
+    fag_dir = vault_root / "§ FAG" / f"{style['symbol']} {fag}"
+    if not fag_dir.is_dir():
+        return None
+    if multi:
+        return fag_dir / "_HoldCourse" / nfc(f"{sem.get('name', 'ukendt')}.md")
+    return fag_dir / nfc("_forløb.md")
+
+
+def write_forloeb_mirrors(data: dict, vault_root: Path, quiet: bool) -> int:
+    genereret = time.strftime("%Y-%m-%dT%H:%M:%S")
+    fag_count: dict[str, int] = {}
+    for sem in data.get("semesters", []):
+        for cls in sem.get("classes", []):
+            fag = cls.get("vswFag") or cls.get("name") or ""
+            fag_count[fag] = fag_count.get(fag, 0) + 1
+
+    written = 0
+    for sem in data.get("semesters", []):
+        for cls in sem.get("classes", []):
+            fag = cls.get("vswFag") or cls.get("name") or ""
+            path = forloeb_path(vault_root, sem, cls, fag_count.get(fag, 0) > 1)
+            if path is None:
+                continue
+            text = render_forloeb(sem, cls, genereret)
+            if path.exists() and _strip_genereret(path.read_text(encoding="utf-8")) == _strip_genereret(text):
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            written += 1
+    if written and not quiet:
+        print(f"Skrev {written} _forløb.md (holdbarheds-spejl, issue #152).")
+    return written
+
+
 def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) -> int:
     if not data_path.exists():
         print(f"Hold Course' data.json findes ikke ({data_path}) — er pluginet installeret?", file=sys.stderr)
@@ -867,6 +986,15 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     # bagud fra en TIDLIGERE kørsel (før dette reconcile-trin fandtes, eller efter en fejlet
     # Syncthing-tur), og det retter sig ikke af sig selv bare fordi Mac er ajour lige nu.
     reconcile_onyx(ONYX_DATA_JSON, merged, apply, quiet)
+
+    # Holdbarheds-spejlet (#152). Skrives uanset om data.json ændrede sig denne tick — helt som
+    # reconcile_onyx ovenfor: en tidligere kørsel (eller en ny/omdøbt enhedsmappe) kan have
+    # efterladt et spejl bagud, og content-sammenligningen inde i funktionen gør en no-op-tick
+    # gratis. Kun ved --apply; dry-run rører ingen filer.
+    if apply:
+        write_forloeb_mirrors(merged, vault_root, quiet)
+    elif not quiet:
+        print("Ville også skrive _forløb.md holdbarheds-spejl (dry-run).")
 
     if after == before:
         # Watch-scriptet kalder denne funktion hvert minut; uden quiet ville loggen fyldes med
@@ -1015,6 +1143,39 @@ def selfcheck() -> int:
     assert fm["plan_id"] == "36016:1235133", fm
     assert fm["litteratur"].startswith("▥ Frede"), fm
     assert fm["forberedelse"] == "⚒ Forberedelse", fm
+
+    # ── _forløb.md holdbarheds-spejl (#152) — kørt her, før den pre-eksisterende #139-assertion
+    #    nedenfor, så en fejl herfra ikke maskeres af den. ────────────────────────────────────
+    fl_sem = {"name": "Efterår 2026"}
+    fl_cls = {"vswFag": "Musik", "name": "Musik", "lectures": [
+        {"date": "2026-09-01", "title": "Musikforståelse", "status": "in-progress",
+         "vaultLink": "§ FAG/♪ Musik/MD/Musikforståelse/[PLAN] 2026-09-01 - Musikforståelse.md",
+         "assignments": [
+             {"type": "Reading", "title": "Frede V Nielsen", "dueDate": "2026-09-01",
+              "status": "not-started", "linkedNote": "§ FAG/♪ Musik/MD/Musikforståelse/Frede V Nielsen.md"},
+             {"type": "Other", "title": "Forberedelse", "dueDate": "2026-09-01", "status": "done",
+              "linkedNote": "§ FAG/♪ Musik/NOTER/2026-09-01/[NOTE] 2026-09-01.md"}]},
+        {"date": "2026-08-25", "title": "Intro", "status": "done", "vaultLink": "", "assignments": []},
+    ], "assignments": [
+        {"title": "Studieopgave", "dueDate": "2026-09-28", "status": "not-started",
+         "linkedNote": "✎ NOTER/OPGAVER/Studieopgave/Studieopgave.md"}]}
+    fl_text = render_forloeb(fl_sem, fl_cls, "2026-09-03T10:00:00")
+    assert "fag: Musik" in fl_text and "kilde: hold-course-sync" in fl_text, fl_text
+    assert FORLOEB_HEADER in fl_text, fl_text
+    lines_fl = fl_text.splitlines()
+    # Lektionerne står kronologisk, ikke i input-rækkefølge.
+    i_intro = next(i for i, l in enumerate(lines_fl) if "| Intro |" in l)
+    i_musik = next(i for i, l in enumerate(lines_fl) if "Musikforståelse" in l and l.startswith("| 2026-09-01"))
+    assert i_intro < i_musik, fl_text
+    row = lines_fl[i_musik]
+    assert "2026-W36" in row, row                      # ISO-uge udledt af datoen
+    assert "| Musikforståelse |" in row, row           # enhed udledt af MD/<enhed>/-leddet
+    assert "[[§ FAG/♪ Musik/MD/Musikforståelse/Frede V Nielsen.md\\|Frede V Nielsen]]" in row, row
+    assert "Forberedelse — 2026-09-01 (done)" in row, row
+    assert "## Afleveringer (uden lektion)" in fl_text and "Studieopgave" in fl_text, fl_text
+    # Kun timestampet skifter mellem to kørsler -> _strip_genereret gør dem ens (mtime-venligt).
+    assert _strip_genereret(fl_text) == _strip_genereret(render_forloeb(fl_sem, fl_cls, "2099-01-01T00:00:00"))
+    assert iso_week("") == "—" and enhed_from_link("") == "—"
 
     plan = dict(fm, _path="§ FAG/♪ Musik/MD/W36tirs - Musikforståelse/[PLAN] W36tirs - Musikforståelse.md")
     ids = iter(f"id{n}" for n in range(100))
