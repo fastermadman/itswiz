@@ -40,7 +40,9 @@ aldrig overskriver Valdemars arbejde, og synken er idempotent, så en tabt skriv
 igen ved næste kørsel.
 
 Notér uden plan_id (ældre end issue #96) synkes ikke — de rapporteres, se ensure_lecture for hvorfor
-et gæt på fag+uge blev afprøvet og forkastet.
+et gæt på fag+uge blev afprøvet og forkastet. Samme rapportér-ikke-slet-princip gælder den anden
+vej: en lecture hvis plan_id er faldet ud af itslearning (aflyst/fjernet) rapporteres, slettes
+aldrig (issue #173).
 
 Dry-run som standard, `--apply` udfører, `--selfcheck` kører den indbyggede test.
 """
@@ -645,11 +647,18 @@ def prune_dead_links(data: dict, vault_root: Path) -> tuple[int, int]:
 
 # ─── Synk ─────────────────────────────────────────────────────────────────────
 
-def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | None = None) -> dict:
+def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | None = None,
+             dropped_out: list[str] | None = None) -> dict:
     """Fletter plans ind i en data.json-struktur. Ren funktion — al I/O ligger i sync().
 
     Fordeler lektioner/opgaver til deres rigtige semester baseret på dato (issue #126).
-    Opretter semestre retroaktivt efter behov."""
+    Opretter semestre retroaktivt efter behov.
+
+    dropped_out (#173): valgfri akkumulator — er den givet, udfyldes den med én tekstlinje pr.
+    lecture der er faldet ud af itslearning siden sidst (matcher stadig `vswPlanId`, men den
+    værdi optrådte ikke i DENNE kørsels plan-sæt for lektionens fag). Rapporteres kun, ALDRIG
+    slettet — "intet slettes nogensinde" gælder også her. Default None ændrer ingenting for
+    eksisterende kald."""
     counter = [0]
     new_id = new_id or (lambda: generate_id(counter))
     data.setdefault("semesters", [])
@@ -663,6 +672,12 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
 
     # Opretter/adoptér alle nødvendige semestre
     term_year_to_sem = ensure_all_semesters(data, plans, tasks, new_id)
+
+    # #173: hvilke (semester, klasse) der rent faktisk fik mindst én plan i DENNE kørsel, og hvilke
+    # plan_id'er de fik. Kun disse klasser er "trygge" at kigge for droppede lektioner i bagefter —
+    # en klasse der slet ikke optræder her kan skyldes en fetch-fejl for hele faget, ikke at alle
+    # dens lektioner reelt er væk (goal metrics i #173).
+    touched: dict[tuple[str, str], set[str]] = {}
 
     for plan in sorted(plans, key=lambda p: (p["fag"], p.get("start", ""))):
         if not plan.get("start"):
@@ -681,6 +696,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         cls = ensure_class(sem, plan["fag"], new_id, plan["plan_id"].split(":")[0])
         relocate_stamped(data, "lectures", "vswPlanId", plan["plan_id"], cls)
         lec = ensure_lecture(cls, plan, new_id)
+        touched.setdefault((sem["id"], cls["id"]), set()).add(plan["plan_id"])  # #173
         due = lec["date"]
         # Opgavernes nøgle hænger på lektionens EGET id, ikke på plan_id eller dato: id'et er det
         # eneste der ligger fast når itslearning udskyder en lektion (plan_id består, datoen
@@ -742,6 +758,21 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         relocate_stamped(data, "assignments", "vswKey", f'opgave|{task["_element_id"]}', cls)
         ensure_assignment(cls, f'opgave|{task["_element_id"]}', task["_title"], "Writing",
                           task["deadline"][:10], "", new_id, linked_note=task["_path"])
+
+    # #173: lectures der er faldet ud af itslearning. Kun klasser i `touched` — en klasse der
+    # slet ikke fik nogen plan denne kørsel springes over i stedet for at rapportere ALLE dens
+    # lektioner som droppede (kunne lige så vel være en fetch-fejl for hele faget).
+    if dropped_out is not None:
+        for sem in data["semesters"]:
+            for cls in sem.get("classes", []):
+                seen = touched.get((sem["id"], cls["id"]))
+                if not seen:
+                    continue
+                for lec in cls.get("lectures", []):
+                    plan_id = lec.get("vswPlanId")
+                    if plan_id and plan_id not in seen:
+                        fag = cls.get("vswFag") or cls.get("name", "")
+                        dropped_out.append(f'{fag} {lec.get("date", "")} {lec.get("title", "")}')
 
     return data
 
@@ -999,7 +1030,8 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     before = data_path.read_text(encoding="utf-8")
     mtime = data_path.stat().st_mtime
     data = json.loads(before)
-    merged = sync_data(data, plans, tasks=tasks)
+    dropped: list[str] = []
+    merged = sync_data(data, plans, tasks=tasks, dropped_out=dropped)
     # FØR serialiseringen: vault -> Hold Course-retningen sætter status på opgaver i `merged`, og
     # de ændringer skal med i den data.json vi sammenligner og skriver.
     checked, marked_done = sync_task_completion(merged, vault_root, dry_run=not apply)
@@ -1011,6 +1043,13 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
               f"(ældre end issue #96, kan ikke matches sikkert — ret dem i vaulten):")
         for rel in uden_plan_id:
             print(f"  {rel}")
+
+    # #173: rapporteres uanset apply/dry-run — intet slettes, kun nævnes, så det er ikke gated
+    # på "label" på samme måde som de skrivende blokke nedenfor.
+    if dropped and not quiet:
+        print(f"{len(dropped)} lektion(er) i data.json er ikke længere i itslearning:")
+        for d in dropped:
+            print(f"  {d}")
 
     # Rapporteres UANSET om data.json selv skal genskrives: Hold Course kan have gemt et Done-tryk
     # siden sidste kørsel uden at vores egen frontmatter-flet ændrer noget, og et Done-tryk skal
@@ -1520,6 +1559,39 @@ def selfcheck() -> int:
     assert l3["notes"] == "", l3  # bevidst tømt: ikke migreret, ikke refyldt
     assert not any("vswNotes" in lec for lec in gammel["semesters"][0]["classes"][0]["lectures"]), gammel
     assert migrate_notes_to_description(gammel) == 0, gammel  # idempotent
+
+    # #173: en lecture der falder ud af itslearning rapporteres, slettes aldrig.
+    plan_b = dict(plan, plan_id="36016:9990002", uge="W36ons", emne="Anden lektion",
+                  start="2026-09-02 12:25:00", stop="2026-09-02 15:45:00")
+    ids10 = iter(f"h{n}" for n in range(100))
+    data10 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2},
+                       [plan, plan_b], lambda: next(ids10))
+    assert len(data10["semesters"][0]["classes"][0]["lectures"]) == 2, data10
+
+    # Næste kørsel: kun plan_b kommer stadig igennem — plan er faldet ud af itslearning.
+    dropped10: list[str] = []
+    data10 = sync_data(data10, [plan_b], lambda: "MÅ-IKKE-BRUGES", dropped_out=dropped10)
+    lecs10 = data10["semesters"][0]["classes"][0]["lectures"]
+    assert len(lecs10) == 2, lecs10  # INTET slettet
+    assert len(dropped10) == 1 and "Musikforståelse" in dropped10[0], dropped10
+
+    # En gentaget kørsel med samme (mangelfulde) plan-sæt rapporterer den droppede igen — ikke
+    # kun ved selve overgangen. Rapportér-ikke-slet er en tilstand, ikke en engangshændelse.
+    dropped10b: list[str] = []
+    data10 = sync_data(data10, [plan_b], lambda: "MÅ-IKKE-BRUGES", dropped_out=dropped10b)
+    assert len(dropped10b) == 1, dropped10b
+
+    # Fag der slet ikke fik nogen plan denne kørsel (kunne være en fetch-fejl for hele faget) —
+    # INGEN af dens lektioner må rapporteres som droppede. Andet fag, ingen Musik-planer overhovedet.
+    andet_fag = dict(plan, fag="Dansk", plan_id="99999:1", uge="W40man",
+                     start="2026-09-28 09:00:00", stop="2026-09-28 10:00:00")
+    dropped10c: list[str] = []
+    data10 = sync_data(data10, [andet_fag], lambda: "MÅ-IKKE-BRUGES", dropped_out=dropped10c)
+    assert dropped10c == [], dropped10c  # Musik blev slet ikke rørt denne kørsel — ikke en fejl
+
+    # dropped_out er valgfri (default None) — eksisterende kald uden parameteren er upåvirkede.
+    data10_noargs = sync_data(dict(data10), [plan_b])
+    assert len(data10_noargs["semesters"][0]["classes"][0]["lectures"]) == 2, data10_noargs
 
     # LivsOplysning-scenariet (live 2026-08-27): intet udfyldt litteratur-felt, men vedhæftede
     # fil-elementer i materiale_filer. Skal STADIG give en Reading-opgave, ikke ingenting.
