@@ -787,15 +787,16 @@ def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> N
     """Propagerer den friske Mac-tilstand ind i Boox' egen data.json (issue #146).
 
     Boox' `.obsidian-onyx`-kopi bliver aldrig rørt af selve sync()-flowet, så
-    `prune_dead_links()`s rettelser lander kun på Mac. Kopien er dog ikke bare en
-    biprodukt-kopi — install.sh's kommentar ("Boox og Mac har med vilje hver sine
-    indstillinger") er reel: `settings.einkMode` er bevidst forskellig pr. enhed
-    (Boox: true, Mac: false, bekræftet 2026-08-31). Alt andet (semesters,
-    currentSemesterId, dataVersion) skal derimod være identisk — det er det
-    `prune_dead_links()` retter. Løsningen er derfor et selektivt reconcile, ikke
-    en fuld overskrivning: tag Mac's friske data, bevar Boox' eget `settings` —
-    hele objektet, ikke kun einkMode, så andre nuværende/fremtidige device-lokale
-    felter i settings også er sikre.
+    `prune_dead_links()`s rettelser lander kun på Mac. `data.json` er nu rent
+    indhold (semesters, currentSemesterId, dataVersion) og skal være identisk på
+    de to enheder — så reconcilen er en lige indholds-kopi.
+
+    De device-lokale felter (`einkMode`, `mobileScale`) bor efter hold-course#10
+    (plugin-PR #28) i en separat `device-settings.json` som dette script aldrig
+    rører — hver enheds `.obsidian`/`.obsidian-onyx` har sin egen. Derfor er den
+    tidligere "bevar Boox' eget settings"-dans væk: en `settings`-nøgle der stadig
+    ligger i en af `data.json`-kopierne er legacy og strippes her (pluginet fjerner
+    den også selv ved næste load, jf. #28's `onExternalSettingsChange`).
 
     ponytail: `install.sh` symlinker Mac's main.js (altid nyeste), men Boox' kopi
     kræver et manuelt install.sh-kør + Syncthing-tur — Boox' pluginkode kan altså
@@ -808,8 +809,7 @@ def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> N
         return  # Boox-kopien findes ikke på denne maskine — intet at reconcilere
     onyx_before = onyx_path.read_text(encoding="utf-8")
     onyx_mtime = onyx_path.stat().st_mtime
-    onyx_data = json.loads(onyx_before)
-    reconciled = dict(merged, settings=onyx_data.get("settings", merged.get("settings")))
+    reconciled = {k: v for k, v in merged.items() if k != "settings"}
     onyx_after = json.dumps(reconciled, indent=2, ensure_ascii=False) + "\n"
     if onyx_after == onyx_before:
         return
@@ -822,7 +822,7 @@ def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> N
         return
     onyx_path.write_text(onyx_after, encoding="utf-8")
     if not quiet:
-        print("Reconcileret .obsidian-onyx/data.json (Boox) — eget settings-felt bevaret.")
+        print("Reconcileret .obsidian-onyx/data.json (Boox) — rent indhold, ingen settings-nøgle.")
 
 
 # ─── _forløb.md: holdbarheds-spejl (issue #152) ───────────────────────────────
@@ -1545,8 +1545,9 @@ def selfcheck() -> int:
     assert "[PLAN] 2026-09-16" not in got and "[NOTE] 2026-09-09" not in got and "_forløb.md" not in got, got
     assert got.count("📎 [[") == 1, ("NFD/NFC-lækage — materiale gen-tilføjet", got)
 
-    # reconcile_onyx (issue #146): Boox' eget settings-felt (einkMode m.m.) skal overleve,
-    # resten skal blive Mac's friske data.
+    # reconcile_onyx (issue #146 + hold-course#10): Boox får Mac's friske indhold,
+    # og en legacy `settings`-nøgle strippes fra begge kopier (device-prefs bor nu
+    # i device-settings.json, som scriptet ikke rører).
     onyx_path = patch_root / "onyx-data.json"
     onyx_path.write_text(json.dumps({"currentSemesterId": "gammel", "semesters": [], "dataVersion": 1,
                                       "settings": {"einkMode": True}}), encoding="utf-8")
@@ -1556,7 +1557,7 @@ def selfcheck() -> int:
     onyx_result = json.loads(onyx_path.read_text(encoding="utf-8"))
     assert onyx_result["currentSemesterId"] == "ny", onyx_result
     assert onyx_result["semesters"] == [{"stub": True}], onyx_result
-    assert onyx_result["settings"] == {"einkMode": True}, "Boox' eget settings-felt blev overskrevet"
+    assert "settings" not in onyx_result, "legacy settings-nøgle blev ikke strippet"
 
     # Idempotent: en gentaget reconcile mod samme friske data ændrer intet.
     before_mtime = onyx_path.stat().st_mtime
