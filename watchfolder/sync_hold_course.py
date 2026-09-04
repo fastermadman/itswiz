@@ -15,13 +15,16 @@ Ukendte nøgler overlever derfor en fuld runde gennem UI'et, og synken kan stemp
 på objekterne:
 
     lecture.vswPlanId     plan_id fra frontmatteren (issue #96)
+    lecture.vswDescription undervisernes beskrivelse: som synken sidst skrev den (issue #172)
     assignment.vswKey     "<lecture.id>|lit|<sti>" / "<lecture.id>|forb|<titel>"
     resource.vswResKey    vault-stien til den matchede litteraturfil
     class.vswFag          fag:-værdien
     semester.vswSync      semestret synken lægger sine klasser i
 
-Synken ejer kun title/date/dueDate/type. Valdemars egne felter — status-pills, karakterer, noter,
-linkede noter, TA/kontor-tid — røres aldrig, og intet slettes nogensinde. Samme princip som
+Synken ejer kun title/date/dueDate/type samt lecture.description (issue #172: undervisernes
+beskrivelse:, adskilt fra lecture.notes så de to ejere ikke deler felt). Valdemars egne felter —
+status-pills, karakterer, noter, linkede noter, TA/kontor-tid — røres aldrig, og intet slettes
+nogensinde. Samme princip som
 spliceAutoSection i background.js: maskinen ejer en afgrænset zone, mennesket ejer resten.
 
 Kendt begrænsning (2026-08-28, delvist afhjulpet): Hold Course implementerer ikke
@@ -464,21 +467,26 @@ def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
     lec = find_stamped(cls.setdefault("lectures", []), "vswPlanId", plan["plan_id"])
     if lec is None:
         lec = {"id": new_id(), "title": "", "date": "", "status": "not-started",
-               "notes": "", "vaultLink": "", "assignments": [], "vswPlanId": plan["plan_id"]}
+               "notes": "", "description": "", "vaultLink": "", "assignments": [],
+               "vswPlanId": plan["plan_id"]}
         cls["lectures"].append(lec)
     # Synkens felter. status er udelukkende Valdemars og røres aldrig.
     lec["title"] = plan.get("emne") or plan.get("uge") or "Lektion"
     lec["date"] = (plan.get("start") or "")[:10]
 
-    # "Key Concepts & Lesson Goal" (lec.notes) er en fritekst-boks han også selv kan skrive i,
-    # samme situation som vaultLink lige nedenfor: vswNotes husker hvad synken sidst skrev, så en
-    # tom boks udfyldes, en boks han selv har rettet i (afviger fra vswNotes) står urørt.
+    # Undervisernes beskrivelse: har sit EGET felt (issue #172, counterpart til
+    # hold-course#5b). Den stod før i lec.notes under et vswNotes-stempel, side om side med
+    # Valdemars egne forberedelsesnoter — to ejere i ét felt. Konkret bed det på to måder:
+    # et bevidst tømt notes-felt talte som "sync-owned, tomt" og blev refyldt ved næste kørsel
+    # (og med hold-course#5b, hvor noten flytter ud i en fil og feltet tømmes, ville det ske
+    # hver gang), og en guard der bare fredede feltet ville omvendt stoppe beskrivelses-
+    # opdateringer fra overhovedet at nå frem. Split i stedet: description er 100% synkens,
+    # notes er 100% Valdemars. Hold Course viser description read-only over notefeltet.
     beskrivelse = plan.get("beskrivelse", "")
     beskrivelse = "" if beskrivelse == "false" else beskrivelse
-    notes_owned = "vswNotes" not in lec or lec.get("notes", "") in ("", lec["vswNotes"])
-    if beskrivelse and notes_owned:
-        lec["notes"] = beskrivelse
-        lec["vswNotes"] = beskrivelse
+    if beskrivelse:
+        lec["description"] = beskrivelse
+        lec["vswDescription"] = beskrivelse
     # Hold Courses "Lecture note" er Valdemars egen note for lektionen, ikke maskinens lektionsplan
     # — derfor [NOTE]-stubben, som selv linker videre til [PLAN] via sit kilde:-felt. Ét klik til
     # planen, i stedet for at bruge feltet på en note han ikke selv skriver i.
@@ -496,6 +504,34 @@ def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
     # overskriver ikke hans valg — det gør bare at pluginet kan slå stien op (se nfc()).
     lec["vaultLink"] = nfc(lec["vaultLink"])
     return lec
+
+
+def migrate_notes_to_description(data: dict) -> int:
+    """Engangs-migrering til #172: flyt undervisernes beskrivelse fra lec.notes over i
+    lec.description, så notes bliver rent Valdemars (file-is-truth, hold-course#5b).
+
+    vswNotes-stemplet er facit for hvem der skrev teksten: står notes uændret som synken sidst
+    skrev den, er det undervisernes tekst og den flyttes. Afviger den — også hvis feltet er tomt,
+    fordi han bevidst har ryddet det — er indholdet hans, og feltet står urørt (hold-course#5b
+    migrerer det ind i notefilen ved første redigering). Stemplet fjernes i begge tilfælde:
+    synken skriver aldrig notes igen, så et vswNotes ville kun være en løgn i data.json.
+
+    Idempotent: efter første kørsel har ingen lecture et vswNotes at migrere. Returnerer antal
+    flyttede.
+    """
+    moved = 0
+    for sem in data.get("semesters", []):
+        for cls in sem.get("classes", []):
+            for lec in cls.get("lectures", []):
+                if "vswNotes" not in lec:
+                    continue
+                stamp = lec.pop("vswNotes")
+                if lec.get("notes", "") == stamp:
+                    lec["description"] = stamp
+                    lec["vswDescription"] = stamp
+                    lec["notes"] = ""
+                    moved += 1
+    return moved
 
 
 def stable_key(vault_path: str) -> str:
@@ -619,6 +655,9 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     data.setdefault("semesters", [])
     data.setdefault("dataVersion", 2)
     tasks = tasks or []
+    # Kører før alt andet og uafhængigt af om der er planer denne gang: en lektion der er faldet
+    # ud af itslearning skal også have sit gamle vswNotes ryddet (#172).
+    migrate_notes_to_description(data)
     if not plans and not tasks:
         return data
 
@@ -1442,18 +1481,45 @@ def selfcheck() -> int:
     assert len(lectures9) == 1, lectures9   # forrige semesters lektion sprunget over, ikke tilføjet
     assert lectures9[0]["vswPlanId"] == plan["plan_id"], lectures9
 
-    # Key Concepts & Lesson Goal (lec.notes): udfyldes fra beskrivelse:, men Valdemars egen
-    # rettelse i Hold Course overlever en resync, ligesom vaultLink.
+    # #172: beskrivelse: lander i lec.description (synkens), aldrig i lec.notes (Valdemars).
     plan_b = dict(plan, beskrivelse="I dag arbejder vi med resonansbegrebet.")
     ids7 = iter(f"g{n}" for n in range(100))
     data7 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [plan_b], lambda: next(ids7))
     lec7 = data7["semesters"][0]["classes"][0]["lectures"][0]
-    assert lec7["notes"] == "I dag arbejder vi med resonansbegrebet.", lec7
-    lec7["notes"] = "Mine egne stikord til timen"  # Valdemar retter i Hold Course
+    assert lec7["description"] == "I dag arbejder vi med resonansbegrebet.", lec7
+    assert lec7["notes"] == "", lec7
+    assert "vswNotes" not in lec7, lec7
+
+    # Valdemars egne noter og undervisernes opdatering lever side om side: hverken clobber den
+    # anden. Det var netop det lec.notes ikke kunne, da de delte felt.
+    lec7["notes"] = "Mine egne stikord til timen"
     plan_b2 = dict(plan_b, beskrivelse="Underviseren har opdateret beskrivelsen.")
     data7 = sync_data(data7, [plan_b2], lambda: "MÅ-IKKE-BRUGES")
     lec7 = data7["semesters"][0]["classes"][0]["lectures"][0]
-    assert lec7["notes"] == "Mine egne stikord til timen", lec7  # ikke overskrevet
+    assert lec7["notes"] == "Mine egne stikord til timen", lec7
+    assert lec7["description"] == "Underviseren har opdateret beskrivelsen.", lec7
+
+    # Et bevidst tømt notes-felt (hold-course#5b flytter noten ud i en fil og rydder feltet)
+    # refyldes ALDRIG — bug'en der udløste #172.
+    lec7["notes"] = ""
+    data7 = sync_data(data7, [plan_b2], lambda: "MÅ-IKKE-BRUGES")
+    assert data7["semesters"][0]["classes"][0]["lectures"][0]["notes"] == "", data7
+
+    # Engangs-migrering: uredigeret notes (== vswNotes) flyttes til description og ryddes;
+    # redigeret notes bliver stående; stemplet forsvinder i begge tilfælde. Kører også på en
+    # lektion der er faldet ud af itslearning (ikke i plan-sættet).
+    gammel = {"semesters": [{"id": "s", "classes": [{"id": "c", "lectures": [
+        {"id": "l1", "notes": "Undervisernes tekst", "vswNotes": "Undervisernes tekst"},
+        {"id": "l2", "notes": "Mine egne noter", "vswNotes": "Undervisernes tekst"},
+        {"id": "l3", "notes": "", "vswNotes": "Undervisernes tekst"},
+    ]}]}]}
+    assert migrate_notes_to_description(gammel) == 1, gammel
+    l1, l2, l3 = gammel["semesters"][0]["classes"][0]["lectures"]
+    assert l1["notes"] == "" and l1["description"] == "Undervisernes tekst", l1
+    assert l2["notes"] == "Mine egne noter" and "description" not in l2, l2
+    assert l3["notes"] == "", l3  # bevidst tømt: ikke migreret, ikke refyldt
+    assert not any("vswNotes" in lec for lec in gammel["semesters"][0]["classes"][0]["lectures"]), gammel
+    assert migrate_notes_to_description(gammel) == 0, gammel  # idempotent
 
     # LivsOplysning-scenariet (live 2026-08-27): intet udfyldt litteratur-felt, men vedhæftede
     # fil-elementer i materiale_filer. Skal STADIG give en Reading-opgave, ikke ingenting.
