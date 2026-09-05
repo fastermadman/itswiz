@@ -26,6 +26,32 @@ og hvad macOS/Syncthing faktisk skriver til disk fik `background.js`s egen flytt
 (`moveDirInVault`) til fejlagtigt at tro en flytning allerede var sket — oprydningen bagefter blev
 lavet via Local REST API's `MOVE`, netop for at wikilinks fulgte med.
 
+## Genstart driftsprocesser efter kodeændringer i sync/extension-laget
+
+`watchfolder/watch_viastudywiz.py` (launchd-job `com.valdemar.viastudywiz-watchfolder`) importerer
+`sync_hold_course` som modul ved opstart og holder den i hukommelsen — en `git pull`/commit til
+`sync_hold_course.py` eller `background.js` ændrer INTET i den kørende proces, før den genstartes:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.valdemar.viastudywiz-watchfolder
+```
+
+Samme problem gælder Obsidians Hold Course-plugin (`main.js`, symlinket fra `obsidian-hold-course`):
+Obsidian genindlæser ikke plugin-kode af sig selv efter en ekstern filændring. Er Local REST API sat
+op og porten kendt (se `~/ViaVault/.obsidian/plugins/obsidian-local-rest-api/data.json`), kan en
+reload trigges uden at forlade appen:
+
+```python
+import sys; sys.path.insert(0, "watchfolder")
+from pathlib import Path
+import sync_hold_course as m
+m.trigger_obsidian_reload(Path.home() / "ViaVault")
+```
+
+Fejler den stille (forkert port/nøgle, Obsidian ikke åben), er en manuel Cmd+R i Obsidian reserven.
+Glemmes begge dele, ser man ændringer der "ikke virker" selvom koden er korrekt — bekræftet live
+2026-09-05/06 to gange i træk under #176/#177/#179-arbejdet.
+
 ## graphify-rs
 
 This project has a graphify-rs knowledge graph at /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/.
