@@ -25,3 +25,12 @@ sti. Live-bekræftet 2026-08-28 (issue #131): en NFC/NFD-mismatch mellem extensi
 og hvad macOS/Syncthing faktisk skriver til disk fik `background.js`s egen flytte-logik
 (`moveDirInVault`) til fejlagtigt at tro en flytning allerede var sket — oprydningen bagefter blev
 lavet via Local REST API's `MOVE`, netop for at wikilinks fulgte med.
+
+## graphify-rs
+
+This project has a graphify-rs knowledge graph at /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/.
+
+Rules:
+- Before answering architecture or codebase questions, read /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/GRAPH_REPORT.md for god nodes and community structure
+- If /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify-rs build --path . --output /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)
