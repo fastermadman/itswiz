@@ -346,17 +346,29 @@ async function collectRangeInPage(startUnix, endUnix) {
   const events = await fetchMyEvents(courseIds, startUnix, endUnix);
   const tasks = await fetchTasks(courses);
 
+  // Lokale/underviser kommer kun fra kalenderevent'ets fritekstbeskrivelse (issue #118/#124),
+  // ikke fra selve Planner-planen — samme parsedDescription som allerede bruges til Google
+  // Calendar-eventets location. Ét event kan i teorien dække flere planId'er; det først sete
+  // event med en udfyldt værdi vinder, resten overskriver ikke (planLocation[key] allerede sat).
   const planKeys = new Set();
+  const planLocation = {};
   for (const event of events) {
+    const parsed = parseDescription(event.apiDescriptionPlainText ?? "");
     for (const planId of event.PlanIds ?? []) {
-      planKeys.add(`${event.courseId}:${planId}`);
+      const key = `${event.courseId}:${planId}`;
+      planKeys.add(key);
+      if (!planLocation[key] && (parsed.room || parsed.teacher)) {
+        planLocation[key] = { room: parsed.room ?? "", teacher: parsed.teacher ?? "" };
+      }
     }
   }
 
   const plans = {};
   for (const key of planKeys) {
     const [courseId, planId] = key.split(":");
-    plans[key] = await fetchPlan(courseId, planId);
+    const plan = await fetchPlan(courseId, planId);
+    if (plan && planLocation[key]) Object.assign(plan, planLocation[key]);
+    plans[key] = plan;
   }
 
   // Forældreløse planer (issue #92): findes i Planner, men uden noget linket kalender-event —
@@ -1376,6 +1388,12 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       // for hvorfor plan.start/stop er den pålidelige kilde.
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
       `stop: "${toGoogleDateTime(plan.stop ?? "").replace("T", " ")}"`,
+      // Kun til stede når kalenderevent'ets beskrivelse rent faktisk havde feltet (issue #118/
+      // #124) — sync_hold_course.py skriver dem videre til Hold Course KUN når de afviger fra
+      // klassens standard, så en manglende linje her er ikke tabt information, bare "ingen
+      // afvigelse at rapportere".
+      ...(plan.room ? [`lokale: "${plan.room}"`] : []),
+      ...(plan.teacher ? [`underviser: "${plan.teacher}"`] : []),
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
       // Samme stabile id som weekFolder-flytningen (issue #96) sporer på — synligt her frem for
