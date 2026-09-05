@@ -189,25 +189,6 @@ def append_file_list_field(text: str, key: str, prefix: str, new_links: list[str
     return text
 
 
-def replace_file_list_field(text: str, key: str, prefix: str, links: list[str]) -> str:
-    """Erstatter et frontmatter-blokfelts INDHOLD med `links` (modsat append_file_list_field, der
-    kun tilføjer). Tom liste giver `key: false`. Rører teksten slet ikke hvis feltet ikke findes."""
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if line == f"{key}: false":
-            if not links:
-                return text
-            block = [f"{key}: |"] + [f"  {prefix} {link}" for link in links]
-            return "\n".join(lines[:i] + block + lines[i + 1:])
-        if line.strip() == f"{key}: |":
-            j = i + 1
-            while j < len(lines) and lines[j].startswith("  "):
-                j += 1
-            block = [f"{key}: |"] + [f"  {prefix} {link}" for link in links] if links else [f"{key}: false"]
-            return "\n".join(lines[:i] + block + lines[j:])
-    return text
-
-
 def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     """Selvhelbredende pas (issue #141): background.js skriver `materiale_filer: false` når en
     fil ikke er MinerU-konverteret endnu på skrivetidspunktet — og den genskriver kun planer der
@@ -229,102 +210,49 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     og _*-filer filtreres fra, og linked-mængden NFC-normaliseres på begge sider (ü/æ/ø/å i
     mappenavne gav ellers NFD/NFC-mismatch og monotont voksende selvreferencer — issue #158).
 
-    "Linket" er en ENHEDS-bred (mappe-bred) egenskab, ikke en pr.-note egenskab (rettet #176: en
-    fil linket i én lektions materiale_filer/litteratur_filer talte tidligere kun som "ikke-orphan"
-    for DEN note — hver søskende-lektion i samme enhed så den stadig som sin egen orphan og linkede
-    den ind separat, så alle lektioner i enheden endte med at dele HELE mappens filliste (live i
-    LivsOplysning "Skolens formål": 4 lektioner, samme 17 filer på hver, efter enhed-migreringen).
-    Den kronologisk første [PLAN]-note i mappen (filnavn starter med dato) claimer en ny orphan;
-    resten ser den som allerede taget, samme "first-touch"-regel en fremtidig fil vil følge næste
-    kørsel."""
+    BEVIDST pr.-note, ikke enheds-bred (#176 forsøgte "kronologisk første lektion ejer filen,
+    resten arver intet" — reverteret samme dag, live-bekræftet skadeligt: filernes eget `dato:`-
+    felt stemmer IKKE overens med filnavnets dato-suffiks, fordi lektioner flyttes i itslearning
+    (#96) uden at materiale-noternes snapshot-dato følger med. Der er ingen pålidelig signal i
+    vaulten til at afgøre hvilken lektion en delt fil reelt hører til — kun itslearnings egen
+    `plan.elements` pr. planId (background.js) ved det med sikkerhed. At gætte en eksklusiv ejer
+    her viste sig som "ingenting under mandagens lektion" i Hold Course, selvom læsestoffet
+    stadig lå i vaulten. Konsekvensen af pr.-note (hver søskende-lektion ser samme fil som sin
+    egen orphan) er For mange Reading-opgaver i Hold Course — kedeligt, men aldrig tab af adgang
+    til materiale. Se #183 for den rigtige løsning (dedupér i Hold Course-visningen, eller lad
+    background.js's egen plan.elements afgøre ejerskabet, ikke en mappe-baseret gæt her)."""
     patched = []
-    by_folder: dict[Path, list] = {}
     for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         text = plan_path.read_text(encoding="utf-8")
         fields = parse_frontmatter(text)
         if fields.get("type") != "lektionsplan":
             continue
-        by_folder.setdefault(plan_path.parent, []).append((plan_path, text, fields))
 
-    for folder, entries in by_folder.items():
-        entries.sort(key=lambda e: e[0].name)  # "[PLAN] YYYY-MM-DD - ..." sorterer kronologisk
-
-        claimed = {
+        linked = {
             nfc(t)
-            for _, _, fields in entries
             for key, pfx in (("materiale_filer", MATERIALE_FIL_PREFIX), ("litteratur_filer", LITTERATUR_FIL_PREFIX))
             for l in prefixed_lines(fields.get(key, ""), pfx)
             if (t := wikilink_target(l))
         }
 
-        for plan_path, text, fields in entries:
-            own_linked = {
-                nfc(t)
-                for key, pfx in (("materiale_filer", MATERIALE_FIL_PREFIX), ("litteratur_filer", LITTERATUR_FIL_PREFIX))
-                for l in prefixed_lines(fields.get(key, ""), pfx)
-                if (t := wikilink_target(l))
-            }
-            orphans = [
-                nfc(str(md.relative_to(vault_root)))
-                for md in sorted(folder.glob("*.md"))
-                if nfc(md.name) != nfc(plan_path.name)
-                and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
-            ]
-            orphans = [o for o in orphans if o not in own_linked and o not in claimed]
-            if not orphans:
-                continue
-            claimed.update(orphans)
-
-            updated = append_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
-                                              [wikilink_for(o) for o in orphans])
-            if updated == text:
-                continue
-            patched.append(str(plan_path.relative_to(vault_root)))
-            if apply:
-                plan_path.write_text(updated, encoding="utf-8")
-    return patched
-
-
-def dedupe_shared_materiale(vault_root: Path, apply: bool) -> list[str]:
-    """Engangs-oprydning til #176: fjerner de krydslinks patch_pending_materiale's gamle
-    pr.-note (fremfor enheds-brede) orphan-tjek allerede har skrevet ind i eksisterende noter,
-    før rettelsen ovenfor. Rører KUN materiale_filer — litteratur_filer er itslearning-matchet
-    (background.js) og aldrig denne funktions ejendom.
-
-    Samme "kronologisk første ejer"-regel som den rettede patch_pending_materiale: for hver fil
-    der optræder i mere end én søskende-notes materiale_filer i samme enheds-mappe, beholdes den
-    kun i den først-daterede note ([PLAN] YYYY-MM-DD - ... sorterer kronologisk på filnavn).
-    Idempotent — ingen filer at fjerne efter første kørsel."""
-    dedup = []
-    by_folder: dict[Path, list] = {}
-    for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
-        text = plan_path.read_text(encoding="utf-8")
-        fields = parse_frontmatter(text)
-        if fields.get("type") != "lektionsplan":
+        orphans = [
+            nfc(str(md.relative_to(vault_root)))
+            for md in sorted(plan_path.parent.glob("*.md"))
+            if nfc(md.name) != nfc(plan_path.name)
+            and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
+        ]
+        orphans = [o for o in orphans if o not in linked]
+        if not orphans:
             continue
-        by_folder.setdefault(plan_path.parent, []).append((plan_path, text, fields))
 
-    for folder, entries in by_folder.items():
-        entries.sort(key=lambda e: e[0].name)
-        owned: set[str] = set()
-        for plan_path, text, fields in entries:
-            own = [
-                (l, t) for l in prefixed_lines(fields.get("materiale_filer", ""), MATERIALE_FIL_PREFIX)
-                if (t := wikilink_target(l))
-            ]
-            keep_targets = [t for _, t in own if nfc(t) not in owned]
-            if len(keep_targets) == len(own):
-                owned.update(nfc(t) for t in keep_targets)
-                continue
-            updated = replace_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
-                                               [wikilink_for(t) for t in keep_targets])
-            owned.update(nfc(t) for t in keep_targets)
-            if updated == text:
-                continue
-            dedup.append(str(plan_path.relative_to(vault_root)))
-            if apply:
-                plan_path.write_text(updated, encoding="utf-8")
-    return dedup
+        updated = append_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
+                                          [wikilink_for(o) for o in orphans])
+        if updated == text:
+            continue
+        patched.append(str(plan_path.relative_to(vault_root)))
+        if apply:
+            plan_path.write_text(updated, encoding="utf-8")
+    return patched
 
 
 def read_tasks(vault_root: Path) -> list[dict]:
@@ -1161,13 +1089,6 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         label = "Rettet" if apply else "Ville rette (dry-run)"
         print(f"{label}: {len(patched)} lektionsplan-note(r) fik nye materiale_filer-links (issue #141):")
         for rel in patched:
-            print(f"  {rel}")
-
-    deduped = dedupe_shared_materiale(vault_root, apply)
-    if deduped and not quiet:
-        label = "Ryddet op i" if apply else "Ville rydde op i (dry-run)"
-        print(f"{label}: {len(deduped)} lektionsplan-note(r) mistede krydslinket materiale (issue #176):")
-        for rel in deduped:
             print(f"  {rel}")
 
     plans, uden_plan_id = read_plans(vault_root)
