@@ -841,7 +841,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         for titel in prefixed_lines(plan.get("forberedelse", ""), FORBEREDELSE_PREFIX):
             # Forberedelses-afkrydsningerne står i [NOTE]-stubben (issue #59), så det er dér
             # opgaven skal føre hen.
-            ensure_assignment(lec, f'{akey}|forb|{titel}', titel, "Other", due, "", new_id,
+            ensure_assignment(lec, f'{akey}|forb|{titel}', titel, "Preparation", due, "", new_id,
                               linked_note=stub)
 
         # Alt vedhæftet fil-materiale UDEN et litteratur-felt-match (background.js udelukker selv
@@ -1364,7 +1364,7 @@ def selfcheck() -> int:
          "assignments": [
              {"type": "Reading", "title": "Frede V Nielsen", "dueDate": "2026-09-01",
               "status": "not-started", "linkedNote": "§ FAG/♪ Musik/MD/Musikforståelse/Frede V Nielsen.md"},
-             {"type": "Other", "title": "Forberedelse", "dueDate": "2026-09-01", "status": "done",
+             {"type": "Preparation", "title": "Forberedelse", "dueDate": "2026-09-01", "status": "done",
               "linkedNote": "§ FAG/♪ Musik/NOTER/2026-09-01/[NOTE] 2026-09-01.md"}]},
         {"date": "2026-08-25", "title": "Intro", "status": "done", "vaultLink": "", "assignments": []},
     ], "assignments": [
@@ -1428,7 +1428,7 @@ def selfcheck() -> int:
     # Reading-opgaven fører til selve materiale-noten, forberedelse til Valdemars stub.
     assert reading["linkedNote"] == sem["resources"][0]["vaultLink"], reading
     assert sem["resources"][0]["classIds"] == [cls["id"]], sem["resources"]
-    forb = next(a for a in lec["assignments"] if a["type"] == "Other")
+    forb = next(a for a in lec["assignments"] if a["type"] == "Preparation")
     assert forb["linkedNote"] == lec["vaultLink"], forb
     assert forb["title"] == "Forberedelse", forb
 
