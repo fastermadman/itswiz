@@ -189,6 +189,25 @@ def append_file_list_field(text: str, key: str, prefix: str, new_links: list[str
     return text
 
 
+def replace_file_list_field(text: str, key: str, prefix: str, links: list[str]) -> str:
+    """Erstatter et frontmatter-blokfelts INDHOLD med `links` (modsat append_file_list_field, der
+    kun tilføjer). Tom liste giver `key: false`. Rører teksten slet ikke hvis feltet ikke findes."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line == f"{key}: false":
+            if not links:
+                return text
+            block = [f"{key}: |"] + [f"  {prefix} {link}" for link in links]
+            return "\n".join(lines[:i] + block + lines[i + 1:])
+        if line.strip() == f"{key}: |":
+            j = i + 1
+            while j < len(lines) and lines[j].startswith("  "):
+                j += 1
+            block = [f"{key}: |"] + [f"  {prefix} {link}" for link in links] if links else [f"{key}: false"]
+            return "\n".join(lines[:i] + block + lines[j:])
+    return text
+
+
 def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     """Selvhelbredende pas (issue #141): background.js skriver `materiale_filer: false` når en
     fil ikke er MinerU-konverteret endnu på skrivetidspunktet — og den genskriver kun planer der
@@ -208,39 +227,104 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     Efter enhed-migreringen (#150/#155) ligger ALLE en enheds [PLAN]-noter + _forløb.md i samme
     MD/<enhed>/-mappe. Kun ægte materiale tælles som "manglende link": søskende-[PLAN]/[NOTE]-noter
     og _*-filer filtreres fra, og linked-mængden NFC-normaliseres på begge sider (ü/æ/ø/å i
-    mappenavne gav ellers NFD/NFC-mismatch og monotont voksende selvreferencer — issue #158)."""
+    mappenavne gav ellers NFD/NFC-mismatch og monotont voksende selvreferencer — issue #158).
+
+    "Linket" er en ENHEDS-bred (mappe-bred) egenskab, ikke en pr.-note egenskab (rettet #176: en
+    fil linket i én lektions materiale_filer/litteratur_filer talte tidligere kun som "ikke-orphan"
+    for DEN note — hver søskende-lektion i samme enhed så den stadig som sin egen orphan og linkede
+    den ind separat, så alle lektioner i enheden endte med at dele HELE mappens filliste (live i
+    LivsOplysning "Skolens formål": 4 lektioner, samme 17 filer på hver, efter enhed-migreringen).
+    Den kronologisk første [PLAN]-note i mappen (filnavn starter med dato) claimer en ny orphan;
+    resten ser den som allerede taget, samme "first-touch"-regel en fremtidig fil vil følge næste
+    kørsel."""
     patched = []
+    by_folder: dict[Path, list] = {}
     for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         text = plan_path.read_text(encoding="utf-8")
         fields = parse_frontmatter(text)
         if fields.get("type") != "lektionsplan":
             continue
+        by_folder.setdefault(plan_path.parent, []).append((plan_path, text, fields))
 
-        linked = {
+    for folder, entries in by_folder.items():
+        entries.sort(key=lambda e: e[0].name)  # "[PLAN] YYYY-MM-DD - ..." sorterer kronologisk
+
+        claimed = {
             nfc(t)
+            for _, _, fields in entries
             for key, pfx in (("materiale_filer", MATERIALE_FIL_PREFIX), ("litteratur_filer", LITTERATUR_FIL_PREFIX))
             for l in prefixed_lines(fields.get(key, ""), pfx)
             if (t := wikilink_target(l))
         }
 
-        orphans = [
-            nfc(str(md.relative_to(vault_root)))
-            for md in sorted(plan_path.parent.glob("*.md"))
-            if nfc(md.name) != nfc(plan_path.name)
-            and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
-        ]
-        orphans = [o for o in orphans if o not in linked]
-        if not orphans:
-            continue
+        for plan_path, text, fields in entries:
+            own_linked = {
+                nfc(t)
+                for key, pfx in (("materiale_filer", MATERIALE_FIL_PREFIX), ("litteratur_filer", LITTERATUR_FIL_PREFIX))
+                for l in prefixed_lines(fields.get(key, ""), pfx)
+                if (t := wikilink_target(l))
+            }
+            orphans = [
+                nfc(str(md.relative_to(vault_root)))
+                for md in sorted(folder.glob("*.md"))
+                if nfc(md.name) != nfc(plan_path.name)
+                and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
+            ]
+            orphans = [o for o in orphans if o not in own_linked and o not in claimed]
+            if not orphans:
+                continue
+            claimed.update(orphans)
 
-        updated = append_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
-                                          [wikilink_for(o) for o in orphans])
-        if updated == text:
-            continue
-        patched.append(str(plan_path.relative_to(vault_root)))
-        if apply:
-            plan_path.write_text(updated, encoding="utf-8")
+            updated = append_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
+                                              [wikilink_for(o) for o in orphans])
+            if updated == text:
+                continue
+            patched.append(str(plan_path.relative_to(vault_root)))
+            if apply:
+                plan_path.write_text(updated, encoding="utf-8")
     return patched
+
+
+def dedupe_shared_materiale(vault_root: Path, apply: bool) -> list[str]:
+    """Engangs-oprydning til #176: fjerner de krydslinks patch_pending_materiale's gamle
+    pr.-note (fremfor enheds-brede) orphan-tjek allerede har skrevet ind i eksisterende noter,
+    før rettelsen ovenfor. Rører KUN materiale_filer — litteratur_filer er itslearning-matchet
+    (background.js) og aldrig denne funktions ejendom.
+
+    Samme "kronologisk første ejer"-regel som den rettede patch_pending_materiale: for hver fil
+    der optræder i mere end én søskende-notes materiale_filer i samme enheds-mappe, beholdes den
+    kun i den først-daterede note ([PLAN] YYYY-MM-DD - ... sorterer kronologisk på filnavn).
+    Idempotent — ingen filer at fjerne efter første kørsel."""
+    dedup = []
+    by_folder: dict[Path, list] = {}
+    for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
+        text = plan_path.read_text(encoding="utf-8")
+        fields = parse_frontmatter(text)
+        if fields.get("type") != "lektionsplan":
+            continue
+        by_folder.setdefault(plan_path.parent, []).append((plan_path, text, fields))
+
+    for folder, entries in by_folder.items():
+        entries.sort(key=lambda e: e[0].name)
+        owned: set[str] = set()
+        for plan_path, text, fields in entries:
+            own = [
+                (l, t) for l in prefixed_lines(fields.get("materiale_filer", ""), MATERIALE_FIL_PREFIX)
+                if (t := wikilink_target(l))
+            ]
+            keep_targets = [t for _, t in own if nfc(t) not in owned]
+            if len(keep_targets) == len(own):
+                owned.update(nfc(t) for t in keep_targets)
+                continue
+            updated = replace_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
+                                               [wikilink_for(t) for t in keep_targets])
+            owned.update(nfc(t) for t in keep_targets)
+            if updated == text:
+                continue
+            dedup.append(str(plan_path.relative_to(vault_root)))
+            if apply:
+                plan_path.write_text(updated, encoding="utf-8")
+    return dedup
 
 
 def read_tasks(vault_root: Path) -> list[dict]:
@@ -455,6 +539,26 @@ def ensure_class(sem: dict, fag: str, new_id, course_id: str = "") -> dict:
     return cls
 
 
+def hhmm(datetime_str: str) -> str:
+    """"2026-08-17 10:00:00" -> "10:00". Tom streng ved kortere/manglende input (fx `plan.stop`
+    på en forældreløs plan uden stop-felt) — aldrig et gæt."""
+    return datetime_str[11:16] if len(datetime_str) >= 16 else ""
+
+
+def _set_deviation_field(lec: dict, field: str, cls_default: str, itslearning_value: str) -> None:
+    """Sætter lec[field] når itslearning-værdien afviger fra klassens standard, ellers "" (arv).
+    Kun når feltet stadig er synk-ejet (uændret siden sidste synk-skrivning, samme vsw<Felt>
+    stempel-mønster som vswVaultLink) — har Valdemar selv redigeret det i Hold Course, er
+    værdien hans, og synken rører den aldrig igen, heller ikke for at "rydde op til arv"."""
+    stamp = f"vsw{field[0].upper()}{field[1:]}"
+    sync_owned = stamp not in lec or lec.get(field, "") == lec.get(stamp, "")
+    if not sync_owned:
+        return
+    target = itslearning_value if itslearning_value and itslearning_value != cls_default else ""
+    lec[field] = target
+    lec[stamp] = target
+
+
 def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
     """Nøglen er plan_id og kun plan_id (issue #96) — stabilt også når itslearning flytter en
     eksisterende lektion i stedet for at oprette en ny.
@@ -470,11 +574,23 @@ def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
     if lec is None:
         lec = {"id": new_id(), "title": "", "date": "", "status": "not-started",
                "notes": "", "description": "", "vaultLink": "", "assignments": [],
+               "meetingStartTime": "", "meetingEndTime": "", "location": "", "professorName": "",
                "vswPlanId": plan["plan_id"]}
         cls["lectures"].append(lec)
     # Synkens felter. status er udelukkende Valdemars og røres aldrig.
     lec["title"] = plan.get("emne") or plan.get("uge") or "Lektion"
     lec["date"] = (plan.get("start") or "")[:10]
+
+    # Tid/lokale/underviser pr. lektion (issue #118/#124, hold-course#41): et tomt felt betyder
+    # "arv fra klassens standard", IKKE "intet sat" (aftalt med Hold Course-siden) — så disse
+    # felter skal kun udfyldes når itslearning rent faktisk AFVIGER fra klassens standardværdi.
+    # Samme sync-owned-stempel-mønster som vswVaultLink/vswDescription ovenfor: konvergerer
+    # tilbage til "" hvis afvigelsen forsvinder igen (fx en rettet plan), men rører aldrig et
+    # felt Valdemar selv har redigeret i Hold Course.
+    _set_deviation_field(lec, "meetingStartTime", cls.get("meetingStartTime", ""), hhmm(plan.get("start", "")))
+    _set_deviation_field(lec, "meetingEndTime", cls.get("meetingEndTime", ""), hhmm(plan.get("stop", "")))
+    _set_deviation_field(lec, "location", cls.get("location", ""), plan.get("lokale", ""))
+    _set_deviation_field(lec, "professorName", cls.get("professorName", ""), plan.get("underviser", ""))
 
     # Undervisernes beskrivelse: har sit EGET felt (issue #172, counterpart til
     # hold-course#5b). Den stod før i lec.notes under et vswNotes-stempel, side om side med
@@ -1023,6 +1139,13 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         label = "Rettet" if apply else "Ville rette (dry-run)"
         print(f"{label}: {len(patched)} lektionsplan-note(r) fik nye materiale_filer-links (issue #141):")
         for rel in patched:
+            print(f"  {rel}")
+
+    deduped = dedupe_shared_materiale(vault_root, apply)
+    if deduped and not quiet:
+        label = "Ryddet op i" if apply else "Ville rydde op i (dry-run)"
+        print(f"{label}: {len(deduped)} lektionsplan-note(r) mistede krydslinket materiale (issue #176):")
+        for rel in deduped:
             print(f"  {rel}")
 
     plans, uden_plan_id = read_plans(vault_root)
@@ -1617,6 +1740,36 @@ def selfcheck() -> int:
     lec6 = data6["semesters"][0]["classes"][0]["lectures"][0]
     titles6 = sorted(a["title"] for a in lec6["assignments"] if a["type"] == "Reading")
     assert titles6 == ["Ekstra", "Frede V Nielsen Ars og Scientia"], titles6
+
+    # issue #118/#124/hold-course#41: tid/lokale/underviser er kun sat på lektionen når det
+    # AFVIGER fra klassens standard — hhmm() slår "10:00" ud af det fulde datetime-felt.
+    assert hhmm("2026-08-17 10:00:00") == "10:00"
+    assert hhmm("") == "" and hhmm("2026-08-17") == ""
+
+    afvig = dict(plan, plan_id="9:11", lokale="B204", underviser="Klaus Glüsing",
+                 _path="§ FAG/♪ Musik/MD/x/[PLAN] x.md")
+    ids7 = iter(f"g{n}" for n in range(100))
+    data7 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [afvig], lambda: next(ids7))
+    cls7 = data7["semesters"][0]["classes"][0]
+    lec7 = cls7["lectures"][0]
+    # Klassens standard er tom -> alt fra itslearning tæller som afvigelse og skrives ind.
+    assert lec7["meetingStartTime"] == "12:25" and lec7["meetingEndTime"] == "15:45", lec7
+    assert lec7["location"] == "B204" and lec7["professorName"] == "Klaus Glüsing", lec7
+
+    # Sætter klassens standard til PRÆCIS samme værdier -> næste synk rydder lektionens
+    # eksplicitte felter (ingen reel afvigelse tilbage, skal arve igen).
+    cls7["meetingStartTime"], cls7["meetingEndTime"] = "12:25", "15:45"
+    cls7["location"], cls7["professorName"] = "B204", "Klaus Glüsing"
+    data7b = sync_data(data7, [afvig], lambda: "MÅ-IKKE-BRUGES")
+    lec7b = data7b["semesters"][0]["classes"][0]["lectures"][0]
+    assert lec7b["meetingStartTime"] == "" and lec7b["meetingEndTime"] == "", lec7b
+    assert lec7b["location"] == "" and lec7b["professorName"] == "", lec7b
+
+    # Valdemar retter selv lec.location i Hold Course (stemplet matcher ikke længere) -> synken
+    # rører den aldrig igen, heller ikke når itslearning senere afviger fra klassen igen.
+    lec7b["location"] = "Valdemars eget valg"
+    data7c = sync_data(data7b, [afvig], lambda: "MÅ-IKKE-BRUGES")
+    assert data7c["semesters"][0]["classes"][0]["lectures"][0]["location"] == "Valdemars eget valg"
 
     # Findes stubben ikke, falder vi tilbage til selve planen
     # Findes stubben ikke, falder vi tilbage til selve planen frem for et dødt link.
