@@ -821,6 +821,16 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         akey = lec["id"]
         stub = lec.get("vswVaultLink") or lec["vaultLink"]
 
+        # #176-følgeskade: en fil krydslinket ind af den (nu rettede) enheds-bug ovenfor gav en
+        # Reading-opgave der aldrig forsvandt igen, selv efter frontmatter blev renset — ensure_
+        # assignment opretter/opdaterer kun, den sletter aldrig en opgave hvis kilden bag den
+        # forsvinder. `valid_file_keys` er de |lit|/|mat|-nøgler DENNE plan rent faktisk giver
+        # lektionen i DENNE kørsel; alt andet med samme præfiks var en tidligere kørsels fejl
+        # eller en fil der reelt er fjernet fra planen, og ryddes nedenfor. Forberedelse (|forb|)
+        # og Valdemars egne opgaver (intet vswKey) er IKKE en del af dette — kun sync-ejede
+        # materiale-opgaver, samme afgrænsning som synken selv skriver i modulets docstring.
+        valid_file_keys = set()
+
         lit_files = prefixed_lines(plan.get("litteratur_filer", ""), LITTERATUR_FIL_PREFIX)
         targets = [nfc(t) for t in (wikilink_target(line) for line in lit_files) if t]
         if targets:
@@ -828,15 +838,19 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
                 res = ensure_resource(sem, cls, target, new_id)
                 # linkedNote peger på selve materiale-noten, så "Open note" virker direkte fra
                 # opgaven uden omvejen om Library.
-                ensure_assignment(lec, f'{akey}|lit|{stable_key(target)}', res["title"], "Reading", due,
+                key = f'{akey}|lit|{stable_key(target)}'
+                ensure_assignment(lec, key, res["title"], "Reading", due,
                                   res["id"], new_id, linked_note=target)
+                valid_file_keys.add(key)
         else:
             # Ren litteratur-tekst uden filmatch: stadig en Reading-opgave, bare uden Library-link —
             # der er ikke noget at linke til (issue #44's konservative matching lader den slags stå).
             lit_text = prefixed_lines(plan.get("litteratur", ""), LITTERATUR_PREFIX)
             if lit_text:
-                ensure_assignment(lec, f'{akey}|lit|', " ".join(lit_text)[:200], "Reading", due,
+                key = f'{akey}|lit|'
+                ensure_assignment(lec, key, " ".join(lit_text)[:200], "Reading", due,
                                   "", new_id, linked_note=stub)
+                valid_file_keys.add(key)
 
         for titel in prefixed_lines(plan.get("forberedelse", ""), FORBEREDELSE_PREFIX):
             # Forberedelses-afkrydsningerne står i [NOTE]-stubben (issue #59), så det er dér
@@ -853,8 +867,16 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
             if not target:
                 continue
             res = ensure_resource(sem, cls, target, new_id)
-            ensure_assignment(lec, f'{akey}|mat|{stable_key(target)}', res["title"], "Reading", due,
+            key = f'{akey}|mat|{stable_key(target)}'
+            ensure_assignment(lec, key, res["title"], "Reading", due,
                               res["id"], new_id, linked_note=target)
+            valid_file_keys.add(key)
+
+        lec["assignments"] = [
+            a for a in lec["assignments"]
+            if not (a.get("vswKey", "").startswith((f'{akey}|lit|', f'{akey}|mat|')))
+            or a["vswKey"] in valid_file_keys
+        ]
 
     # Afleveringsopgaver hænger på faget, ikke på en lektion — derfor klasse-niveau. De vises i
     # Hold Courses Assignments-liste og kalender uden at blive klistret på en tilfældig lektion.
@@ -1740,6 +1762,16 @@ def selfcheck() -> int:
     lec6 = data6["semesters"][0]["classes"][0]["lectures"][0]
     titles6 = sorted(a["title"] for a in lec6["assignments"] if a["type"] == "Reading")
     assert titles6 == ["Ekstra", "Frede V Nielsen Ars og Scientia"], titles6
+
+    # #176-følgeskade: forsvinder en fil fra materiale_filer igen (fx efter en dedupe-oprydning
+    # af en tidligere krydslink-fejl), skal den tilhørende Reading-opgave forsvinde med — ikke
+    # blive stående for evigt, som ensure_assignment alene ville gøre (den opretter/opdaterer,
+    # sletter aldrig selv).
+    data6b = sync_data(json.loads(json.dumps(data6)), [dict(plan, plan_id="9:10", _path=baade["_path"])],
+                       lambda: "MÅ-IKKE-BRUGES")
+    lec6b = data6b["semesters"][0]["classes"][0]["lectures"][0]
+    titles6b = sorted(a["title"] for a in lec6b["assignments"] if a["type"] == "Reading")
+    assert titles6b == ["Frede V Nielsen Ars og Scientia"], titles6b
 
     # issue #118/#124/hold-course#41: tid/lokale/underviser er kun sat på lektionen når det
     # AFVIGER fra klassens standard — hhmm() slår "10:00" ud af det fulde datetime-felt.
