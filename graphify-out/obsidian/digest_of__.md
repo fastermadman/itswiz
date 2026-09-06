@@ -1,0 +1,12 @@
+---
+id: watchfolder_engangsscripts_backfill_footnotes_py_digest_of
+type: Function
+source: ./watchfolder/engangsscripts/backfill_footnotes.py
+community: 10
+community_label: main()
+---
+
+## Connections
+
+- [[backfill_footnotes]] (defines)
+- [[build_raw_index__]] (calls)

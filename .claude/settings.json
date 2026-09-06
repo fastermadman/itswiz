@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "[ -f \"/Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/graph.json\" ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true",
+            "type": "command"
+          }
+        ],
+        "matcher": "Glob|Grep"
+      }
+    ]
+  }
+}

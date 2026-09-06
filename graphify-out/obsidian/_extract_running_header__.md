@@ -1,0 +1,13 @@
+---
+id: watchfolder_watch_viastudywiz_py_extract_running_header
+type: Function
+source: ./watchfolder/watch_viastudywiz.py
+community: 20
+community_label: write_conversion()
+---
+
+## Connections
+
+- [[watch_viastudywiz_0]] (defines)
+- [[write_conversion__]] (calls)
+- [[selfcheck___1]] (calls)

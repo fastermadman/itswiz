@@ -1,0 +1,34 @@
+# migrate_to_raw_md
+
+- **ID:** `watchfolder_engangsscripts_migrate_to_raw_md_py`
+- **Type:** File
+- **File:** `./watchfolder/engangsscripts/migrate_to_raw_md.py`
+- **Community:** 3 (to_wikilinks())
+
+## Relationships
+
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_hashlib (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_re (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_shutil (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_sys (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_pathlib_path (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_attachments_dir_name (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_md_dir_name (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_raw_dir_name (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_vault_root (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_frontmatter (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_md_targets (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_write_duplicate_stub (imports, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_to_wikilinks (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_destination (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_plan_fag (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_fingerprint (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_resolve_duplicates (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_plan_duplicate_stubs (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_source_document (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_add_frontmatter (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_collapse_duplicate (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_find_fag_dirs (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_main (defines, Extracted)
+- watchfolder_engangsscripts_migrate_to_raw_md_py → watchfolder_engangsscripts_migrate_to_raw_md_py_selfcheck (defines, Extracted)
+

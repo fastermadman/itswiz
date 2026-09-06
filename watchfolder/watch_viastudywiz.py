@@ -156,7 +156,9 @@ def _plan_note_for(notes: list[Path], md_name: str) -> Path:
     if md_name and len(notes) > 1:
         for note in notes:
             body = note.read_text(encoding="utf-8")
-            block = re.search(r"^## Materialer\n(.*?)(?=\n## |\n<!-- AUTO:END|\Z)", body, re.S | re.M)
+            # Samme regex som sync_hold_course._owned_targets — formatet er background.js'
+            # AUTO-blok, og to kopier ville kunne drifte fra hinanden.
+            block = sync_hold_course.AUTO_MATERIALER_RE.search(body)
             if block and any(link.rsplit("/", 1)[-1] == md_name
                              for link in re.findall(r"\[\[([^|\]]+)", block.group(1))):
                 return note
