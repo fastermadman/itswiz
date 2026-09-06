@@ -133,6 +133,23 @@ async function copyRecursive(srcDir, destDir) {
 // issue #96) fra oldPath til newPath. FSA har intet atomisk move for mapper — kopierer rekursivt
 // og sletter kilden bagefter. No-op hvis kildemappen (eller en af dens forældre) ikke findes, fx
 // hvis den allerede blev flyttet i en tidligere kørsel.
+//
+// Returnerer { moved, reason }. Efter enhed-migreringen (#150/#155) deler ALLE en enheds
+// lektioner samme MD-mappe, men kalderen kender kun ÉN lektions gamle placering — og fjernelsen
+// nedenfor er `recursive: true`. Skiftede lektion A emne mens søskende B og C ikke gjorde, tog
+// A's flytning derfor B's og C's [PLAN]-noter og det delte materiale med sig; deres records pegede
+// bagefter på en sti der ikke fandtes, og sync_hold_course.py's prune_dead_links fjernede så deres
+// resources/opgaver fra Hold Course. Derfor: en mappe med mere end én [PLAN]-note flyttes ALDRIG
+// automatisk — kalderen rapporterer i stedet, samme rapportér-frem-for-gæt-princip som #96/#173
+// (issue #181).
+async function countPlanNotes(dir) {
+  let n = 0;
+  for await (const name of dir.keys()) {
+    if (name.startsWith("[PLAN] ")) n++;
+  }
+  return n;
+}
+
 async function moveDir(oldPath, newPath) {
   const root = await getVaultHandle();
 
@@ -142,15 +159,19 @@ async function moveDir(oldPath, newPath) {
   try {
     oldParentDir = await getTargetDirectory(root, oldParts, { create: false });
   } catch (err) {
-    if (err.name === "NotFoundError") return;
+    if (err.name === "NotFoundError") return { moved: false, reason: "missing" };
     throw err;
   }
   let oldDir;
   try {
     oldDir = await getDirectoryHandleTolerant(oldParentDir, oldName, { create: false });
   } catch (err) {
-    if (err.name === "NotFoundError") return;
+    if (err.name === "NotFoundError") return { moved: false, reason: "missing" };
     throw err;
+  }
+
+  if ((await countPlanNotes(oldDir)) > 1) {
+    return { moved: false, reason: "shared" };
   }
 
   const newParts = newPath.split("/");
@@ -160,6 +181,7 @@ async function moveDir(oldPath, newPath) {
 
   await copyRecursive(oldDir, newDir);
   await oldParentDir.removeEntry(oldName, { recursive: true });
+  return { moved: true };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -178,7 +200,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === "moveDir") {
     moveDir(message.oldPath, message.newPath)
-      .then(() => sendResponse({ ok: true }))
+      .then((result) => sendResponse({ ok: true, ...result }))
       .catch((err) => sendResponse({ ok: false, error: err.message, code: err.code }));
     return true;
   }

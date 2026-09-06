@@ -128,19 +128,39 @@ def read_frontmatter_field(text: str, key: str) -> str | None:
 # til den fulde plan, har det rigtige tidspunkt (start/stop) oveni emnet. Foretræk den når den
 # findes, fald tilbage til at parse emnet ud af mappenavnet ellers (fx hvis kalender-sync/
 # lektionsplan-noter er slået fra i indstillingerne).
-def enrich_from_plan_note(week_dir: Path) -> dict[str, str]:
+def enrich_from_plan_note(week_dir: Path, md_name: str = "") -> dict[str, str]:
     # glob() ville fortolke "[PLAN]" som en karakterklasse (ét tegn ud af P/L/A/N), ikke en
     # bogstavelig streng — derfor startswith() på et almindeligt "*.md"-glob i stedet.
-    notes = [p for p in week_dir.glob("*.md") if p.name.startswith("[PLAN] ")]
+    notes = sorted(p for p in week_dir.glob("*.md") if p.name.startswith("[PLAN] "))
     if not notes:
         return {}
-    text = notes[0].read_text(encoding="utf-8")
+    text = _plan_note_for(notes, md_name).read_text(encoding="utf-8")
     fields = {}
     for key in ("emne", "uge", "ugedag", "dato", "start", "stop"):
         value = read_frontmatter_field(text, key)
         if value:
             fields[key] = value
     return fields
+
+
+# Efter enhed-migreringen (#150/#155) ligger ALLE en enheds [PLAN]-noter i samme MD-mappe, så
+# "den første note i mappen" er et vilkårligt valg blandt søskende — og det er netop dét der gav
+# materiale-noter et `dato:` fra en anden lektion end den de hører til (mekanismen bag #183's
+# observation om at `dato:` ikke matcher filnavnets dato-suffiks). Det pålidelige signal er
+# background.js' egen plan.elements-liste, som står i AUTO-blokkens "## Materialer" pr. plan:
+# den plan der nævner FILEN er dens ejer. Nævner ingen den (MinerU-konverteringen er asynkron og
+# kan nå frem før background.js har skrevet planen — hele grunden til at #141 findes), falder vi
+# tilbage til den første note, som før. Kun uge/ugedag/dato/start/stop rammes af valget; `emne`
+# er enhedens navn og dermed ens for alle søskende.
+def _plan_note_for(notes: list[Path], md_name: str) -> Path:
+    if md_name and len(notes) > 1:
+        for note in notes:
+            body = note.read_text(encoding="utf-8")
+            block = re.search(r"^## Materialer\n(.*?)(?=\n## |\n<!-- AUTO:END|\Z)", body, re.S | re.M)
+            if block and any(link.rsplit("/", 1)[-1] == md_name
+                             for link in re.findall(r"\[\[([^|\]]+)", block.group(1))):
+                return note
+    return notes[0]
 
 
 _DAYS_DA = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
@@ -184,7 +204,7 @@ def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -
     _, _, folder_emne = folder.partition(" - ")
     md_week_dir = raw_root.parent / MD_DIR_NAME / doc_path.parent.relative_to(raw_root)
 
-    fields = enrich_from_plan_note(md_week_dir)
+    fields = enrich_from_plan_note(md_week_dir, f"{sanitize(doc_path.stem)}.md")
     # enhed-mappe: hele navnet er emnet; dato-fallback-mappe (intet topic): intet emne.
     emne = fields.get("emne") or folder_emne or ("" if _DATE_OR_WEEK.fullmatch(folder) else folder)
 
@@ -925,6 +945,25 @@ def selfcheck() -> int:
         with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={}):
             fm3 = frontmatter(VAULT_ROOT / "§ FAG/♪ Musik/RAW/2026-04-15/Noget.pdf")
         assert "uge:" not in fm3 and "emne:" not in fm3, fm3
+
+        # #181/#183: i en delt enhed-mappe vælges plan-noten der EJER filen (AUTO-blokkens
+        # "## Materialer"), ikke bare den første. Uden dette fik hver materiale-note tids-felter
+        # fra en vilkårlig søskende-lektion.
+        import tempfile as _tf
+        delt = Path(_tf.mkdtemp()) / "Skolens formål"
+        delt.mkdir(parents=True)
+        for dato, fil in (("2026-08-17", "Rosa1.md"), ("2026-09-07", "Resonans.md")):
+            (delt / f"[PLAN] {dato} - Skolens formål.md").write_text(
+                f'---\nemne: "Skolens formål"\ndato: {dato}\nstart: "{dato} 10:00:00"\n---\n\n'
+                f"<!-- AUTO:START -->\n# Skolens formål\n\n## Materialer\n"
+                f"- [[§ FAG/⚖︎ LivsOplysning/MD/Skolens formål/{fil}|{fil}]]\n<!-- AUTO:END -->\n",
+                encoding="utf-8")
+        assert enrich_from_plan_note(delt, "Resonans.md")["dato"] == "2026-09-07", \
+            "materiale-noten fik tids-felter fra en søskende-lektion i stedet for sin egen ejer"
+        assert enrich_from_plan_note(delt, "Rosa1.md")["dato"] == "2026-08-17"
+        # Ejerløs fil (MinerU nåede frem før background.js skrev planen, #141) -> første note, som før.
+        assert enrich_from_plan_note(delt, "Ukendt.md")["dato"] == "2026-08-17"
+        assert enrich_from_plan_note(delt)["dato"] == "2026-08-17"
 
         # md_targets uændret: MD-mappen spejler RAW-mappen uanset navneform.
         md, att = md_targets(enhed_doc)
