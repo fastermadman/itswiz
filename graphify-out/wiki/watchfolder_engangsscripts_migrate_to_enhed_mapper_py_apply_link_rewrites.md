@@ -4,7 +4,7 @@
 - **Type:** Function
 - **File:** `./watchfolder/engangsscripts/migrate_to_enhed_mapper.py`
 - **Location:** L366
-- **Community:** 5 (wikilink_target())
+- **Community:** 5 (split_folder())
 
 ## Relationships
 

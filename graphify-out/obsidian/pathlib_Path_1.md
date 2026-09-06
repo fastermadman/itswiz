@@ -3,7 +3,7 @@ id: watchfolder_watch_viastudywiz_py_import_pathlib_path
 type: Module
 source: ./watchfolder/watch_viastudywiz.py
 community: 1
-community_label: sync_hold_course_quietly()
+community_label: write_duplicate_stub()
 ---
 
 ## Connections

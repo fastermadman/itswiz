@@ -8,7 +8,7 @@
 |--------|-------|
 | Nodes | 373 |
 | Edges | 739 |
-| Communities | 26 |
+| Communities | 19 |
 | Hyperedges | 0 |
 
 ### Confidence Breakdown
@@ -26,21 +26,21 @@
 | background | 83 | 0 |
 | watch_viastudywiz | 61 | 1 |
 | sync_hold_course | 55 | 2 |
-| migrate_to_enhed_mapper | 38 | 4 |
+| migrate_to_enhed_mapper | 38 | 3 |
 | writePlanNotes() | 30 | 0 |
-| migrate_to_raw_md | 24 | 3 |
-| selfcheck() | 17 | 7 |
-| sync_data() | 17 | 23 |
+| migrate_to_raw_md | 24 | 4 |
+| sync_data() | 17 | 2 |
+| selfcheck() | 17 | 2 |
 | downloadFileElements() | 16 | 0 |
 | syncCalendar() | 15 | 0 |
 
 ## 🔮 Surprising Connections
 
-- **watchfolder_sync_hold_course_py_ensure_lecture** → **watchfolder_sync_hold_course_py_nfc** (calls)
-- **watchfolder_sync_hold_course_py_ensure_resource** → **watchfolder_sync_hold_course_py_find_stamped** (calls)
-- **watchfolder_sync_hold_course_py_ensure_resource** → **watchfolder_sync_hold_course_py_nfc** (calls)
-- **watchfolder_sync_hold_course_py_ensure_assignment** → **watchfolder_sync_hold_course_py_nfc** (calls)
-- **watchfolder_sync_hold_course_py_sync_data** → **watchfolder_sync_hold_course_py_generate_id** (calls)
+- **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag** → **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_is_ghost** (calls)
+- **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag** → **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_resolve_targets** (calls)
+- **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets** → **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_split_folder** (calls)
+- **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main** → **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets** (calls)
+- **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main** → **watchfolder_engangsscripts_migrate_to_enhed_mapper_py_rel** (calls)
 
 ## 🏘️ Communities
 
@@ -68,33 +68,34 @@
 - extractExtensionFromWopi()
 - _…and 64 more_
 
-### Community 1 — sync_hold_course_quietly() (35 nodes, cohesion: 0.08)
+### Community 1 — write_duplicate_stub() (63 nodes, cohesion: 0.06)
 
 - watch_viastudywiz
+- already_converted()
 - api_request()
 - _bisect_blocks()
+- cached_zip()
 - DocumentHandler
 - .on_created()
 - enrich_from_plan_note()
+- error_marker_path()
+- existing_conversion()
+- _extract_running_header()
+- _first_anchor_text()
+- format_now()
+- _format_page_marker()
+- frontmatter()
+- _group_blocks_by_page()
+- has_highlights()
 - datetime
 - functools.lru_cache
 - hashlib
-- json
-- pathlib.Path
-- re
-- requests
-- shutil
-- subprocess
-- sync_hold_course
-- sys
-- tempfile
-- threading
-- time
-- _…and 15 more_
+- _…and 43 more_
 
-### Community 2 — write_forloeb_mirrors() (34 nodes, cohesion: 0.09)
+### Community 2 — write_forloeb_mirrors() (56 nodes, cohesion: 0.09)
 
 - sync_hold_course
+- append_file_list_field()
 - _cell()
 - course_url()
 - enhed_from_link()
@@ -102,6 +103,7 @@
 - ensure_assignment()
 - ensure_class()
 - ensure_lecture()
+- ensure_resource()
 - find_stamped()
 - forloeb_path()
 - generate_id()
@@ -112,11 +114,33 @@
 - re
 - ssl
 - sys
-- tempfile
-- time
-- _…and 14 more_
+- _…and 36 more_
 
-### Community 3 — to_wikilinks() (25 nodes, cohesion: 0.12)
+### Community 3 — wikilink_target() (26 nodes, cohesion: 0.10)
+
+- migrate_to_enhed_mapper
+- fingerprint()
+- folder_date()
+- _has_real_content()
+- datetime
+- hashlib
+- pathlib.Path
+- re
+- shutil
+- sys
+- unicodedata
+- watch_viastudywiz.ATTACHMENTS_DIR_NAME
+- watch_viastudywiz.FOLDER_SYMBOLS
+- watch_viastudywiz.MD_DIR_NAME
+- watch_viastudywiz.RAW_DIR_NAME
+- watch_viastudywiz.VAULT_ROOT
+- is_ghost()
+- Plan
+- plan_dublets()
+- .__init__()
+- _…and 6 more_
+
+### Community 4 — to_wikilinks() (25 nodes, cohesion: 0.12)
 
 - migrate_to_raw_md
 - add_frontmatter()
@@ -140,31 +164,7 @@
 - plan_duplicate_stubs()
 - _…and 5 more_
 
-### Community 4 — _suffix_all() (23 nodes, cohesion: 0.10)
-
-- migrate_to_enhed_mapper
-- fingerprint()
-- folder_date()
-- _has_real_content()
-- datetime
-- hashlib
-- pathlib.Path
-- re
-- shutil
-- sys
-- unicodedata
-- watch_viastudywiz.ATTACHMENTS_DIR_NAME
-- watch_viastudywiz.FOLDER_SYMBOLS
-- watch_viastudywiz.MD_DIR_NAME
-- watch_viastudywiz.RAW_DIR_NAME
-- watch_viastudywiz.VAULT_ROOT
-- is_ghost()
-- Plan
-- .__init__()
-- read_fm()
-- _…and 3 more_
-
-### Community 5 — wikilink_target() (17 nodes, cohesion: 0.24)
+### Community 5 — split_folder() (14 nodes, cohesion: 0.31)
 
 - apply_link_rewrites()
 - classify_folder()
@@ -176,13 +176,10 @@
 - nfc()
 - normalize_time_fm()
 - plain_fag()
-- plan_dublets()
 - plan_fag()
-- resolve_note()
 - sanitize()
 - selfcheck()
 - split_folder()
-- wikilink_target()
 
 ### Community 6 — week_folder_base() (12 nodes, cohesion: 0.30)
 
@@ -199,22 +196,7 @@
 - to_space_datetime()
 - week_folder_base()
 
-### Community 7 — wikilink_target() (7) (12 nodes, cohesion: 0.33)
-
-- append_file_list_field()
-- nfc()
-- _owned_targets()
-- parse_frontmatter()
-- patch_pending_materiale()
-- prefixed_lines()
-- read_plans()
-- read_tasks()
-- remove_file_list_lines()
-- selfcheck()
-- wikilink_for()
-- wikilink_target()
-
-### Community 8 — writeFile() (12 nodes, cohesion: 0.38)
+### Community 7 — writeFile() (12 nodes, cohesion: 0.38)
 
 - offscreen
 - copyRecursive()
@@ -229,35 +211,7 @@
 - vaultPermissionError()
 - writeFile()
 
-### Community 9 — write_duplicate_stub() (11 nodes, cohesion: 0.27)
-
-- already_converted()
-- cached_zip()
-- error_marker_path()
-- existing_conversion()
-- md_targets()
-- previously_failed()
-- process_document()
-- sanitize()
-- submit()
-- write_cache()
-- write_duplicate_stub()
-
-### Community 10 — main() (11 nodes, cohesion: 0.24)
-
-- backfill_footnotes
-- build_raw_index()
-- digest_of()
-- has_footnotes()
-- hashlib
-- json
-- pathlib.Path
-- sys
-- watch_viastudywiz
-- zipfile
-- main()
-
-### Community 11 — selfcheck() (11 nodes, cohesion: 0.22)
+### Community 8 — selfcheck() (8) (11 nodes, cohesion: 0.22)
 
 - reconvert_double_page
 - find_affected()
@@ -271,7 +225,21 @@
 - main()
 - selfcheck()
 
-### Community 12 — selfcheck() (12) (9 nodes, cohesion: 0.33)
+### Community 9 — main() (11 nodes, cohesion: 0.24)
+
+- backfill_footnotes
+- build_raw_index()
+- digest_of()
+- has_footnotes()
+- hashlib
+- json
+- pathlib.Path
+- sys
+- watch_viastudywiz
+- zipfile
+- main()
+
+### Community 10 — selfcheck() (10) (9 nodes, cohesion: 0.33)
 
 - backfill_week_topics
 - pathlib.Path
@@ -283,18 +251,7 @@
 - sanitize()
 - selfcheck()
 
-### Community 13 — next_nonblank() (8 nodes, cohesion: 0.36)
-
-- strip_empty_headings
-- fix()
-- pathlib.Path
-- re
-- sys
-- looks_like_lost_title()
-- main()
-- next_nonblank()
-
-### Community 14 — selfcheck() (14) (8 nodes, cohesion: 0.32)
+### Community 11 — selfcheck() (11) (8 nodes, cohesion: 0.32)
 
 - rename_lektionsplan_notes
 - fix_backlinks()
@@ -305,17 +262,18 @@
 - rename_in_week_dir()
 - selfcheck()
 
-### Community 15 — selfcheck() (15) (7 nodes, cohesion: 0.38)
+### Community 12 — next_nonblank() (8 nodes, cohesion: 0.36)
 
-- fix_fag_symbol_prefix
+- strip_empty_headings
+- fix()
 - pathlib.Path
 - re
 - sys
+- looks_like_lost_title()
 - main()
-- rewrite_fag()
-- selfcheck()
+- next_nonblank()
 
-### Community 16 — reformat() (7 nodes, cohesion: 0.38)
+### Community 13 — reformat() (7 nodes, cohesion: 0.38)
 
 - reformat_material_links
 - find_raw_file()
@@ -325,17 +283,17 @@
 - main()
 - reformat()
 
-### Community 17 — _printed_page_number() (7 nodes, cohesion: 0.29)
+### Community 14 — selfcheck() (7 nodes, cohesion: 0.38)
 
-- _first_anchor_text()
-- _format_page_marker()
-- _group_blocks_by_page()
-- insert_page_markers()
-- _page_footnotes()
-- _page_sizes()
-- _printed_page_number()
+- fix_fag_symbol_prefix
+- pathlib.Path
+- re
+- sys
+- main()
+- rewrite_fag()
+- selfcheck()
 
-### Community 18 — selfcheck() (18) (7 nodes, cohesion: 0.38)
+### Community 15 — selfcheck() (15) (7 nodes, cohesion: 0.38)
 
 - rename_fag_folders
 - pathlib.Path
@@ -345,7 +303,7 @@
 - rewrite_references()
 - selfcheck()
 
-### Community 19 — rewrite_links() (6 nodes, cohesion: 0.40)
+### Community 16 — rewrite_links() (6 nodes, cohesion: 0.40)
 
 - fix_stale_fag_root_links
 - pathlib.Path
@@ -354,46 +312,14 @@
 - main()
 - rewrite_links()
 
-### Community 20 — write_conversion() (5 nodes, cohesion: 0.40)
-
-- _extract_running_header()
-- has_highlights()
-- integrate_output()
-- to_wikilinks()
-- write_conversion()
-
-### Community 21 — time_fields_from_start() (5 nodes, cohesion: 0.50)
-
-- format_now()
-- frontmatter()
-- plain_fag()
-- selfcheck()
-- time_fields_from_start()
-
-### Community 22 — trigger_obsidian_reload() (5 nodes, cohesion: 0.40)
-
-- prune_dead_links()
-- reconcile_onyx()
-- sync()
-- sync_task_completion()
-- trigger_obsidian_reload()
-
-### Community 23 — sync_data() (5 nodes, cohesion: 0.50)
-
-- ensure_resource()
-- migrate_notes_to_description()
-- prune_stale_resource_classes()
-- stable_key()
-- sync_data()
-
-### Community 24 — fsSet() (4 nodes, cohesion: 0.83)
+### Community 17 — fsSet() (4 nodes, cohesion: 0.83)
 
 - fsHandle
 - fsGet()
 - fsOpenDb()
 - fsSet()
 
-### Community 25 — refreshVaultDirStatus() (3 nodes, cohesion: 1.00)
+### Community 18 — refreshVaultDirStatus() (3 nodes, cohesion: 1.00)
 
 - options
 - load()
@@ -413,13 +339,13 @@ No isolated nodes.
 
 ## ❓ Suggested Questions
 
-1. How does 'watchfolder_sync_hold_course_py_sync_task_completion' relate to 3 different communities (trigger_obsidian_reload(), wikilink_target() (7), write_forloeb_mirrors())?
-1. How does 'watchfolder_watch_viastudywiz_py_selfcheck' relate to 5 different communities (write_conversion(), write_duplicate_stub(), sync_hold_course_quietly(), time_fields_from_start(), _printed_page_number())?
-1. How does 'watchfolder_sync_hold_course_py_migrate_notes_to_description' relate to 3 different communities (sync_data(), write_forloeb_mirrors(), wikilink_target() (7))?
-1. How does 'watchfolder_sync_hold_course_py_nfc' relate to 3 different communities (write_forloeb_mirrors(), wikilink_target() (7), sync_data())?
-1. How does 'watchfolder_sync_hold_course_py_reconcile_onyx' relate to 3 different communities (write_forloeb_mirrors(), trigger_obsidian_reload(), wikilink_target() (7))?
-1. How does 'watchfolder_watch_viastudywiz_py_process_document_with_watchdog' relate to 3 different communities (sync_hold_course_quietly(), write_duplicate_stub(), time_fields_from_start())?
-1. How does 'watchfolder_sync_hold_course_py_wikilink_target' relate to 3 different communities (write_forloeb_mirrors(), wikilink_target() (7), sync_data())?
+1. Can you verify the inferred relationships of 'writePlanNotes()' (degree 30)?
+1. Why is 'main()' (11 nodes) loosely connected (cohesion 0.24)? Should it be split?
+1. Why is 'ymd()' (84 nodes) loosely connected (cohesion 0.06)? Should it be split?
+1. Why is 'write_forloeb_mirrors()' (56 nodes) loosely connected (cohesion 0.09)? Should it be split?
+1. Why is 'selfcheck() (8)' (11 nodes) loosely connected (cohesion 0.22)? Should it be split?
+1. Why is 'wikilink_target()' (26 nodes) loosely connected (cohesion 0.10)? Should it be split?
+1. Why is 'to_wikilinks()' (25 nodes) loosely connected (cohesion 0.12)? Should it be split?
 
 ---
 _Generated by graphify-rs_

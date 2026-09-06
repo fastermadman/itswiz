@@ -1,6 +1,6 @@
-# Community 5: wikilink_target()
+# Community 5: split_folder()
 
-**Members:** 17
+**Members:** 14
 
 ## Nodes
 
@@ -14,13 +14,10 @@
 - **nfc()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_nfc`, Function, degree: 6)
 - **normalize_time_fm()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_normalize_time_fm`, Function, degree: 4)
 - **plain_fag()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plain_fag`, Function, degree: 3)
-- **plan_dublets()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets`, Function, degree: 6)
 - **plan_fag()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag`, Function, degree: 9)
-- **resolve_note()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_resolve_note`, Function, degree: 2)
 - **sanitize()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_sanitize`, Function, degree: 3)
 - **selfcheck()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck`, Function, degree: 10)
 - **split_folder()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_split_folder`, Function, degree: 6)
-- **wikilink_target()** (`watchfolder_engangsscripts_migrate_to_enhed_mapper_py_wikilink_target`, Function, degree: 3)
 
 ## Relationships
 
@@ -33,9 +30,6 @@
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_split_folder (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_enhed_for (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_nfc (calls)
-- watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_resolve_note (calls)
-- watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_wikilink_target (calls)
-- watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_split_folder (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_count_rewrites → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_link_patterns (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_count_rewrites → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_nfc (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_count_rewrites → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_normalize_time_fm (calls)
@@ -45,7 +39,6 @@
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_apply_link_rewrites → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_nfc (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_apply_link_rewrites → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_folder_fallback_date (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag (calls)
-- watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_count_rewrites (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_apply_link_rewrites (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_classify_folder (calls)
@@ -53,7 +46,6 @@
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_classify_folder (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_enhed_for (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plain_fag (calls)
-- watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_wikilink_target (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_apply_link_rewrites (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_normalize_time_fm (calls)
 - watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck → watchfolder_engangsscripts_migrate_to_enhed_mapper_py_folder_fallback_date (calls)

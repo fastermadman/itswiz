@@ -2,8 +2,8 @@
 id: watchfolder_engangsscripts_rename_lektionsplan_notes_py_rename_in_week_dir
 type: Function
 source: ./watchfolder/engangsscripts/rename_lektionsplan_notes.py
-community: 14
-community_label: selfcheck() (14)
+community: 11
+community_label: selfcheck() (11)
 ---
 
 ## Connections

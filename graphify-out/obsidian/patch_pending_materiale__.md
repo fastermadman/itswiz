@@ -2,8 +2,8 @@
 id: watchfolder_sync_hold_course_py_patch_pending_materiale
 type: Function
 source: ./watchfolder/sync_hold_course.py
-community: 7
-community_label: wikilink_target() (7)
+community: 2
+community_label: write_forloeb_mirrors()
 ---
 
 ## Connections

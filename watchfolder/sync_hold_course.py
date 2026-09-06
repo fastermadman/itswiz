@@ -348,12 +348,26 @@ def read_tasks(vault_root: Path) -> list[dict]:
     return tasks
 
 
-def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
+def read_plans(vault_root: Path, dubletter: list[str] | None = None) -> tuple[list[dict], list[str]]:
     """Alle `type: lektionsplan`-noter. `type: dublet` falder væk af sig selv (issue #113).
 
     Returnerer også stierne på de noter der mangler plan_id — de er ældre end issue #96 og kan ikke
     synkes sikkert (se ensure_lecture). De skal rettes i vaulten, ikke gættes om her, så de
-    rapporteres frem for at forsvinde stille."""
+    rapporteres frem for at forsvinde stille.
+
+    Samme plan_id må kun optræde ÉN gang (#181). background.js skriver alle en enheds lektioner
+    til samme sti (`MD/<enhed>/[PLAN] <enhed>.md`, writePlanNotes), så de daterede
+    `[PLAN] <dato> - <enhed>.md` fra før enhed-migreringen (#150/#155) står tilbage som rester
+    ingen skriver til længere — og den udaterede note bærer det plan_id, den lektion der skrev
+    sidst havde. To noter med samme plan_id rammer derfor samme lecture i sync_data, hvor hver
+    især prunede den andens Reading-opgaver via valid_file_keys: opgaverne blev genskabt med nye
+    id'er ved HVER kørsel, data.json ændrede sig hver gang, og trigger_obsidian_reload bad
+    Obsidian genstarte hvert minut (live-bekræftet 2026-09-06 hos Valdemar).
+
+    Vi beholder den friskeste note pr. plan_id (`hentet:`, faldende) og rapporterer resten frem
+    for at slette dem — de daterede rester rummer stadig de ANDRE lektioners sidst-kendte data,
+    og den rigtige løsning er at give hver lektion sin egen plan-note-sti i background.js, ikke
+    at kaste vaultindhold væk her."""
     plans, uden_plan_id = [], []
     for path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         fields = parse_frontmatter(path.read_text(encoding="utf-8"))
@@ -365,7 +379,16 @@ def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
             continue
         fields["_path"] = nfc(rel)
         plans.append(fields)
-    return plans, uden_plan_id
+
+    friskeste: dict[str, dict] = {}
+    for plan in sorted(plans, key=lambda f: (f.get("hentet", ""), f["_path"]), reverse=True):
+        pid = plan["plan_id"]
+        if pid in friskeste:
+            if dubletter is not None:
+                dubletter.append(f'{plan["_path"]} (samme plan_id som {friskeste[pid]["_path"]})')
+            continue
+        friskeste[pid] = plan
+    return [p for p in plans if friskeste.get(p["plan_id"]) is p], uden_plan_id
 
 
 # ─── data.json-hjælpere ───────────────────────────────────────────────────────
@@ -1231,7 +1254,8 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         for rel in patched:
             print(f"  {rel}")
 
-    plans, uden_plan_id = read_plans(vault_root)
+    plan_dubletter: list[str] = []
+    plans, uden_plan_id = read_plans(vault_root, dubletter=plan_dubletter)
     tasks = read_tasks(vault_root)
     before = data_path.read_text(encoding="utf-8")
     mtime = data_path.stat().st_mtime
@@ -1257,6 +1281,12 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         print(f"{len(dropped)} lektion(er) i data.json er ikke længere i itslearning:")
         for d in dropped:
             print(f"  {d}")
+
+    if plan_dubletter and not quiet:
+        print(f"{len(plan_dubletter)} lektionsplan-note(r) deler plan_id med en nyere note og "
+              f"springes over (rest fra enhed-migreringen, #181 — ret stien i background.js):")
+        for rel in plan_dubletter:
+            print(f"  {rel}")
 
     # #181: samme rapportér-frem-for-slet-linje for de tre øvrige ensure_*.
     for key, overskrift in (
@@ -2036,6 +2066,35 @@ def selfcheck() -> int:
         "---\nmateriale_filer: |\n  📎 [[a/b.md|b.md]]\ntype: lektionsplan\n---\n",
         "materiale_filer", MATERIALE_FIL_PREFIX, {"a/b.md"})
     assert "materiale_filer: false\ntype: lektionsplan" in tom, tom
+
+    # #181: to [PLAN]-noter med samme plan_id (den daterede rest fra før enhed-migreringen +
+    # den udaterede background.js stadig skriver). Ramte begge samme lecture, hvor hver prunede
+    # den andens Reading-opgaver via valid_file_keys — nye opgave-id'er ved hver kørsel, så
+    # data.json ændrede sig altid og trigger_obsidian_reload genstartede Obsidian hvert minut.
+    dub_dir = patch_root / "§ FAG" / "⚖︎ LivsOplysning" / "MD" / "Introduktion"
+    dub_dir.mkdir(parents=True)
+    for navn, hentet, fil in ((" 2026-08-10 -", "2026-09-01 08:00", "Gammel.md"),
+                              ("", "2026-09-06 08:00", "Ny.md")):
+        (dub_dir / f"[PLAN]{navn} Introduktion.md").write_text(
+            f'---\ntype: lektionsplan\nfag: LivsOplysning\nplan_id: "33203:1315587"\n'
+            f'start: "2026-08-10 10:00:00"\nhentet: "{hentet}"\n'
+            f"materiale_filer: |\n  📎 [[§ FAG/⚖︎ LivsOplysning/MD/Introduktion/{fil}]]\n---\n",
+            encoding="utf-8")
+    dubs: list[str] = []
+    dub_plans, _ = read_plans(patch_root, dubletter=dubs)
+    valgt = [p for p in dub_plans if p["plan_id"] == "33203:1315587"]
+    assert len(valgt) == 1, ("samme plan_id optræder flere gange — churn-bug'en er tilbage", valgt)
+    assert "hentet" in valgt[0] and valgt[0]["hentet"] == "2026-09-06 08:00", \
+        ("den ældste note vandt — friskeste hentet: skal afgøre", valgt)
+    assert len(dubs) == 1 and "2026-08-10" in dubs[0], dubs
+    # Idempotens hele vejen igennem: to kørsler i træk må give bit-identisk data.json, ellers
+    # skriver synken (og reloader Obsidian) ved hvert eneste tick.
+    ids_d = iter(f"d{n}" for n in range(500))
+    d1 = sync_data({"semesters": [], "dataVersion": 2}, dub_plans, lambda: next(ids_d))
+    snap1 = json.dumps(d1, sort_keys=True)
+    d2 = sync_data(json.loads(snap1), dub_plans, lambda: next(ids_d))
+    assert json.dumps(d2, sort_keys=True) == snap1, \
+        "data.json ændrer sig ved hver kørsel — Obsidian ville blive reloadet i ring"
 
     # reconcile_onyx (issue #146 + hold-course#10): Boox får Mac's friske indhold,
     # og en legacy `settings`-nøgle strippes fra begge kopier (device-prefs bor nu

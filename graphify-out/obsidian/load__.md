@@ -2,7 +2,7 @@
 id: options_js_load
 type: Function
 source: ./options.js
-community: 25
+community: 18
 community_label: refreshVaultDirStatus()
 ---
 

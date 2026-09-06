@@ -3,8 +3,8 @@
 - **ID:** `watchfolder_watch_viastudywiz_py_write_conversion`
 - **Type:** Function
 - **File:** `./watchfolder/watch_viastudywiz.py`
-- **Location:** L578
-- **Community:** 20 (write_conversion())
+- **Location:** L580
+- **Community:** 1 (write_duplicate_stub())
 
 ## Relationships
 

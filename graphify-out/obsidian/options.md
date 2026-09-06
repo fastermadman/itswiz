@@ -2,7 +2,7 @@
 id: options_js
 type: File
 source: ./options.js
-community: 25
+community: 18
 community_label: refreshVaultDirStatus()
 ---
 

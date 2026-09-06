@@ -2,7 +2,7 @@
 id: watchfolder_engangsscripts_reformat_material_links_py
 type: File
 source: ./watchfolder/engangsscripts/reformat_material_links.py
-community: 16
+community: 13
 community_label: reformat()
 ---
 

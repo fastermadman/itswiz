@@ -3,8 +3,8 @@
 - **ID:** `watchfolder_watch_viastudywiz_py_frontmatter`
 - **Type:** Function
 - **File:** `./watchfolder/watch_viastudywiz.py`
-- **Location:** L201
-- **Community:** 21 (time_fields_from_start())
+- **Location:** L203
+- **Community:** 1 (write_duplicate_stub())
 
 ## Relationships
 

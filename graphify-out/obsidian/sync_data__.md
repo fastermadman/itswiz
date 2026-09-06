@@ -2,8 +2,8 @@
 id: watchfolder_sync_hold_course_py_sync_data
 type: Function
 source: ./watchfolder/sync_hold_course.py
-community: 23
-community_label: sync_data()
+community: 2
+community_label: write_forloeb_mirrors()
 ---
 
 ## Connections

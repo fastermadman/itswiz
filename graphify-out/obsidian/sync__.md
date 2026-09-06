@@ -2,8 +2,8 @@
 id: watchfolder_sync_hold_course_py_sync
 type: Function
 source: ./watchfolder/sync_hold_course.py
-community: 22
-community_label: trigger_obsidian_reload()
+community: 2
+community_label: write_forloeb_mirrors()
 ---
 
 ## Connections

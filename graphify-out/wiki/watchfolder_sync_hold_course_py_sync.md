@@ -4,7 +4,7 @@
 - **Type:** Function
 - **File:** `./watchfolder/sync_hold_course.py`
 - **Location:** L1221
-- **Community:** 22 (trigger_obsidian_reload())
+- **Community:** 2 (write_forloeb_mirrors())
 
 ## Relationships
 

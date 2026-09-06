@@ -2,7 +2,7 @@
 id: offscreen_js
 type: File
 source: ./offscreen.js
-community: 8
+community: 7
 community_label: writeFile()
 ---
 

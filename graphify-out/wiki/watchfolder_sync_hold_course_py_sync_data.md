@@ -4,7 +4,7 @@
 - **Type:** Function
 - **File:** `./watchfolder/sync_hold_course.py`
 - **Location:** L785
-- **Community:** 23 (sync_data())
+- **Community:** 2 (write_forloeb_mirrors())
 
 ## Relationships
 

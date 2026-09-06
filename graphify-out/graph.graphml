@@ -519,115 +519,115 @@
       <data key="label">fsHandle</data>
       <data key="node_type">File</data>
       <data key="source_file">./fsHandle.js</data>
-      <data key="community">24</data>
+      <data key="community">17</data>
     </node>
     <node id="fshandle_js_fsopendb">
       <data key="label">fsOpenDb()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./fsHandle.js</data>
-      <data key="community">24</data>
+      <data key="community">17</data>
     </node>
     <node id="fshandle_js_fsset">
       <data key="label">fsSet()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./fsHandle.js</data>
-      <data key="community">24</data>
+      <data key="community">17</data>
     </node>
     <node id="fshandle_js_fsget">
       <data key="label">fsGet()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./fsHandle.js</data>
-      <data key="community">24</data>
+      <data key="community">17</data>
     </node>
     <node id="options_js">
       <data key="label">options</data>
       <data key="node_type">File</data>
       <data key="source_file">./options.js</data>
-      <data key="community">25</data>
+      <data key="community">18</data>
     </node>
     <node id="options_js_refreshvaultdirstatus">
       <data key="label">refreshVaultDirStatus()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./options.js</data>
-      <data key="community">25</data>
+      <data key="community">18</data>
     </node>
     <node id="options_js_load">
       <data key="label">load()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./options.js</data>
-      <data key="community">25</data>
+      <data key="community">18</data>
     </node>
     <node id="offscreen_js">
       <data key="label">offscreen</data>
       <data key="node_type">File</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_vaultpermissionerror">
       <data key="label">vaultPermissionError()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_getvaulthandle">
       <data key="label">getVaultHandle()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_finddirentrynormalized">
       <data key="label">findDirEntryNormalized()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_getdirectoryhandletolerant">
       <data key="label">getDirectoryHandleTolerant()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_gettargetdirectory">
       <data key="label">getTargetDirectory()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_writefile">
       <data key="label">writeFile()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_readfile">
       <data key="label">readFile()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_fileexists">
       <data key="label">fileExists()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_copyrecursive">
       <data key="label">copyRecursive()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_countplannotes">
       <data key="label">countPlanNotes()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="offscreen_js_movedir">
       <data key="label">moveDir()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./offscreen.js</data>
-      <data key="community">8</data>
+      <data key="community">7</data>
     </node>
     <node id="watchfolder_sync_hold_course_py">
       <data key="label">sync_hold_course</data>
@@ -699,19 +699,19 @@
       <data key="label">nfc()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_parse_frontmatter">
       <data key="label">parse_frontmatter()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_prefixed_lines">
       <data key="label">prefixed_lines()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_note_stub_path">
       <data key="label">note_stub_path()</data>
@@ -723,49 +723,49 @@
       <data key="label">wikilink_target()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_wikilink_for">
       <data key="label">wikilink_for()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_append_file_list_field">
       <data key="label">append_file_list_field()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_owned_targets">
       <data key="label">_owned_targets()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_remove_file_list_lines">
       <data key="label">remove_file_list_lines()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_patch_pending_materiale">
       <data key="label">patch_pending_materiale()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_read_tasks">
       <data key="label">read_tasks()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_read_plans">
       <data key="label">read_plans()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_generate_id">
       <data key="label">generate_id()</data>
@@ -843,25 +843,25 @@
       <data key="label">migrate_notes_to_description()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">23</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_stable_key">
       <data key="label">stable_key()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">23</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_ensure_resource">
       <data key="label">ensure_resource()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">23</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_prune_stale_resource_classes">
       <data key="label">prune_stale_resource_classes()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">23</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_ensure_assignment">
       <data key="label">ensure_assignment()</data>
@@ -873,31 +873,31 @@
       <data key="label">prune_dead_links()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">22</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_sync_data">
       <data key="label">sync_data()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">23</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_sync_task_completion">
       <data key="label">sync_task_completion()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">22</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_trigger_obsidian_reload">
       <data key="label">trigger_obsidian_reload()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">22</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_reconcile_onyx">
       <data key="label">reconcile_onyx()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">22</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_iso_week">
       <data key="label">iso_week()</data>
@@ -945,7 +945,7 @@
       <data key="label">sync()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">22</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_sync_hold_course_py_init_semesters_retroactively">
       <data key="label">init_semesters_retroactively()</data>
@@ -963,7 +963,7 @@
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/sync_hold_course.py</data>
-      <data key="community">7</data>
+      <data key="community">2</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py">
       <data key="label">watch_viastudywiz</data>
@@ -1095,13 +1095,13 @@
       <data key="label">sanitize()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_to_wikilinks">
       <data key="label">to_wikilinks()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">20</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_read_frontmatter_field">
       <data key="label">read_frontmatter_field()</data>
@@ -1125,31 +1125,31 @@
       <data key="label">time_fields_from_start()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">21</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_format_now">
       <data key="label">format_now()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">21</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_plain_fag">
       <data key="label">plain_fag()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">21</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_frontmatter">
       <data key="label">frontmatter()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">21</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_md_targets">
       <data key="label">md_targets()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_in_raw_branch">
       <data key="label">in_raw_branch()</data>
@@ -1161,55 +1161,55 @@
       <data key="label">existing_conversion()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_write_duplicate_stub">
       <data key="label">write_duplicate_stub()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_error_marker_path">
       <data key="label">error_marker_path()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_already_converted">
       <data key="label">already_converted()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_has_highlights">
       <data key="label">has_highlights()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">20</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_previously_failed">
       <data key="label">previously_failed()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_submit">
       <data key="label">submit()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_cached_zip">
       <data key="label">cached_zip()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_write_cache">
       <data key="label">write_cache()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_poll">
       <data key="label">poll()</data>
@@ -1221,19 +1221,19 @@
       <data key="label">_group_blocks_by_page()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">17</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_printed_page_number">
       <data key="label">_printed_page_number()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">17</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_page_footnotes">
       <data key="label">_page_footnotes()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">17</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_bisect_blocks">
       <data key="label">_bisect_blocks()</data>
@@ -1251,49 +1251,49 @@
       <data key="label">_page_sizes()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">17</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_extract_running_header">
       <data key="label">_extract_running_header()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">20</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_first_anchor_text">
       <data key="label">_first_anchor_text()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">17</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_insert_page_markers">
       <data key="label">insert_page_markers()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">17</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_format_page_marker">
       <data key="label">_format_page_marker()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">17</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_write_conversion">
       <data key="label">write_conversion()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">20</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_integrate_output">
       <data key="label">integrate_output()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">20</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_process_document">
       <data key="label">process_document()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">9</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_watch_viastudywiz_py_process_document_with_watchdog">
       <data key="label">process_document_with_watchdog()</data>
@@ -1341,439 +1341,439 @@
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/watch_viastudywiz.py</data>
-      <data key="community">21</data>
+      <data key="community">1</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py">
       <data key="label">migrate_to_raw_md</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_hashlib">
       <data key="label">hashlib</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_shutil">
       <data key="label">shutil</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_attachments_dir_name">
       <data key="label">watch_viastudywiz.ATTACHMENTS_DIR_NAME</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_md_dir_name">
       <data key="label">watch_viastudywiz.MD_DIR_NAME</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_raw_dir_name">
       <data key="label">watch_viastudywiz.RAW_DIR_NAME</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_vault_root">
       <data key="label">watch_viastudywiz.VAULT_ROOT</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_frontmatter">
       <data key="label">watch_viastudywiz.frontmatter</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_md_targets">
       <data key="label">watch_viastudywiz.md_targets</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_write_duplicate_stub">
       <data key="label">watch_viastudywiz.write_duplicate_stub</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_to_wikilinks">
       <data key="label">to_wikilinks()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_destination">
       <data key="label">destination()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_plan_fag">
       <data key="label">plan_fag()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_fingerprint">
       <data key="label">fingerprint()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_resolve_duplicates">
       <data key="label">resolve_duplicates()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_plan_duplicate_stubs">
       <data key="label">plan_duplicate_stubs()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_source_document">
       <data key="label">source_document()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_add_frontmatter">
       <data key="label">add_frontmatter()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_collapse_duplicate">
       <data key="label">collapse_duplicate()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_find_fag_dirs">
       <data key="label">find_fag_dirs()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_raw_md_py_selfcheck">
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_raw_md.py</data>
-      <data key="community">3</data>
+      <data key="community">4</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py">
       <data key="label">strip_empty_headings</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py_looks_like_lost_title">
       <data key="label">looks_like_lost_title()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py_next_nonblank">
       <data key="label">next_nonblank()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py_fix">
       <data key="label">fix()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_strip_empty_headings_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/strip_empty_headings.py</data>
-      <data key="community">13</data>
+      <data key="community">12</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_stale_fag_root_links_py">
       <data key="label">fix_stale_fag_root_links</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_stale_fag_root_links.py</data>
-      <data key="community">19</data>
+      <data key="community">16</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_stale_fag_root_links_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_stale_fag_root_links.py</data>
-      <data key="community">19</data>
+      <data key="community">16</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_stale_fag_root_links_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_stale_fag_root_links.py</data>
-      <data key="community">19</data>
+      <data key="community">16</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_stale_fag_root_links_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_stale_fag_root_links.py</data>
-      <data key="community">19</data>
+      <data key="community">16</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_stale_fag_root_links_py_rewrite_links">
       <data key="label">rewrite_links()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_stale_fag_root_links.py</data>
-      <data key="community">19</data>
+      <data key="community">16</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_stale_fag_root_links_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_stale_fag_root_links.py</data>
-      <data key="community">19</data>
+      <data key="community">16</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py">
       <data key="label">backfill_footnotes</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_import_hashlib">
       <data key="label">hashlib</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_import_json">
       <data key="label">json</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_import_zipfile">
       <data key="label">zipfile</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_import_watch_viastudywiz">
       <data key="label">watch_viastudywiz</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_digest_of">
       <data key="label">digest_of()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_build_raw_index">
       <data key="label">build_raw_index()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_has_footnotes">
       <data key="label">has_footnotes()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_footnotes_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_footnotes.py</data>
-      <data key="community">10</data>
+      <data key="community">9</data>
     </node>
     <node id="watchfolder_engangsscripts_reformat_material_links_py">
       <data key="label">reformat_material_links</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/reformat_material_links.py</data>
-      <data key="community">16</data>
+      <data key="community">13</data>
     </node>
     <node id="watchfolder_engangsscripts_reformat_material_links_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reformat_material_links.py</data>
-      <data key="community">16</data>
+      <data key="community">13</data>
     </node>
     <node id="watchfolder_engangsscripts_reformat_material_links_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reformat_material_links.py</data>
-      <data key="community">16</data>
+      <data key="community">13</data>
     </node>
     <node id="watchfolder_engangsscripts_reformat_material_links_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reformat_material_links.py</data>
-      <data key="community">16</data>
+      <data key="community">13</data>
     </node>
     <node id="watchfolder_engangsscripts_reformat_material_links_py_find_raw_file">
       <data key="label">find_raw_file()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/reformat_material_links.py</data>
-      <data key="community">16</data>
+      <data key="community">13</data>
     </node>
     <node id="watchfolder_engangsscripts_reformat_material_links_py_reformat">
       <data key="label">reformat()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/reformat_material_links.py</data>
-      <data key="community">16</data>
+      <data key="community">13</data>
     </node>
     <node id="watchfolder_engangsscripts_reformat_material_links_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/reformat_material_links.py</data>
-      <data key="community">16</data>
+      <data key="community">13</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py">
       <data key="label">rename_lektionsplan_notes</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py_rename_in_week_dir">
       <data key="label">rename_in_week_dir()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py_fix_backlinks">
       <data key="label">fix_backlinks()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_lektionsplan_notes_py_selfcheck">
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_lektionsplan_notes.py</data>
-      <data key="community">14</data>
+      <data key="community">11</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_fag_folders_py">
       <data key="label">rename_fag_folders</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_fag_folders.py</data>
-      <data key="community">18</data>
+      <data key="community">15</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_fag_folders_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_fag_folders.py</data>
-      <data key="community">18</data>
+      <data key="community">15</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_fag_folders_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_fag_folders.py</data>
-      <data key="community">18</data>
+      <data key="community">15</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_fag_folders_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_fag_folders.py</data>
-      <data key="community">18</data>
+      <data key="community">15</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references">
       <data key="label">rewrite_references()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_fag_folders.py</data>
-      <data key="community">18</data>
+      <data key="community">15</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_fag_folders_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_fag_folders.py</data>
-      <data key="community">18</data>
+      <data key="community">15</data>
     </node>
     <node id="watchfolder_engangsscripts_rename_fag_folders_py_selfcheck">
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/rename_fag_folders.py</data>
-      <data key="community">18</data>
+      <data key="community">15</data>
     </node>
     <node id="watchfolder_engangsscripts_enrich_existing_notes_py">
       <data key="label">enrich_existing_notes</data>
@@ -1851,133 +1851,133 @@
       <data key="label">backfill_week_topics</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_sanitize">
       <data key="label">sanitize()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_rewrite_references">
       <data key="label">rewrite_references()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_plan_renames">
       <data key="label">plan_renames()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_backfill_week_topics_py_selfcheck">
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/backfill_week_topics.py</data>
-      <data key="community">12</data>
+      <data key="community">10</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py">
       <data key="label">migrate_to_enhed_mapper</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_datetime">
       <data key="label">datetime</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_hashlib">
       <data key="label">hashlib</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_shutil">
       <data key="label">shutil</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_unicodedata">
       <data key="label">unicodedata</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_attachments_dir_name">
       <data key="label">watch_viastudywiz.ATTACHMENTS_DIR_NAME</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_folder_symbols">
       <data key="label">watch_viastudywiz.FOLDER_SYMBOLS</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_md_dir_name">
       <data key="label">watch_viastudywiz.MD_DIR_NAME</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_raw_dir_name">
       <data key="label">watch_viastudywiz.RAW_DIR_NAME</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_vault_root">
       <data key="label">watch_viastudywiz.VAULT_ROOT</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_nfc">
       <data key="label">nfc()</data>
@@ -2007,7 +2007,7 @@
       <data key="label">folder_date()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_enhed_for">
       <data key="label">enhed_for()</data>
@@ -2025,43 +2025,43 @@
       <data key="label">is_ghost()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_fingerprint">
       <data key="label">fingerprint()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_read_fm">
       <data key="label">read_fm()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_wikilink_target">
       <data key="label">wikilink_target()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">5</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_resolve_note">
       <data key="label">resolve_note()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">5</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan">
       <data key="label">Plan</data>
       <data key="node_type">Class</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_init">
       <data key="label">.__init__()</data>
       <data key="node_type">Method</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag">
       <data key="label">plan_fag()</data>
@@ -2073,19 +2073,19 @@
       <data key="label">_resolve_targets()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_suffix_all">
       <data key="label">_suffix_all()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets">
       <data key="label">plan_dublets()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">5</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_link_patterns">
       <data key="label">_link_patterns()</data>
@@ -2121,7 +2121,7 @@
       <data key="label">rel()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main">
       <data key="label">main()</data>
@@ -2133,7 +2133,7 @@
       <data key="label">_has_real_content()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/migrate_to_enhed_mapper.py</data>
-      <data key="community">4</data>
+      <data key="community">3</data>
     </node>
     <node id="watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck">
       <data key="label">selfcheck()</data>
@@ -2145,109 +2145,109 @@
       <data key="label">reconvert_double_page</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_import_shutil">
       <data key="label">shutil</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_import_watch_viastudywiz_vault_root">
       <data key="label">watch_viastudywiz.VAULT_ROOT</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_import_watch_viastudywiz_has_highlights">
       <data key="label">watch_viastudywiz.has_highlights</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_import_watch_viastudywiz_md_targets">
       <data key="label">watch_viastudywiz.md_targets</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_find_affected">
       <data key="label">find_affected()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_reconvert_double_page_py_selfcheck">
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/reconvert_double_page.py</data>
-      <data key="community">11</data>
+      <data key="community">8</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_fag_symbol_prefix_py">
       <data key="label">fix_fag_symbol_prefix</data>
       <data key="node_type">File</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_fag_symbol_prefix.py</data>
-      <data key="community">15</data>
+      <data key="community">14</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_fag_symbol_prefix_py_import_re">
       <data key="label">re</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_fag_symbol_prefix.py</data>
-      <data key="community">15</data>
+      <data key="community">14</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_fag_symbol_prefix_py_import_sys">
       <data key="label">sys</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_fag_symbol_prefix.py</data>
-      <data key="community">15</data>
+      <data key="community">14</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_fag_symbol_prefix_py_import_pathlib_path">
       <data key="label">pathlib.Path</data>
       <data key="node_type">Module</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_fag_symbol_prefix.py</data>
-      <data key="community">15</data>
+      <data key="community">14</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_fag_symbol_prefix_py_rewrite_fag">
       <data key="label">rewrite_fag()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_fag_symbol_prefix.py</data>
-      <data key="community">15</data>
+      <data key="community">14</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_fag_symbol_prefix_py_main">
       <data key="label">main()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_fag_symbol_prefix.py</data>
-      <data key="community">15</data>
+      <data key="community">14</data>
     </node>
     <node id="watchfolder_engangsscripts_fix_fag_symbol_prefix_py_selfcheck">
       <data key="label">selfcheck()</data>
       <data key="node_type">Function</data>
       <data key="source_file">./watchfolder/engangsscripts/fix_fag_symbol_prefix.py</data>
-      <data key="community">15</data>
+      <data key="community">14</data>
     </node>
     <edge id="e0" source="background_js" target="background_js_ensureoffscreendocument">
       <data key="relation">defines</data>

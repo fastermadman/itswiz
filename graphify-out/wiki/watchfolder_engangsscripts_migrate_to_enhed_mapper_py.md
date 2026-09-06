@@ -3,7 +3,7 @@
 - **ID:** `watchfolder_engangsscripts_migrate_to_enhed_mapper_py`
 - **Type:** File
 - **File:** `./watchfolder/engangsscripts/migrate_to_enhed_mapper.py`
-- **Community:** 4 (_suffix_all())
+- **Community:** 3 (wikilink_target())
 
 ## Relationships
 

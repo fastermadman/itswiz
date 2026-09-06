@@ -2,7 +2,7 @@
 id: watchfolder_engangsscripts_strip_empty_headings_py_fix
 type: Function
 source: ./watchfolder/engangsscripts/strip_empty_headings.py
-community: 13
+community: 12
 community_label: next_nonblank()
 ---
 

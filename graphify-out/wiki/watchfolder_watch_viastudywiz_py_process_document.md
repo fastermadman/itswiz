@@ -3,8 +3,8 @@
 - **ID:** `watchfolder_watch_viastudywiz_py_process_document`
 - **Type:** Function
 - **File:** `./watchfolder/watch_viastudywiz.py`
-- **Location:** L636
-- **Community:** 9 (write_duplicate_stub())
+- **Location:** L638
+- **Community:** 1 (write_duplicate_stub())
 
 ## Relationships
 

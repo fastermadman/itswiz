@@ -3,7 +3,7 @@
 - **ID:** `watchfolder_watch_viastudywiz_py`
 - **Type:** File
 - **File:** `./watchfolder/watch_viastudywiz.py`
-- **Community:** 1 (sync_hold_course_quietly())
+- **Community:** 1 (write_duplicate_stub())
 
 ## Relationships
 

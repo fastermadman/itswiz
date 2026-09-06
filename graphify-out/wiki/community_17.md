@@ -1,23 +1,19 @@
-# Community 17: _printed_page_number()
+# Community 17: fsSet()
 
-**Members:** 7
+**Members:** 4
 
 ## Nodes
 
-- **_first_anchor_text()** (`watchfolder_watch_viastudywiz_py_first_anchor_text`, Function, degree: 2)
-- **_format_page_marker()** (`watchfolder_watch_viastudywiz_py_format_page_marker`, Function, degree: 2)
-- **_group_blocks_by_page()** (`watchfolder_watch_viastudywiz_py_group_blocks_by_page`, Function, degree: 2)
-- **insert_page_markers()** (`watchfolder_watch_viastudywiz_py_insert_page_markers`, Function, degree: 10)
-- **_page_footnotes()** (`watchfolder_watch_viastudywiz_py_page_footnotes`, Function, degree: 2)
-- **_page_sizes()** (`watchfolder_watch_viastudywiz_py_page_sizes`, Function, degree: 2)
-- **_printed_page_number()** (`watchfolder_watch_viastudywiz_py_printed_page_number`, Function, degree: 3)
+- **fsHandle** (`fshandle_js`, File, degree: 3)
+- **fsGet()** (`fshandle_js_fsget`, Function, degree: 2)
+- **fsOpenDb()** (`fshandle_js_fsopendb`, Function, degree: 3)
+- **fsSet()** (`fshandle_js_fsset`, Function, degree: 2)
 
 ## Relationships
 
-- watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_page_sizes (calls)
-- watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_group_blocks_by_page (calls)
-- watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_first_anchor_text (calls)
-- watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_format_page_marker (calls)
-- watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_printed_page_number (calls)
-- watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_page_footnotes (calls)
+- fshandle_js → fshandle_js_fsopendb (defines)
+- fshandle_js → fshandle_js_fsset (defines)
+- fshandle_js → fshandle_js_fsget (defines)
+- fshandle_js_fsset → fshandle_js_fsopendb (calls)
+- fshandle_js_fsget → fshandle_js_fsopendb (calls)
 

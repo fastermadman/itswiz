@@ -4,7 +4,7 @@
 - **Type:** Function
 - **File:** `./watchfolder/sync_hold_course.py`
 - **Location:** L89
-- **Community:** 7 (wikilink_target() (7))
+- **Community:** 2 (write_forloeb_mirrors())
 
 ## Relationships
 

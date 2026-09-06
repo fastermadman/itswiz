@@ -679,7 +679,7 @@
       "label": "fsHandle",
       "source_file": "./fsHandle.js",
       "node_type": "file",
-      "community": 24
+      "community": 17
     },
     {
       "id": "fshandle_js_fsopendb",
@@ -687,7 +687,7 @@
       "source_file": "./fsHandle.js",
       "source_location": "L8",
       "node_type": "function",
-      "community": 24
+      "community": 17
     },
     {
       "id": "fshandle_js_fsset",
@@ -695,7 +695,7 @@
       "source_file": "./fsHandle.js",
       "source_location": "L17",
       "node_type": "function",
-      "community": 24
+      "community": 17
     },
     {
       "id": "fshandle_js_fsget",
@@ -703,14 +703,14 @@
       "source_file": "./fsHandle.js",
       "source_location": "L27",
       "node_type": "function",
-      "community": 24
+      "community": 17
     },
     {
       "id": "options_js",
       "label": "options",
       "source_file": "./options.js",
       "node_type": "file",
-      "community": 25
+      "community": 18
     },
     {
       "id": "options_js_refreshvaultdirstatus",
@@ -718,7 +718,7 @@
       "source_file": "./options.js",
       "source_location": "L12",
       "node_type": "function",
-      "community": 25
+      "community": 18
     },
     {
       "id": "options_js_load",
@@ -726,14 +726,14 @@
       "source_file": "./options.js",
       "source_location": "L36",
       "node_type": "function",
-      "community": 25
+      "community": 18
     },
     {
       "id": "offscreen_js",
       "label": "offscreen",
       "source_file": "./offscreen.js",
       "node_type": "file",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_vaultpermissionerror",
@@ -741,7 +741,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L7",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_getvaulthandle",
@@ -749,7 +749,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L11",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_finddirentrynormalized",
@@ -757,7 +757,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L33",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_getdirectoryhandletolerant",
@@ -765,7 +765,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L41",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_gettargetdirectory",
@@ -773,7 +773,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L53",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_writefile",
@@ -781,7 +781,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L61",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_readfile",
@@ -789,7 +789,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L81",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_fileexists",
@@ -797,7 +797,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L103",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_copyrecursive",
@@ -805,7 +805,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L117",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_countplannotes",
@@ -813,7 +813,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L145",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "offscreen_js_movedir",
@@ -821,7 +821,7 @@
       "source_file": "./offscreen.js",
       "source_location": "L153",
       "node_type": "function",
-      "community": 8
+      "community": 7
     },
     {
       "id": "watchfolder_sync_hold_course_py",
@@ -916,7 +916,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L89",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_parse_frontmatter",
@@ -924,7 +924,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L107",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_prefixed_lines",
@@ -932,7 +932,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L136",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_note_stub_path",
@@ -948,7 +948,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L160",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_wikilink_for",
@@ -956,7 +956,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L169",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_append_file_list_field",
@@ -964,7 +964,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L174",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_owned_targets",
@@ -972,7 +972,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L195",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_remove_file_list_lines",
@@ -980,7 +980,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L212",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_patch_pending_materiale",
@@ -988,7 +988,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L230",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_read_tasks",
@@ -996,7 +996,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L326",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_read_plans",
@@ -1004,7 +1004,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L351",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_generate_id",
@@ -1108,7 +1108,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L623",
       "node_type": "function",
-      "community": 23
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_stable_key",
@@ -1116,7 +1116,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L651",
       "node_type": "function",
-      "community": 23
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_ensure_resource",
@@ -1124,7 +1124,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L667",
       "node_type": "function",
-      "community": 23
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_prune_stale_resource_classes",
@@ -1132,7 +1132,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L685",
       "node_type": "function",
-      "community": 23
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_ensure_assignment",
@@ -1148,7 +1148,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L730",
       "node_type": "function",
-      "community": 22
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_sync_data",
@@ -1156,7 +1156,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L785",
       "node_type": "function",
-      "community": 23
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_sync_task_completion",
@@ -1164,7 +1164,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L985",
       "node_type": "function",
-      "community": 22
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_trigger_obsidian_reload",
@@ -1172,7 +1172,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L1042",
       "node_type": "function",
-      "community": 22
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_reconcile_onyx",
@@ -1180,7 +1180,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L1061",
       "node_type": "function",
-      "community": 22
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_iso_week",
@@ -1244,7 +1244,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L1221",
       "node_type": "function",
-      "community": 22
+      "community": 2
     },
     {
       "id": "watchfolder_sync_hold_course_py_init_semesters_retroactively",
@@ -1268,7 +1268,7 @@
       "source_file": "./watchfolder/sync_hold_course.py",
       "source_location": "L1427",
       "node_type": "function",
-      "community": 7
+      "community": 2
     },
     {
       "id": "watchfolder_watch_viastudywiz_py",
@@ -1443,7 +1443,7 @@
       "source_file": "./watchfolder/watch_viastudywiz.py",
       "source_location": "L104",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_to_wikilinks",
@@ -1451,7 +1451,7 @@
       "source_file": "./watchfolder/watch_viastudywiz.py",
       "source_location": "L113",
       "node_type": "function",
-      "community": 20
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_read_frontmatter_field",
@@ -1481,47 +1481,47 @@
       "id": "watchfolder_watch_viastudywiz_py_time_fields_from_start",
       "label": "time_fields_from_start()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L169",
+      "source_location": "L171",
       "node_type": "function",
-      "community": 21
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_format_now",
       "label": "format_now()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L183",
+      "source_location": "L185",
       "node_type": "function",
-      "community": 21
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_plain_fag",
       "label": "plain_fag()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L187",
+      "source_location": "L189",
       "node_type": "function",
-      "community": 21
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_frontmatter",
       "label": "frontmatter()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L201",
+      "source_location": "L203",
       "node_type": "function",
-      "community": 21
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_md_targets",
       "label": "md_targets()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L228",
+      "source_location": "L230",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_in_raw_branch",
       "label": "in_raw_branch()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L236",
+      "source_location": "L238",
       "node_type": "function",
       "community": 1
     },
@@ -1529,79 +1529,79 @@
       "id": "watchfolder_watch_viastudywiz_py_existing_conversion",
       "label": "existing_conversion()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L245",
+      "source_location": "L247",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_write_duplicate_stub",
       "label": "write_duplicate_stub()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L261",
+      "source_location": "L263",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_error_marker_path",
       "label": "error_marker_path()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L269",
+      "source_location": "L271",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_already_converted",
       "label": "already_converted()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L273",
+      "source_location": "L275",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_has_highlights",
       "label": "has_highlights()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L283",
+      "source_location": "L285",
       "node_type": "function",
-      "community": 20
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_previously_failed",
       "label": "previously_failed()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L287",
+      "source_location": "L289",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_submit",
       "label": "submit()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L293",
+      "source_location": "L295",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_cached_zip",
       "label": "cached_zip()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L323",
+      "source_location": "L325",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_write_cache",
       "label": "write_cache()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L338",
+      "source_location": "L340",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_poll",
       "label": "poll()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L347",
+      "source_location": "L349",
       "node_type": "function",
       "community": 1
     },
@@ -1609,31 +1609,31 @@
       "id": "watchfolder_watch_viastudywiz_py_group_blocks_by_page",
       "label": "_group_blocks_by_page()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L366",
+      "source_location": "L368",
       "node_type": "function",
-      "community": 17
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_printed_page_number",
       "label": "_printed_page_number()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L376",
+      "source_location": "L378",
       "node_type": "function",
-      "community": 17
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_page_footnotes",
       "label": "_page_footnotes()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L405",
+      "source_location": "L407",
       "node_type": "function",
-      "community": 17
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_bisect_blocks",
       "label": "_bisect_blocks()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L425",
+      "source_location": "L427",
       "node_type": "function",
       "community": 1
     },
@@ -1641,7 +1641,7 @@
       "id": "watchfolder_watch_viastudywiz_py_split_double_page",
       "label": "_split_double_page()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L434",
+      "source_location": "L436",
       "node_type": "function",
       "community": 1
     },
@@ -1649,71 +1649,71 @@
       "id": "watchfolder_watch_viastudywiz_py_page_sizes",
       "label": "_page_sizes()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L458",
+      "source_location": "L460",
       "node_type": "function",
-      "community": 17
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_extract_running_header",
       "label": "_extract_running_header()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L477",
+      "source_location": "L479",
       "node_type": "function",
-      "community": 20
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_first_anchor_text",
       "label": "_first_anchor_text()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L496",
+      "source_location": "L498",
       "node_type": "function",
-      "community": 17
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_insert_page_markers",
       "label": "insert_page_markers()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L507",
+      "source_location": "L509",
       "node_type": "function",
-      "community": 17
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_format_page_marker",
       "label": "_format_page_marker()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L569",
+      "source_location": "L571",
       "node_type": "function",
-      "community": 17
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_write_conversion",
       "label": "write_conversion()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L578",
+      "source_location": "L580",
       "node_type": "function",
-      "community": 20
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_integrate_output",
       "label": "integrate_output()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L622",
+      "source_location": "L624",
       "node_type": "function",
-      "community": 20
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_process_document",
       "label": "process_document()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L636",
+      "source_location": "L638",
       "node_type": "function",
-      "community": 9
+      "community": 1
     },
     {
       "id": "watchfolder_watch_viastudywiz_py_process_document_with_watchdog",
       "label": "process_document_with_watchdog()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L669",
+      "source_location": "L671",
       "node_type": "function",
       "community": 1
     },
@@ -1721,7 +1721,7 @@
       "id": "watchfolder_watch_viastudywiz_py_scan_existing",
       "label": "scan_existing()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L685",
+      "source_location": "L687",
       "node_type": "function",
       "community": 1
     },
@@ -1729,7 +1729,7 @@
       "id": "watchfolder_watch_viastudywiz_py_resolve_sync_conflict",
       "label": "resolve_sync_conflict()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L701",
+      "source_location": "L703",
       "node_type": "function",
       "community": 1
     },
@@ -1737,7 +1737,7 @@
       "id": "watchfolder_watch_viastudywiz_py_documenthandler",
       "label": "DocumentHandler",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L714",
+      "source_location": "L716",
       "node_type": "class",
       "community": 1
     },
@@ -1745,7 +1745,7 @@
       "id": "watchfolder_watch_viastudywiz_py_documenthandler_on_created",
       "label": ".on_created()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L715",
+      "source_location": "L717",
       "node_type": "method",
       "community": 1
     },
@@ -1753,7 +1753,7 @@
       "id": "watchfolder_watch_viastudywiz_py_sync_hold_course_quietly",
       "label": "sync_hold_course_quietly()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L731",
+      "source_location": "L733",
       "node_type": "function",
       "community": 1
     },
@@ -1761,7 +1761,7 @@
       "id": "watchfolder_watch_viastudywiz_py_main",
       "label": "main()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L744",
+      "source_location": "L746",
       "node_type": "function",
       "community": 1
     },
@@ -1769,16 +1769,16 @@
       "id": "watchfolder_watch_viastudywiz_py_selfcheck",
       "label": "selfcheck()",
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L762",
+      "source_location": "L764",
       "node_type": "function",
-      "community": 21
+      "community": 1
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py",
       "label": "migrate_to_raw_md",
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "node_type": "file",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_hashlib",
@@ -1786,7 +1786,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L20",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_re",
@@ -1794,7 +1794,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L21",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_shutil",
@@ -1802,7 +1802,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L22",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_sys",
@@ -1810,7 +1810,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L23",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_pathlib_path",
@@ -1818,7 +1818,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L24",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_attachments_dir_name",
@@ -1826,7 +1826,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L26",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_md_dir_name",
@@ -1834,7 +1834,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L26",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_raw_dir_name",
@@ -1842,7 +1842,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L26",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_vault_root",
@@ -1850,7 +1850,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L26",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_frontmatter",
@@ -1858,7 +1858,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L26",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_md_targets",
@@ -1866,7 +1866,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L26",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_import_watch_viastudywiz_write_duplicate_stub",
@@ -1874,7 +1874,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L26",
       "node_type": "module",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_to_wikilinks",
@@ -1882,7 +1882,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L42",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_destination",
@@ -1890,7 +1890,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L46",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_plan_fag",
@@ -1898,7 +1898,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L55",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_fingerprint",
@@ -1906,7 +1906,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L81",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_resolve_duplicates",
@@ -1914,7 +1914,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L87",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_plan_duplicate_stubs",
@@ -1922,7 +1922,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L112",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_source_document",
@@ -1930,7 +1930,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L133",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_add_frontmatter",
@@ -1938,7 +1938,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L140",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_collapse_duplicate",
@@ -1946,7 +1946,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L149",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_find_fag_dirs",
@@ -1954,7 +1954,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L164",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_main",
@@ -1962,7 +1962,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L175",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_raw_md_py_selfcheck",
@@ -1970,14 +1970,14 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_raw_md.py",
       "source_location": "L228",
       "node_type": "function",
-      "community": 3
+      "community": 4
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py",
       "label": "strip_empty_headings",
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "node_type": "file",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py_import_re",
@@ -1985,7 +1985,7 @@
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "source_location": "L14",
       "node_type": "module",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py_import_sys",
@@ -1993,7 +1993,7 @@
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "source_location": "L15",
       "node_type": "module",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py_import_pathlib_path",
@@ -2001,7 +2001,7 @@
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "source_location": "L16",
       "node_type": "module",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py_looks_like_lost_title",
@@ -2009,7 +2009,7 @@
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "source_location": "L25",
       "node_type": "function",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py_next_nonblank",
@@ -2017,7 +2017,7 @@
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "source_location": "L42",
       "node_type": "function",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py_fix",
@@ -2025,7 +2025,7 @@
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "source_location": "L49",
       "node_type": "function",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_strip_empty_headings_py_main",
@@ -2033,14 +2033,14 @@
       "source_file": "./watchfolder/engangsscripts/strip_empty_headings.py",
       "source_location": "L70",
       "node_type": "function",
-      "community": 13
+      "community": 12
     },
     {
       "id": "watchfolder_engangsscripts_fix_stale_fag_root_links_py",
       "label": "fix_stale_fag_root_links",
       "source_file": "./watchfolder/engangsscripts/fix_stale_fag_root_links.py",
       "node_type": "file",
-      "community": 19
+      "community": 16
     },
     {
       "id": "watchfolder_engangsscripts_fix_stale_fag_root_links_py_import_re",
@@ -2048,7 +2048,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_stale_fag_root_links.py",
       "source_location": "L17",
       "node_type": "module",
-      "community": 19
+      "community": 16
     },
     {
       "id": "watchfolder_engangsscripts_fix_stale_fag_root_links_py_import_sys",
@@ -2056,7 +2056,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_stale_fag_root_links.py",
       "source_location": "L18",
       "node_type": "module",
-      "community": 19
+      "community": 16
     },
     {
       "id": "watchfolder_engangsscripts_fix_stale_fag_root_links_py_import_pathlib_path",
@@ -2064,7 +2064,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_stale_fag_root_links.py",
       "source_location": "L19",
       "node_type": "module",
-      "community": 19
+      "community": 16
     },
     {
       "id": "watchfolder_engangsscripts_fix_stale_fag_root_links_py_rewrite_links",
@@ -2072,7 +2072,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_stale_fag_root_links.py",
       "source_location": "L27",
       "node_type": "function",
-      "community": 19
+      "community": 16
     },
     {
       "id": "watchfolder_engangsscripts_fix_stale_fag_root_links_py_main",
@@ -2080,14 +2080,14 @@
       "source_file": "./watchfolder/engangsscripts/fix_stale_fag_root_links.py",
       "source_location": "L37",
       "node_type": "function",
-      "community": 19
+      "community": 16
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py",
       "label": "backfill_footnotes",
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "node_type": "file",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_import_hashlib",
@@ -2095,7 +2095,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L16",
       "node_type": "module",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_import_json",
@@ -2103,7 +2103,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L17",
       "node_type": "module",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_import_sys",
@@ -2111,7 +2111,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L18",
       "node_type": "module",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_import_zipfile",
@@ -2119,7 +2119,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L19",
       "node_type": "module",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_import_pathlib_path",
@@ -2127,7 +2127,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L20",
       "node_type": "module",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_import_watch_viastudywiz",
@@ -2135,7 +2135,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L23",
       "node_type": "module",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_digest_of",
@@ -2143,7 +2143,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L26",
       "node_type": "function",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_build_raw_index",
@@ -2151,7 +2151,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L30",
       "node_type": "function",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_has_footnotes",
@@ -2159,7 +2159,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L38",
       "node_type": "function",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_backfill_footnotes_py_main",
@@ -2167,14 +2167,14 @@
       "source_file": "./watchfolder/engangsscripts/backfill_footnotes.py",
       "source_location": "L48",
       "node_type": "function",
-      "community": 10
+      "community": 9
     },
     {
       "id": "watchfolder_engangsscripts_reformat_material_links_py",
       "label": "reformat_material_links",
       "source_file": "./watchfolder/engangsscripts/reformat_material_links.py",
       "node_type": "file",
-      "community": 16
+      "community": 13
     },
     {
       "id": "watchfolder_engangsscripts_reformat_material_links_py_import_re",
@@ -2182,7 +2182,7 @@
       "source_file": "./watchfolder/engangsscripts/reformat_material_links.py",
       "source_location": "L15",
       "node_type": "module",
-      "community": 16
+      "community": 13
     },
     {
       "id": "watchfolder_engangsscripts_reformat_material_links_py_import_sys",
@@ -2190,7 +2190,7 @@
       "source_file": "./watchfolder/engangsscripts/reformat_material_links.py",
       "source_location": "L16",
       "node_type": "module",
-      "community": 16
+      "community": 13
     },
     {
       "id": "watchfolder_engangsscripts_reformat_material_links_py_import_pathlib_path",
@@ -2198,7 +2198,7 @@
       "source_file": "./watchfolder/engangsscripts/reformat_material_links.py",
       "source_location": "L17",
       "node_type": "module",
-      "community": 16
+      "community": 13
     },
     {
       "id": "watchfolder_engangsscripts_reformat_material_links_py_find_raw_file",
@@ -2206,7 +2206,7 @@
       "source_file": "./watchfolder/engangsscripts/reformat_material_links.py",
       "source_location": "L27",
       "node_type": "function",
-      "community": 16
+      "community": 13
     },
     {
       "id": "watchfolder_engangsscripts_reformat_material_links_py_reformat",
@@ -2214,7 +2214,7 @@
       "source_file": "./watchfolder/engangsscripts/reformat_material_links.py",
       "source_location": "L43",
       "node_type": "function",
-      "community": 16
+      "community": 13
     },
     {
       "id": "watchfolder_engangsscripts_reformat_material_links_py_main",
@@ -2222,14 +2222,14 @@
       "source_file": "./watchfolder/engangsscripts/reformat_material_links.py",
       "source_location": "L68",
       "node_type": "function",
-      "community": 16
+      "community": 13
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py",
       "label": "rename_lektionsplan_notes",
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "node_type": "file",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py_import_re",
@@ -2237,7 +2237,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "source_location": "L18",
       "node_type": "module",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py_import_sys",
@@ -2245,7 +2245,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "source_location": "L19",
       "node_type": "module",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py_import_pathlib_path",
@@ -2253,7 +2253,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "source_location": "L20",
       "node_type": "module",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py_rename_in_week_dir",
@@ -2261,7 +2261,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "source_location": "L31",
       "node_type": "function",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py_fix_backlinks",
@@ -2269,7 +2269,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "source_location": "L55",
       "node_type": "function",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py_main",
@@ -2277,7 +2277,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "source_location": "L84",
       "node_type": "function",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_lektionsplan_notes_py_selfcheck",
@@ -2285,14 +2285,14 @@
       "source_file": "./watchfolder/engangsscripts/rename_lektionsplan_notes.py",
       "source_location": "L105",
       "node_type": "function",
-      "community": 14
+      "community": 11
     },
     {
       "id": "watchfolder_engangsscripts_rename_fag_folders_py",
       "label": "rename_fag_folders",
       "source_file": "./watchfolder/engangsscripts/rename_fag_folders.py",
       "node_type": "file",
-      "community": 18
+      "community": 15
     },
     {
       "id": "watchfolder_engangsscripts_rename_fag_folders_py_import_re",
@@ -2300,7 +2300,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_fag_folders.py",
       "source_location": "L19",
       "node_type": "module",
-      "community": 18
+      "community": 15
     },
     {
       "id": "watchfolder_engangsscripts_rename_fag_folders_py_import_sys",
@@ -2308,7 +2308,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_fag_folders.py",
       "source_location": "L20",
       "node_type": "module",
-      "community": 18
+      "community": 15
     },
     {
       "id": "watchfolder_engangsscripts_rename_fag_folders_py_import_pathlib_path",
@@ -2316,7 +2316,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_fag_folders.py",
       "source_location": "L21",
       "node_type": "module",
-      "community": 18
+      "community": 15
     },
     {
       "id": "watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references",
@@ -2324,7 +2324,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_fag_folders.py",
       "source_location": "L31",
       "node_type": "function",
-      "community": 18
+      "community": 15
     },
     {
       "id": "watchfolder_engangsscripts_rename_fag_folders_py_main",
@@ -2332,7 +2332,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_fag_folders.py",
       "source_location": "L38",
       "node_type": "function",
-      "community": 18
+      "community": 15
     },
     {
       "id": "watchfolder_engangsscripts_rename_fag_folders_py_selfcheck",
@@ -2340,7 +2340,7 @@
       "source_file": "./watchfolder/engangsscripts/rename_fag_folders.py",
       "source_location": "L72",
       "node_type": "function",
-      "community": 18
+      "community": 15
     },
     {
       "id": "watchfolder_engangsscripts_enrich_existing_notes_py",
@@ -2442,7 +2442,7 @@
       "label": "backfill_week_topics",
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "node_type": "file",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_import_re",
@@ -2450,7 +2450,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L17",
       "node_type": "module",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_import_sys",
@@ -2458,7 +2458,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L18",
       "node_type": "module",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_import_pathlib_path",
@@ -2466,7 +2466,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L19",
       "node_type": "module",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_sanitize",
@@ -2474,7 +2474,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L67",
       "node_type": "function",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_rewrite_references",
@@ -2482,7 +2482,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L71",
       "node_type": "function",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_plan_renames",
@@ -2490,7 +2490,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L82",
       "node_type": "function",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_main",
@@ -2498,7 +2498,7 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L93",
       "node_type": "function",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_backfill_week_topics_py_selfcheck",
@@ -2506,14 +2506,14 @@
       "source_file": "./watchfolder/engangsscripts/backfill_week_topics.py",
       "source_location": "L131",
       "node_type": "function",
-      "community": 12
+      "community": 10
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py",
       "label": "migrate_to_enhed_mapper",
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "node_type": "file",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_datetime",
@@ -2521,7 +2521,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L35",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_hashlib",
@@ -2529,7 +2529,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L36",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_re",
@@ -2537,7 +2537,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L37",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_shutil",
@@ -2545,7 +2545,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L38",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_sys",
@@ -2553,7 +2553,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L39",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_unicodedata",
@@ -2561,7 +2561,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L40",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_pathlib_path",
@@ -2569,7 +2569,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L41",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_attachments_dir_name",
@@ -2577,7 +2577,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L45",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_folder_symbols",
@@ -2585,7 +2585,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L45",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_md_dir_name",
@@ -2593,7 +2593,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L45",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_raw_dir_name",
@@ -2601,7 +2601,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L45",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_import_watch_viastudywiz_vault_root",
@@ -2609,7 +2609,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L45",
       "node_type": "module",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_nfc",
@@ -2649,7 +2649,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L93",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_enhed_for",
@@ -2673,7 +2673,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L112",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_fingerprint",
@@ -2681,7 +2681,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L116",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_read_fm",
@@ -2689,7 +2689,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L122",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_wikilink_target",
@@ -2697,7 +2697,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L134",
       "node_type": "function",
-      "community": 5
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_resolve_note",
@@ -2705,7 +2705,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L139",
       "node_type": "function",
-      "community": 5
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan",
@@ -2713,7 +2713,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L152",
       "node_type": "class",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_init",
@@ -2721,7 +2721,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L153",
       "node_type": "method",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_fag",
@@ -2737,7 +2737,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L233",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_suffix_all",
@@ -2745,7 +2745,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L275",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_plan_dublets",
@@ -2753,7 +2753,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L287",
       "node_type": "function",
-      "community": 5
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_link_patterns",
@@ -2801,7 +2801,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L390",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_main",
@@ -2817,7 +2817,7 @@
       "source_file": "./watchfolder/engangsscripts/migrate_to_enhed_mapper.py",
       "source_location": "L513",
       "node_type": "function",
-      "community": 4
+      "community": 3
     },
     {
       "id": "watchfolder_engangsscripts_migrate_to_enhed_mapper_py_selfcheck",
@@ -2832,7 +2832,7 @@
       "label": "reconvert_double_page",
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "node_type": "file",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_import_re",
@@ -2840,7 +2840,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L22",
       "node_type": "module",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_import_shutil",
@@ -2848,7 +2848,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L23",
       "node_type": "module",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_import_sys",
@@ -2856,7 +2856,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L24",
       "node_type": "module",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_import_pathlib_path",
@@ -2864,7 +2864,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L25",
       "node_type": "module",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_import_watch_viastudywiz_vault_root",
@@ -2872,7 +2872,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L27",
       "node_type": "module",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_import_watch_viastudywiz_has_highlights",
@@ -2880,7 +2880,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L27",
       "node_type": "module",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_import_watch_viastudywiz_md_targets",
@@ -2888,7 +2888,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L27",
       "node_type": "module",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_find_affected",
@@ -2896,7 +2896,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L33",
       "node_type": "function",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_main",
@@ -2904,7 +2904,7 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L52",
       "node_type": "function",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_reconvert_double_page_py_selfcheck",
@@ -2912,14 +2912,14 @@
       "source_file": "./watchfolder/engangsscripts/reconvert_double_page.py",
       "source_location": "L79",
       "node_type": "function",
-      "community": 11
+      "community": 8
     },
     {
       "id": "watchfolder_engangsscripts_fix_fag_symbol_prefix_py",
       "label": "fix_fag_symbol_prefix",
       "source_file": "./watchfolder/engangsscripts/fix_fag_symbol_prefix.py",
       "node_type": "file",
-      "community": 15
+      "community": 14
     },
     {
       "id": "watchfolder_engangsscripts_fix_fag_symbol_prefix_py_import_re",
@@ -2927,7 +2927,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_fag_symbol_prefix.py",
       "source_location": "L12",
       "node_type": "module",
-      "community": 15
+      "community": 14
     },
     {
       "id": "watchfolder_engangsscripts_fix_fag_symbol_prefix_py_import_sys",
@@ -2935,7 +2935,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_fag_symbol_prefix.py",
       "source_location": "L13",
       "node_type": "module",
-      "community": 15
+      "community": 14
     },
     {
       "id": "watchfolder_engangsscripts_fix_fag_symbol_prefix_py_import_pathlib_path",
@@ -2943,7 +2943,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_fag_symbol_prefix.py",
       "source_location": "L14",
       "node_type": "module",
-      "community": 15
+      "community": 14
     },
     {
       "id": "watchfolder_engangsscripts_fix_fag_symbol_prefix_py_rewrite_fag",
@@ -2951,7 +2951,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_fag_symbol_prefix.py",
       "source_location": "L20",
       "node_type": "function",
-      "community": 15
+      "community": 14
     },
     {
       "id": "watchfolder_engangsscripts_fix_fag_symbol_prefix_py_main",
@@ -2959,7 +2959,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_fag_symbol_prefix.py",
       "source_location": "L26",
       "node_type": "function",
-      "community": 15
+      "community": 14
     },
     {
       "id": "watchfolder_engangsscripts_fix_fag_symbol_prefix_py_selfcheck",
@@ -2967,7 +2967,7 @@
       "source_file": "./watchfolder/engangsscripts/fix_fag_symbol_prefix.py",
       "source_location": "L50",
       "node_type": "function",
-      "community": 15
+      "community": 14
     }
   ],
   "links": [
@@ -7328,7 +7328,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L169",
+      "source_location": "L171",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7339,7 +7339,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L183",
+      "source_location": "L185",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7350,7 +7350,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L187",
+      "source_location": "L189",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7361,7 +7361,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L201",
+      "source_location": "L203",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7372,7 +7372,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L228",
+      "source_location": "L230",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7383,7 +7383,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L236",
+      "source_location": "L238",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7394,7 +7394,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L245",
+      "source_location": "L247",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7405,7 +7405,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L261",
+      "source_location": "L263",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7416,7 +7416,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L269",
+      "source_location": "L271",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7427,7 +7427,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L273",
+      "source_location": "L275",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7438,7 +7438,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L283",
+      "source_location": "L285",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7449,7 +7449,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L287",
+      "source_location": "L289",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7460,7 +7460,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L293",
+      "source_location": "L295",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7471,7 +7471,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L323",
+      "source_location": "L325",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7482,7 +7482,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L338",
+      "source_location": "L340",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7493,7 +7493,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L347",
+      "source_location": "L349",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7504,7 +7504,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L366",
+      "source_location": "L368",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7515,7 +7515,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L376",
+      "source_location": "L378",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7526,7 +7526,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L405",
+      "source_location": "L407",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7537,7 +7537,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L425",
+      "source_location": "L427",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7548,7 +7548,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L434",
+      "source_location": "L436",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7559,7 +7559,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L458",
+      "source_location": "L460",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7570,7 +7570,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L477",
+      "source_location": "L479",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7581,7 +7581,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L496",
+      "source_location": "L498",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7592,7 +7592,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L507",
+      "source_location": "L509",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7603,7 +7603,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L569",
+      "source_location": "L571",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7614,7 +7614,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L578",
+      "source_location": "L580",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7625,7 +7625,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L622",
+      "source_location": "L624",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7636,7 +7636,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L636",
+      "source_location": "L638",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7647,7 +7647,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L669",
+      "source_location": "L671",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7658,7 +7658,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L685",
+      "source_location": "L687",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7669,7 +7669,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L701",
+      "source_location": "L703",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7680,7 +7680,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L714",
+      "source_location": "L716",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7691,7 +7691,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L715",
+      "source_location": "L717",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7702,7 +7702,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L731",
+      "source_location": "L733",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7713,7 +7713,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L744",
+      "source_location": "L746",
       "weight": 1.0,
       "provenance": "ast:defines"
     },
@@ -7724,7 +7724,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "./watchfolder/watch_viastudywiz.py",
-      "source_location": "L762",
+      "source_location": "L764",
       "weight": 1.0,
       "provenance": "ast:defines"
     },

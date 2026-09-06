@@ -3,7 +3,7 @@
 - **ID:** `watchfolder_engangsscripts_reconvert_double_page_py`
 - **Type:** File
 - **File:** `./watchfolder/engangsscripts/reconvert_double_page.py`
-- **Community:** 11 (selfcheck())
+- **Community:** 8 (selfcheck() (8))
 
 ## Relationships
 

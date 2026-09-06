@@ -3,7 +3,7 @@
 - **ID:** `offscreen_js`
 - **Type:** File
 - **File:** `./offscreen.js`
-- **Community:** 8 (writeFile())
+- **Community:** 7 (writeFile())
 
 ## Relationships
 

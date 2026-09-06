@@ -3,8 +3,8 @@
 - **ID:** `watchfolder_watch_viastudywiz_py_insert_page_markers`
 - **Type:** Function
 - **File:** `./watchfolder/watch_viastudywiz.py`
-- **Location:** L507
-- **Community:** 17 (_printed_page_number())
+- **Location:** L509
+- **Community:** 1 (write_duplicate_stub())
 
 ## Relationships
 

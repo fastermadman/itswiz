@@ -2,7 +2,7 @@
 id: watchfolder_engangsscripts_backfill_footnotes_py
 type: File
 source: ./watchfolder/engangsscripts/backfill_footnotes.py
-community: 10
+community: 9
 community_label: main()
 ---
 

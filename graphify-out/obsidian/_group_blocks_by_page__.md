@@ -2,8 +2,8 @@
 id: watchfolder_watch_viastudywiz_py_group_blocks_by_page
 type: Function
 source: ./watchfolder/watch_viastudywiz.py
-community: 17
-community_label: _printed_page_number()
+community: 1
+community_label: write_duplicate_stub()
 ---
 
 ## Connections

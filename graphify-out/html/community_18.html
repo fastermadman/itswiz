@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>selfcheck() (18) — Community 18</title>
+<title>refreshVaultDirStatus() — Community 18</title>
 <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,8 +25,8 @@ body { background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 <body>
 <div id="sidebar">
     <div>
-        <h2>selfcheck() (18)</h2>
-        <p style="font-size:12px;color:#666;">7 nodes · Community 18</p>
+        <h2>refreshVaultDirStatus()</h2>
+        <p style="font-size:12px;color:#666;">3 nodes · Community 18</p>
     </div>
     <input id="search" type="text" placeholder="Search nodes…" />
     <div>
@@ -41,8 +41,8 @@ body { background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 <div id="graph-container"></div>
 <script>
 (function() {
-    var nodesData = [{id:"watchfolder_engangsscripts_rename_fag_folders_py",label:"rename_fag_folders",title:"rename_fag_folders\nType: File\nFile: ./watchfolder/engangsscripts/rename_fag_folders.py\nDegree: 6",color:"#9C755F",size:17.8},{id:"watchfolder_engangsscripts_rename_fag_folders_py_import_re",label:"re",title:"re\nType: Module\nFile: ./watchfolder/engangsscripts/rename_fag_folders.py\nDegree: 1",color:"#9C755F",size:12.0},{id:"watchfolder_engangsscripts_rename_fag_folders_py_import_sys",label:"sys",title:"sys\nType: Module\nFile: ./watchfolder/engangsscripts/rename_fag_folders.py\nDegree: 1",color:"#9C755F",size:12.0},{id:"watchfolder_engangsscripts_rename_fag_folders_py_import_pathlib_path",label:"pathlib.Path",title:"pathlib.Path\nType: Module\nFile: ./watchfolder/engangsscripts/rename_fag_folders.py\nDegree: 1",color:"#9C755F",size:12.0},{id:"watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references",label:"rewrite_references()",title:"rewrite_references()\nType: Function\nFile: ./watchfolder/engangsscripts/rename_fag_folders.py\nDegree: 3",color:"#9C755F",size:14.9},{id:"watchfolder_engangsscripts_rename_fag_folders_py_main",label:"main()",title:"main()\nType: Function\nFile: ./watchfolder/engangsscripts/rename_fag_folders.py\nDegree: 2",color:"#9C755F",size:13.7},{id:"watchfolder_engangsscripts_rename_fag_folders_py_selfcheck",label:"selfcheck()",title:"selfcheck()\nType: Function\nFile: ./watchfolder/engangsscripts/rename_fag_folders.py\nDegree: 2",color:"#9C755F",size:13.7}];
-    var edgesData = [{from:"watchfolder_engangsscripts_rename_fag_folders_py",to:"watchfolder_engangsscripts_rename_fag_folders_py_import_re",label:"imports",dashes:false,title:"imports: watchfolder_engangsscripts_rename_fag_folders_py → watchfolder_engangsscripts_rename_fag_folders_py_import_re\nConfidence: Extracted"},{from:"watchfolder_engangsscripts_rename_fag_folders_py",to:"watchfolder_engangsscripts_rename_fag_folders_py_import_sys",label:"imports",dashes:false,title:"imports: watchfolder_engangsscripts_rename_fag_folders_py → watchfolder_engangsscripts_rename_fag_folders_py_import_sys\nConfidence: Extracted"},{from:"watchfolder_engangsscripts_rename_fag_folders_py",to:"watchfolder_engangsscripts_rename_fag_folders_py_import_pathlib_path",label:"imports",dashes:false,title:"imports: watchfolder_engangsscripts_rename_fag_folders_py → watchfolder_engangsscripts_rename_fag_folders_py_import_pathlib_path\nConfidence: Extracted"},{from:"watchfolder_engangsscripts_rename_fag_folders_py",to:"watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references",label:"defines",dashes:false,title:"defines: watchfolder_engangsscripts_rename_fag_folders_py → watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references\nConfidence: Extracted"},{from:"watchfolder_engangsscripts_rename_fag_folders_py",to:"watchfolder_engangsscripts_rename_fag_folders_py_main",label:"defines",dashes:false,title:"defines: watchfolder_engangsscripts_rename_fag_folders_py → watchfolder_engangsscripts_rename_fag_folders_py_main\nConfidence: Extracted"},{from:"watchfolder_engangsscripts_rename_fag_folders_py",to:"watchfolder_engangsscripts_rename_fag_folders_py_selfcheck",label:"defines",dashes:false,title:"defines: watchfolder_engangsscripts_rename_fag_folders_py → watchfolder_engangsscripts_rename_fag_folders_py_selfcheck\nConfidence: Extracted"},{from:"watchfolder_engangsscripts_rename_fag_folders_py_main",to:"watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references",label:"calls",dashes:true,title:"calls: watchfolder_engangsscripts_rename_fag_folders_py_main → watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references\nConfidence: Inferred"},{from:"watchfolder_engangsscripts_rename_fag_folders_py_selfcheck",to:"watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references",label:"calls",dashes:true,title:"calls: watchfolder_engangsscripts_rename_fag_folders_py_selfcheck → watchfolder_engangsscripts_rename_fag_folders_py_rewrite_references\nConfidence: Inferred"}];
+    var nodesData = [{id:"options_js",label:"options",title:"options\nType: File\nFile: ./options.js\nDegree: 2",color:"#9C755F",size:13.7},{id:"options_js_refreshvaultdirstatus",label:"refreshVaultDirStatus()",title:"refreshVaultDirStatus()\nType: Function\nFile: ./options.js\nDegree: 2",color:"#9C755F",size:13.7},{id:"options_js_load",label:"load()",title:"load()\nType: Function\nFile: ./options.js\nDegree: 2",color:"#9C755F",size:13.7}];
+    var edgesData = [{from:"options_js",to:"options_js_refreshvaultdirstatus",label:"defines",dashes:false,title:"defines: options_js → options_js_refreshvaultdirstatus\nConfidence: Extracted"},{from:"options_js",to:"options_js_load",label:"defines",dashes:false,title:"defines: options_js → options_js_load\nConfidence: Extracted"},{from:"options_js_load",to:"options_js_refreshvaultdirstatus",label:"calls",dashes:true,title:"calls: options_js_load → options_js_refreshvaultdirstatus\nConfidence: Inferred"}];
     var container = document.getElementById('graph-container');
     var nodes = new vis.DataSet(nodesData);
     var edges = new vis.DataSet(edgesData);

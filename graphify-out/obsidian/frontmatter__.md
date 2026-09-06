@@ -2,8 +2,8 @@
 id: watchfolder_watch_viastudywiz_py_frontmatter
 type: Function
 source: ./watchfolder/watch_viastudywiz.py
-community: 21
-community_label: time_fields_from_start()
+community: 1
+community_label: write_duplicate_stub()
 ---
 
 ## Connections

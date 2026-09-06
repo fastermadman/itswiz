@@ -3,7 +3,7 @@
 - **ID:** `watchfolder_engangsscripts_strip_empty_headings_py`
 - **Type:** File
 - **File:** `./watchfolder/engangsscripts/strip_empty_headings.py`
-- **Community:** 13 (next_nonblank())
+- **Community:** 12 (next_nonblank())
 
 ## Relationships
 

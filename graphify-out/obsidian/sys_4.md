@@ -2,7 +2,7 @@
 id: watchfolder_engangsscripts_fix_stale_fag_root_links_py_import_sys
 type: Module
 source: ./watchfolder/engangsscripts/fix_stale_fag_root_links.py
-community: 19
+community: 16
 community_label: rewrite_links()
 ---
 

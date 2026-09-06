@@ -2,8 +2,8 @@
 id: watchfolder_engangsscripts_migrate_to_enhed_mapper_py_suffix_all
 type: Function
 source: ./watchfolder/engangsscripts/migrate_to_enhed_mapper.py
-community: 4
-community_label: _suffix_all()
+community: 3
+community_label: wikilink_target()
 ---
 
 ## Connections

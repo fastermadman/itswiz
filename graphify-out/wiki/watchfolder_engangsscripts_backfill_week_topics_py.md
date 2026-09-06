@@ -3,7 +3,7 @@
 - **ID:** `watchfolder_engangsscripts_backfill_week_topics_py`
 - **Type:** File
 - **File:** `./watchfolder/engangsscripts/backfill_week_topics.py`
-- **Community:** 12 (selfcheck() (12))
+- **Community:** 10 (selfcheck() (10))
 
 ## Relationships
 

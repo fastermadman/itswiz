@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>_printed_page_number() — Community 17</title>
+<title>fsSet() — Community 17</title>
 <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,8 +25,8 @@ body { background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 <body>
 <div id="sidebar">
     <div>
-        <h2>_printed_page_number()</h2>
-        <p style="font-size:12px;color:#666;">7 nodes · Community 17</p>
+        <h2>fsSet()</h2>
+        <p style="font-size:12px;color:#666;">4 nodes · Community 17</p>
     </div>
     <input id="search" type="text" placeholder="Search nodes…" />
     <div>
@@ -35,14 +35,14 @@ body { background: #0f0f1a; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
     </div>
     <div>
         <h3>Navigation</h3>
-        <a href="index.html" class="nav-link" style="font-weight:bold;">← Overview</a><a href="community_1.html" class="nav-link"><span class="legend-dot" style="background:#F28E2B"></span>sync_hold_course_quietly() (8 links)</a><a href="community_21.html" class="nav-link"><span class="legend-dot" style="background:#F28E2B"></span>time_fields_from_start() (2 links)</a><a href="community_20.html" class="nav-link"><span class="legend-dot" style="background:#4E79A7"></span>write_conversion() (1 links)</a>
+        <a href="index.html" class="nav-link" style="font-weight:bold;">← Overview</a>
     </div>
 </div>
 <div id="graph-container"></div>
 <script>
 (function() {
-    var nodesData = [{id:"watchfolder_watch_viastudywiz_py_group_blocks_by_page",label:"_group_blocks_by_page()",title:"_group_blocks_by_page()\nType: Function\nFile: ./watchfolder/watch_viastudywiz.py\nDegree: 2",color:"#FF9DA7",size:13.7},{id:"watchfolder_watch_viastudywiz_py_printed_page_number",label:"_printed_page_number()",title:"_printed_page_number()\nType: Function\nFile: ./watchfolder/watch_viastudywiz.py\nDegree: 3",color:"#FF9DA7",size:14.9},{id:"watchfolder_watch_viastudywiz_py_page_footnotes",label:"_page_footnotes()",title:"_page_footnotes()\nType: Function\nFile: ./watchfolder/watch_viastudywiz.py\nDegree: 2",color:"#FF9DA7",size:13.7},{id:"watchfolder_watch_viastudywiz_py_page_sizes",label:"_page_sizes()",title:"_page_sizes()\nType: Function\nFile: ./watchfolder/watch_viastudywiz.py\nDegree: 2",color:"#FF9DA7",size:13.7},{id:"watchfolder_watch_viastudywiz_py_first_anchor_text",label:"_first_anchor_text()",title:"_first_anchor_text()\nType: Function\nFile: ./watchfolder/watch_viastudywiz.py\nDegree: 2",color:"#FF9DA7",size:13.7},{id:"watchfolder_watch_viastudywiz_py_insert_page_markers",label:"insert_page_markers()",title:"insert_page_markers()\nType: Function\nFile: ./watchfolder/watch_viastudywiz.py\nDegree: 10",color:"#FF9DA7",size:20.6},{id:"watchfolder_watch_viastudywiz_py_format_page_marker",label:"_format_page_marker()",title:"_format_page_marker()\nType: Function\nFile: ./watchfolder/watch_viastudywiz.py\nDegree: 2",color:"#FF9DA7",size:13.7}];
-    var edgesData = [{from:"watchfolder_watch_viastudywiz_py_insert_page_markers",to:"watchfolder_watch_viastudywiz_py_page_sizes",label:"calls",dashes:true,title:"calls: watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_page_sizes\nConfidence: Inferred"},{from:"watchfolder_watch_viastudywiz_py_insert_page_markers",to:"watchfolder_watch_viastudywiz_py_group_blocks_by_page",label:"calls",dashes:true,title:"calls: watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_group_blocks_by_page\nConfidence: Inferred"},{from:"watchfolder_watch_viastudywiz_py_insert_page_markers",to:"watchfolder_watch_viastudywiz_py_first_anchor_text",label:"calls",dashes:true,title:"calls: watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_first_anchor_text\nConfidence: Inferred"},{from:"watchfolder_watch_viastudywiz_py_insert_page_markers",to:"watchfolder_watch_viastudywiz_py_format_page_marker",label:"calls",dashes:true,title:"calls: watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_format_page_marker\nConfidence: Inferred"},{from:"watchfolder_watch_viastudywiz_py_insert_page_markers",to:"watchfolder_watch_viastudywiz_py_printed_page_number",label:"calls",dashes:true,title:"calls: watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_printed_page_number\nConfidence: Inferred"},{from:"watchfolder_watch_viastudywiz_py_insert_page_markers",to:"watchfolder_watch_viastudywiz_py_page_footnotes",label:"calls",dashes:true,title:"calls: watchfolder_watch_viastudywiz_py_insert_page_markers → watchfolder_watch_viastudywiz_py_page_footnotes\nConfidence: Inferred"}];
+    var nodesData = [{id:"fshandle_js",label:"fsHandle",title:"fsHandle\nType: File\nFile: ./fsHandle.js\nDegree: 3",color:"#FF9DA7",size:14.9},{id:"fshandle_js_fsopendb",label:"fsOpenDb()",title:"fsOpenDb()\nType: Function\nFile: ./fsHandle.js\nDegree: 3",color:"#FF9DA7",size:14.9},{id:"fshandle_js_fsset",label:"fsSet()",title:"fsSet()\nType: Function\nFile: ./fsHandle.js\nDegree: 2",color:"#FF9DA7",size:13.7},{id:"fshandle_js_fsget",label:"fsGet()",title:"fsGet()\nType: Function\nFile: ./fsHandle.js\nDegree: 2",color:"#FF9DA7",size:13.7}];
+    var edgesData = [{from:"fshandle_js",to:"fshandle_js_fsopendb",label:"defines",dashes:false,title:"defines: fshandle_js → fshandle_js_fsopendb\nConfidence: Extracted"},{from:"fshandle_js",to:"fshandle_js_fsset",label:"defines",dashes:false,title:"defines: fshandle_js → fshandle_js_fsset\nConfidence: Extracted"},{from:"fshandle_js",to:"fshandle_js_fsget",label:"defines",dashes:false,title:"defines: fshandle_js → fshandle_js_fsget\nConfidence: Extracted"},{from:"fshandle_js_fsset",to:"fshandle_js_fsopendb",label:"calls",dashes:true,title:"calls: fshandle_js_fsset → fshandle_js_fsopendb\nConfidence: Inferred"},{from:"fshandle_js_fsget",to:"fshandle_js_fsopendb",label:"calls",dashes:true,title:"calls: fshandle_js_fsget → fshandle_js_fsopendb\nConfidence: Inferred"}];
     var container = document.getElementById('graph-container');
     var nodes = new vis.DataSet(nodesData);
     var edges = new vis.DataSet(edgesData);
