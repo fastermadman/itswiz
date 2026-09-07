@@ -76,6 +76,8 @@ async function existsInVault(path) {
 // Flytter en hel ugemappe (RAW/MD, inkl. konverterede materialer og _attachments) — bruges når en
 // lektion er blevet udskudt til en anden dato (issue #96, se writePlanNotes). No-op hvis
 // kildemappen ikke findes.
+// Returnerer { moved, reason } — se moveDir i offscreen.js. `moved: false, reason: "shared"`
+// betyder at mappen huser flere lektioners [PLAN]-noter og bevidst IKKE blev flyttet (issue #181).
 async function moveDirInVault(oldPath, newPath) {
   await ensureOffscreenDocument();
   const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "moveDir", oldPath, newPath });
@@ -84,6 +86,7 @@ async function moveDirInVault(oldPath, newPath) {
       code: response?.code,
     });
   }
+  return { moved: response.moved !== false, reason: response.reason };
 }
 
 // Tæller fejlede enkelt-elementer (fil-downloads, kalender-events, lektionsplan-noter) i den
@@ -1277,9 +1280,20 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     let prevRecord = planNoteRecord(records, noteId);
     if (prevRecord?.weekFolder && prevRecord.weekFolder !== weekFolder) {
       try {
-        await moveDirInVault(`${FAG_ROOT}/${fag}/MD/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/MD/${weekFolder}`);
-        await moveDirInVault(`${FAG_ROOT}/${fag}/RAW/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/RAW/${weekFolder}`);
-        runChangedNotes.push(`${prevRecord.weekFolder} → ${weekFolder} (${fagField}): lektion flyttet, vault-materialer fulgte med`);
+        // MD afgør: RAW-mappen har ingen [PLAN]-noter og kan derfor ikke selv se om enheden er
+        // delt. Flyttes kun når MD faktisk blev flyttet, ellers ville de to grene drifte fra
+        // hinanden (issue #181).
+        const md = await moveDirInVault(`${FAG_ROOT}/${fag}/MD/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/MD/${weekFolder}`);
+        if (md.reason === "shared") {
+          // Materialet bliver liggende under det gamle emne, hvor søskende-lektionerne stadig
+          // bruger det. Ikke en fejl der kan rettes automatisk: en delt fil har ingen enkelt
+          // ejer at flytte med (samme grundproblem som #183), så det er Valdemars beslutning.
+          recordError(`Lektion flyttet (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): `
+            + `materialet blev IKKE flyttet — mappen deles med andre lektioner i samme enhed. Flyt manuelt i Obsidian hvis det skal følge med.`);
+        } else {
+          await moveDirInVault(`${FAG_ROOT}/${fag}/RAW/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/RAW/${weekFolder}`);
+          runChangedNotes.push(`${prevRecord.weekFolder} → ${weekFolder} (${fagField}): lektion flyttet, vault-materialer fulgte med`);
+        }
         await savePlanNoteRecord(noteId, prevRecord.hash, weekFolder);
         prevRecord = { hash: prevRecord.hash, weekFolder };
       } catch (err) {

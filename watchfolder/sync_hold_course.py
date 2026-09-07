@@ -189,6 +189,44 @@ def append_file_list_field(text: str, key: str, prefix: str, new_links: list[str
     return text
 
 
+AUTO_MATERIALER_RE = re.compile(r"^## Materialer\n(.*?)(?=\n## |\n<!-- AUTO:END|\Z)", re.S | re.M)
+
+
+def _owned_targets(text: str, fields: dict) -> set[str]:
+    """Hvilke materiale-filer background.js beviseligt har tildelt DENNE plan (#183).
+
+    De to felter patch_pending_materiale aldrig selv skriver til, og som derfor stadig er ren
+    plan.elements-sandhed: AUTO-blokkens `## Materialer` (writePlanNotes' `materials`, som også
+    rummer Link-elementer og RAW-modparter — de matcher bare ingen fil i mappen og filtreres væk
+    af kalderen) og frontmatterens `litteratur_filer`. `materiale_filer` er BEVIDST udeladt: det
+    er netop dét felt der er fladet ud af tidligere kørsler, og at læse det ville gøre reglen
+    cirkulær.
+    """
+    match = AUTO_MATERIALER_RE.search(text)
+    owned = {nfc(t) for t in re.findall(r"\[\[([^|\]]+)", match.group(1))} if match else set()
+    owned |= {nfc(t) for l in prefixed_lines(fields.get("litteratur_filer", ""), LITTERATUR_FIL_PREFIX)
+              if (t := wikilink_target(l))}
+    return owned
+
+
+def remove_file_list_lines(text: str, key: str, prefix: str, drop: set[str]) -> str:
+    """Modstykket til append_file_list_field: fjerner de 📎-linjer i `key` hvis wikilink-mål står
+    i `drop`. Tømmes blokken helt, bliver feltet `key: false` igen — samme form background.js selv
+    skriver for et tomt felt, så Bases' `!= false`-filtre bliver ved med at virke."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() != f"{key}: |":
+            continue
+        j = i + 1
+        while j < len(lines) and lines[j].startswith("  "):
+            j += 1
+        kept = [l for l in lines[i + 1:j]
+                if nfc(wikilink_target(l.strip()[len(prefix):].strip()) or "") not in drop]
+        block = [f"{key}: |"] + kept if kept else [f"{key}: false"]
+        return "\n".join(lines[:i] + block + lines[j:])
+    return text
+
+
 def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     """Selvhelbredende pas (issue #141): background.js skriver `materiale_filer: false` når en
     fil ikke er MinerU-konverteret endnu på skrivetidspunktet — og den genskriver kun planer der
@@ -210,48 +248,78 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     og _*-filer filtreres fra, og linked-mængden NFC-normaliseres på begge sider (ü/æ/ø/å i
     mappenavne gav ellers NFD/NFC-mismatch og monotont voksende selvreferencer — issue #158).
 
-    BEVIDST pr.-note, ikke enheds-bred (#176 forsøgte "kronologisk første lektion ejer filen,
-    resten arver intet" — reverteret samme dag, live-bekræftet skadeligt: filernes eget `dato:`-
-    felt stemmer IKKE overens med filnavnets dato-suffiks, fordi lektioner flyttes i itslearning
-    (#96) uden at materiale-noternes snapshot-dato følger med. Der er ingen pålidelig signal i
-    vaulten til at afgøre hvilken lektion en delt fil reelt hører til — kun itslearnings egen
-    `plan.elements` pr. planId (background.js) ved det med sikkerhed. At gætte en eksklusiv ejer
-    her viste sig som "ingenting under mandagens lektion" i Hold Course, selvom læsestoffet
-    stadig lå i vaulten. Konsekvensen af pr.-note (hver søskende-lektion ser samme fil som sin
-    egen orphan) er For mange Reading-opgaver i Hold Course — kedeligt, men aldrig tab af adgang
-    til materiale. Se #183 for den rigtige løsning (dedupér i Hold Course-visningen, eller lad
-    background.js's egen plan.elements afgøre ejerskabet, ikke en mappe-baseret gæt her)."""
-    patched = []
+    Ejerskab i en delt enhed-mappe afgøres af background.js' EGEN plan.elements-skrivning, ikke
+    af et gæt her (#183). #176 gættede "kronologisk første lektion ejer filen, resten arver
+    intet" og blev reverteret samme dag: filernes `dato:`-felt stemmer ikke med filnavnets
+    dato-suffiks, fordi lektioner flyttes i itslearning (#96) uden at materiale-noternes
+    snapshot-dato følger med — 3 af 4 "Skolens formål"-lektioner stod tomme i Hold Course selvom
+    læsestoffet lå i vaulten.
+
+    Det pålidelige signal FINDES dog, det står bare ikke i `materiale_filer`: background.js
+    skriver samme plan.elements-liste TO steder — frontmatter `materiale_filer` OG AUTO-blokkens
+    `## Materialer` (writePlanNotes). Denne funktion har kun nogensinde skrevet til
+    `materiale_filer`, så AUTO-blokken (+ `litteratur_filer`, som den heller aldrig rører) er
+    urørt itslearning-sandhed pr. plan — se _owned_targets(). Live-målt 2026-09-06 over alle 16
+    delte enhed-mapper: 103 af 150 filer (68%) har dermed en kendt, diskriminerende ejer.
+
+    Reglen: en orphan springes over for DENNE plan hvis en søskende beviseligt ejer den og denne
+    plan ikke gør. Ejer ingen søskende den (de resterende 32% — MinerU nåede aldrig ind i
+    background.js' tidsvindue, som er hele grunden til at funktionen findes), claimer alle
+    søskende den som før. Aldrig under-inkluderende: #176's fejltilstand kan ikke opstå, fordi
+    en fil kun fravælges dér hvor der findes positivt bevis for en anden ejer. Prisen er de
+    32%'s dublet-Reading-opgaver — kedeligt, aldrig tab af adgang til materiale."""
+    # Samlet pr. mappe, ikke pr. note: ejerskabet nedenfor kan kun afgøres ved at se søskendene.
+    folders: dict[Path, list[tuple[Path, str, dict]]] = {}
     for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         text = plan_path.read_text(encoding="utf-8")
         fields = parse_frontmatter(text)
         if fields.get("type") != "lektionsplan":
             continue
+        folders.setdefault(plan_path.parent, []).append((plan_path, text, fields))
 
-        linked = {
-            nfc(t)
-            for key, pfx in (("materiale_filer", MATERIALE_FIL_PREFIX), ("litteratur_filer", LITTERATUR_FIL_PREFIX))
-            for l in prefixed_lines(fields.get(key, ""), pfx)
-            if (t := wikilink_target(l))
-        }
+    patched = []
+    for siblings in folders.values():
+        owned = {path: _owned_targets(text, fields) for path, text, fields in siblings}
+        for plan_path, text, fields in siblings:
+            claimed_elsewhere = set().union(
+                *(t for p, t in owned.items() if p != plan_path), set()
+            ) - owned[plan_path]
 
-        orphans = [
-            nfc(str(md.relative_to(vault_root)))
-            for md in sorted(plan_path.parent.glob("*.md"))
-            if nfc(md.name) != nfc(plan_path.name)
-            and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
-        ]
-        orphans = [o for o in orphans if o not in linked]
-        if not orphans:
-            continue
+            linked = {
+                nfc(t)
+                for key, pfx in (("materiale_filer", MATERIALE_FIL_PREFIX), ("litteratur_filer", LITTERATUR_FIL_PREFIX))
+                for l in prefixed_lines(fields.get(key, ""), pfx)
+                if (t := wikilink_target(l))
+            }
 
-        updated = append_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
-                                          [wikilink_for(o) for o in orphans])
-        if updated == text:
-            continue
-        patched.append(str(plan_path.relative_to(vault_root)))
-        if apply:
-            plan_path.write_text(updated, encoding="utf-8")
+            orphans = [
+                nfc(str(md.relative_to(vault_root)))
+                for md in sorted(plan_path.parent.glob("*.md"))
+                if nfc(md.name) != nfc(plan_path.name)
+                and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
+            ]
+            orphans = [o for o in orphans if o not in linked and o not in claimed_elsewhere]
+
+            # Oprydning efter tidligere kørslers udfladning: samme regel bagudrettet. Kun
+            # `materiale_filer` (det eneste felt denne funktion nogensinde har skrevet i) og kun
+            # mål en søskende beviseligt ejer — Valdemars egne links og alt uden for mappen
+            # røres aldrig, og et link uden positivt modbevis bliver stående.
+            foreign = {
+                t for l in prefixed_lines(fields.get("materiale_filer", ""), MATERIALE_FIL_PREFIX)
+                if (t := nfc(wikilink_target(l) or "")) in claimed_elsewhere
+            }
+            if not orphans and not foreign:
+                continue
+
+            updated = append_file_list_field(text, "materiale_filer", MATERIALE_FIL_PREFIX,
+                                              [wikilink_for(o) for o in orphans]) if orphans else text
+            if foreign:
+                updated = remove_file_list_lines(updated, "materiale_filer", MATERIALE_FIL_PREFIX, foreign)
+            if updated == text:
+                continue
+            patched.append(str(plan_path.relative_to(vault_root)))
+            if apply:
+                plan_path.write_text(updated, encoding="utf-8")
     return patched
 
 
@@ -280,12 +348,26 @@ def read_tasks(vault_root: Path) -> list[dict]:
     return tasks
 
 
-def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
+def read_plans(vault_root: Path, dubletter: list[str] | None = None) -> tuple[list[dict], list[str]]:
     """Alle `type: lektionsplan`-noter. `type: dublet` falder væk af sig selv (issue #113).
 
     Returnerer også stierne på de noter der mangler plan_id — de er ældre end issue #96 og kan ikke
     synkes sikkert (se ensure_lecture). De skal rettes i vaulten, ikke gættes om her, så de
-    rapporteres frem for at forsvinde stille."""
+    rapporteres frem for at forsvinde stille.
+
+    Samme plan_id må kun optræde ÉN gang (#181). background.js skriver alle en enheds lektioner
+    til samme sti (`MD/<enhed>/[PLAN] <enhed>.md`, writePlanNotes), så de daterede
+    `[PLAN] <dato> - <enhed>.md` fra før enhed-migreringen (#150/#155) står tilbage som rester
+    ingen skriver til længere — og den udaterede note bærer det plan_id, den lektion der skrev
+    sidst havde. To noter med samme plan_id rammer derfor samme lecture i sync_data, hvor hver
+    især prunede den andens Reading-opgaver via valid_file_keys: opgaverne blev genskabt med nye
+    id'er ved HVER kørsel, data.json ændrede sig hver gang, og trigger_obsidian_reload bad
+    Obsidian genstarte hvert minut (live-bekræftet 2026-09-06 hos Valdemar).
+
+    Vi beholder den friskeste note pr. plan_id (`hentet:`, faldende) og rapporterer resten frem
+    for at slette dem — de daterede rester rummer stadig de ANDRE lektioners sidst-kendte data,
+    og den rigtige løsning er at give hver lektion sin egen plan-note-sti i background.js, ikke
+    at kaste vaultindhold væk her."""
     plans, uden_plan_id = [], []
     for path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         fields = parse_frontmatter(path.read_text(encoding="utf-8"))
@@ -297,7 +379,16 @@ def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
             continue
         fields["_path"] = nfc(rel)
         plans.append(fields)
-    return plans, uden_plan_id
+
+    friskeste: dict[str, dict] = {}
+    for plan in sorted(plans, key=lambda f: (f.get("hentet", ""), f["_path"]), reverse=True):
+        pid = plan["plan_id"]
+        if pid in friskeste:
+            if dubletter is not None:
+                dubletter.append(f'{plan["_path"]} (samme plan_id som {friskeste[pid]["_path"]})')
+            continue
+        friskeste[pid] = plan
+    return [p for p in plans if friskeste.get(p["plan_id"]) is p], uden_plan_id
 
 
 # ─── data.json-hjælpere ───────────────────────────────────────────────────────
@@ -614,6 +705,29 @@ def ensure_resource(sem: dict, cls: dict, vault_path: str, new_id) -> dict:
     return res
 
 
+def prune_stale_resource_classes(data: dict, seen: dict[str, set[str]],
+                                 touched_classes: set[str]) -> list[str]:
+    """`classIds` voksede kun, aldrig omvendt (#181): holdt et fag op med at bruge et materiale,
+    blev resourcen hængende i den klasses Library for evigt. `prune_dead_links` fanger kun døde
+    FILSTIER, ikke logisk forældreløshed — filen ligger der stadig, ingen lektion peger på den.
+
+    `seen` er {resource_id: {class_id, ...}} fra DENNE kørsel, `touched_classes` de klasser der
+    rent faktisk fik mindst én plan (samme vagt som #173's dropped_out: en klasse uden planer kan
+    lige så vel være en fejlet fetch som et reelt tomt fag, og må ikke røres). Kun bogføringen
+    ryddes — selve resourcen slettes ALDRIG her, fordi `status`/`notes` på den er Valdemars.
+    Ender den uden nogen klasse, rapporteres den i stedet, samme rapportér-frem-for-slet-linje
+    som #96/#173."""
+    orphaned = []
+    for sem in data.get("semesters", []):
+        for res in sem.get("resources", []):
+            still = seen.get(res["id"], set())
+            kept = [c for c in res.get("classIds", []) if c not in touched_classes or c in still]
+            res["classIds"] = kept
+            if not kept:
+                orphaned.append(f'{res.get("title", "")} ({res.get("vaultLink", "")})')
+    return orphaned
+
+
 def ensure_assignment(owner: dict, key: str, title: str, atype: str, due: str, linked_book: str,
                       new_id, linked_note: str = "") -> dict:
     """`owner` er enten en lecture eller en class — Hold Course har begge slags opgaver
@@ -692,7 +806,8 @@ def prune_dead_links(data: dict, vault_root: Path) -> tuple[int, int]:
 # ─── Synk ─────────────────────────────────────────────────────────────────────
 
 def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | None = None,
-             dropped_out: list[str] | None = None) -> dict:
+             dropped_out: list[str] | None = None,
+             report: dict[str, list[str]] | None = None) -> dict:
     """Fletter plans ind i en data.json-struktur. Ren funktion — al I/O ligger i sync().
 
     Fordeler lektioner/opgaver til deres rigtige semester baseret på dato (issue #126).
@@ -702,7 +817,13 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     lecture der er faldet ud af itslearning siden sidst (matcher stadig `vswPlanId`, men den
     værdi optrådte ikke i DENNE kørsels plan-sæt for lektionens fag). Rapporteres kun, ALDRIG
     slettet — "intet slettes nogensinde" gælder også her. Default None ændrer ingenting for
-    eksisterende kald."""
+    eksisterende kald.
+
+    report (#181): samme rapportér-frem-for-slet-akkumulator, men for de tre andre `ensure_*` der
+    manglede et modstykke — nøglerne `dropped_classes` (fag helt væk fra itslearning),
+    `dropped_tasks` (afleveringsopgave væk) og `orphaned_resources` (materiale ingen klasse bruger
+    længere). Ingen af dem sletter noget; `prune_stale_resource_classes` rører kun bogføringen.
+    Default None ændrer ingenting for eksisterende kald."""
     counter = [0]
     new_id = new_id or (lambda: generate_id(counter))
     data.setdefault("semesters", [])
@@ -722,6 +843,8 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     # en klasse der slet ikke optræder her kan skyldes en fetch-fejl for hele faget, ikke at alle
     # dens lektioner reelt er væk (goal metrics i #173).
     touched: dict[tuple[str, str], set[str]] = {}
+    # #181: {resource_id: {class_id}} for DENNE kørsel — grundlaget for at classIds kan krympe igen.
+    seen_res: dict[str, set[str]] = {}
 
     for plan in sorted(plans, key=lambda p: (p["fag"], p.get("start", ""))):
         if not plan.get("start"):
@@ -764,6 +887,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         if targets:
             for target in targets:
                 res = ensure_resource(sem, cls, target, new_id)
+                seen_res.setdefault(res["id"], set()).add(cls["id"])  # #181
                 # linkedNote peger på selve materiale-noten, så "Open note" virker direkte fra
                 # opgaven uden omvejen om Library.
                 key = f'{akey}|lit|{stable_key(target)}'
@@ -795,6 +919,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
             if not target:
                 continue
             res = ensure_resource(sem, cls, target, new_id)
+            seen_res.setdefault(res["id"], set()).add(cls["id"])  # #181
             key = f'{akey}|mat|{stable_key(target)}'
             ensure_assignment(lec, key, res["title"], "Reading", due,
                               res["id"], new_id, linked_note=target)
@@ -805,6 +930,11 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
             if not (a.get("vswKey", "").startswith((f'{akey}|lit|', f'{akey}|mat|')))
             or a["vswKey"] in valid_file_keys
         ]
+
+    # #181: hvilke klasser der fik mindst én OPGAVE denne kørsel, og hvilke nøgler. Samme vagt
+    # som `touched` ovenfor: en klasse uden opgaver i denne kørsel kigges der ikke efter droppede
+    # opgaver i — read_tasks() kan have fejlet for hele faget.
+    touched_tasks: dict[str, set[str]] = {}
 
     # Afleveringsopgaver hænger på faget, ikke på en lektion — derfor klasse-niveau. De vises i
     # Hold Courses Assignments-liste og kalender uden at blive klistret på en tilfældig lektion.
@@ -824,6 +954,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
         relocate_stamped(data, "assignments", "vswKey", f'opgave|{task["_element_id"]}', cls)
         ensure_assignment(cls, f'opgave|{task["_element_id"]}', task["_title"], "Writing",
                           task["deadline"][:10], "", new_id, linked_note=task["_path"])
+        touched_tasks.setdefault(cls["id"], set()).add(f'opgave|{task["_element_id"]}')  # #181
 
     # #173: lectures der er faldet ud af itslearning. Kun klasser i `touched` — en klasse der
     # slet ikke fik nogen plan denne kørsel springes over i stedet for at rapportere ALLE dens
@@ -839,6 +970,37 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
                     if plan_id and plan_id not in seen:
                         fag = cls.get("vswFag") or cls.get("name", "")
                         dropped_out.append(f'{fag} {lec.get("date", "")} {lec.get("title", "")}')
+
+    # #181: de tre `ensure_*` der manglede #173's modstykke. Alle tre rapporterer kun.
+    if report is not None:
+        touched_sems = {sem_id for sem_id, _ in touched}
+        touched_classes = {cls_id for _, cls_id in touched}
+
+        for sem in data["semesters"]:
+            if sem["id"] not in touched_sems:
+                continue
+            # Klasser: et fag der HELT er væk fra itslearning. Kun i et semester der ellers fik
+            # planer — ellers ville hvert forgangent semester blive rapporteret ved hver kørsel.
+            for cls in sem.get("classes", []):
+                if cls["id"] not in touched_classes:
+                    report.setdefault("dropped_classes", []).append(
+                        f'{sem.get("name", "")}: {cls.get("vswFag") or cls.get("name", "")}')
+                    continue
+                # Afleveringsopgaver: modstykket til lectures' valid_file_keys, men rapporterende
+                # frem for prunende — `status`/`grade` på en Writing-opgave er Valdemars fremdrift.
+                seen_keys = touched_tasks.get(cls["id"])
+                if not seen_keys:
+                    continue
+                for a in cls.get("assignments", []):
+                    key = a.get("vswKey", "")
+                    if key.startswith("opgave|") and key not in seen_keys:
+                        report.setdefault("dropped_tasks", []).append(
+                            f'{cls.get("vswFag") or cls.get("name", "")} '
+                            f'{a.get("dueDate", "")} {a.get("title", "")}')
+
+        orphaned = prune_stale_resource_classes(data, seen_res, touched_classes)
+        if orphaned:
+            report.setdefault("orphaned_resources", []).extend(orphaned)
 
     return data
 
@@ -1087,17 +1249,20 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     patched = patch_pending_materiale(vault_root, apply)
     if patched and not quiet:
         label = "Rettet" if apply else "Ville rette (dry-run)"
-        print(f"{label}: {len(patched)} lektionsplan-note(r) fik nye materiale_filer-links (issue #141):")
+        print(f"{label}: {len(patched)} lektionsplan-note(r) fik materiale_filer opdateret "
+              f"(nye orphan-links, #141 / fremmede links fjernet, #183):")
         for rel in patched:
             print(f"  {rel}")
 
-    plans, uden_plan_id = read_plans(vault_root)
+    plan_dubletter: list[str] = []
+    plans, uden_plan_id = read_plans(vault_root, dubletter=plan_dubletter)
     tasks = read_tasks(vault_root)
     before = data_path.read_text(encoding="utf-8")
     mtime = data_path.stat().st_mtime
     data = json.loads(before)
     dropped: list[str] = []
-    merged = sync_data(data, plans, tasks=tasks, dropped_out=dropped)
+    report: dict[str, list[str]] = {}
+    merged = sync_data(data, plans, tasks=tasks, dropped_out=dropped, report=report)
     # FØR serialiseringen: vault -> Hold Course-retningen sætter status på opgaver i `merged`, og
     # de ændringer skal med i den data.json vi sammenligner og skriver.
     checked, marked_done = sync_task_completion(merged, vault_root, dry_run=not apply)
@@ -1116,6 +1281,23 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         print(f"{len(dropped)} lektion(er) i data.json er ikke længere i itslearning:")
         for d in dropped:
             print(f"  {d}")
+
+    if plan_dubletter and not quiet:
+        print(f"{len(plan_dubletter)} lektionsplan-note(r) deler plan_id med en nyere note og "
+              f"springes over (rest fra enhed-migreringen, #181 — ret stien i background.js):")
+        for rel in plan_dubletter:
+            print(f"  {rel}")
+
+    # #181: samme rapportér-frem-for-slet-linje for de tre øvrige ensure_*.
+    for key, overskrift in (
+        ("dropped_classes", "fag i data.json fik ingen lektioner i et ellers aktivt semester"),
+        ("dropped_tasks", "afleveringsopgave(r) i data.json er ikke længere i itslearning"),
+        ("orphaned_resources", "materiale(r) i Library bruges ikke længere af nogen klasse"),
+    ):
+        if report.get(key) and not quiet:
+            print(f"{len(report[key])} {overskrift}:")
+            for line in report[key]:
+                print(f"  {line}")
 
     # Rapporteres UANSET om data.json selv skal genskrives: Hold Course kan have gemt et Done-tryk
     # siden sidste kørsel uden at vores egen frontmatter-flet ændrer noget, og et Done-tryk skal
@@ -1733,6 +1915,46 @@ def selfcheck() -> int:
     assert prefixed_lines("false", "▥") == []
     assert parse_frontmatter("---\ntype: dublet\nplan_id: \"1:1\"\n---\n")["type"] == "dublet"
 
+    # ── #181: de tre ensure_*-modstykker der manglede (#173 dækkede kun lectures) ──────────
+    # Kørsel 1 bygger tilstanden; kørsel 2 fjerner ét fag, én opgave og ét materiale fra
+    # itslearning-siden og skal rapportere alle tre — uden at slette noget.
+    p_mus = {"fag": "Musik", "plan_id": "1:1", "start": "2026-09-01 10:00:00",
+             "emne": "Musikforståelse", "type": "lektionsplan",
+             "_path": "§ FAG/♪ Musik/MD/Musikforståelse/[PLAN] 2026-09-01 - Musikforståelse.md",
+             "materiale_filer": "📎 [[§ FAG/♪ Musik/MD/Musikforståelse/A.md]]"}
+    p_rel = {"fag": "Religion", "plan_id": "2:2", "start": "2026-09-02 10:00:00",
+             "emne": "Intro", "type": "lektionsplan",
+             "_path": "§ FAG/♱ Religion/MD/Intro/[PLAN] 2026-09-02 - Intro.md"}
+    t_op = {"fag": "Musik", "deadline": "2026-09-30", "_element_id": "E1",
+            "_title": "Studieopgave", "_path": "✎ NOTER/OPGAVER/Studieopgave.md"}
+    t_bliver = {"fag": "Musik", "deadline": "2026-10-30", "_element_id": "E2",
+                "_title": "Eksamen", "_path": "✎ NOTER/OPGAVER/Eksamen.md"}
+    ids2 = iter(f"n{n}" for n in range(200))
+    d181 = sync_data({"semesters": [], "dataVersion": 2}, [p_mus, p_rel],
+                     lambda: next(ids2), tasks=[t_op, t_bliver])
+    rep: dict[str, list[str]] = {}
+    # Kørsel 2: Religion helt væk, Studieopgave væk (men Eksamen består, så klassen ER "rørt"
+    # og et drop kan skelnes fra en fejlet read_tasks), og A.md ikke længere på planen.
+    sync_data(d181, [dict(p_mus, materiale_filer="")], lambda: next(ids2),
+              tasks=[t_bliver], report=rep)
+    assert any("Religion" in x for x in rep.get("dropped_classes", [])), rep
+    assert not any("Musik" in x for x in rep.get("dropped_classes", [])), \
+        ("Musik fik planer og må ikke rapporteres som droppet", rep)
+    assert any("Studieopgave" in x for x in rep.get("dropped_tasks", [])), rep
+    assert not any("Eksamen" in x for x in rep.get("dropped_tasks", [])), \
+        ("stadig-eksisterende opgave rapporteret som droppet", rep)
+    assert any("A.md" in x for x in rep.get("orphaned_resources", [])), rep
+    # Intet slettet — kun rapporteret. Resourcen står stadig i Library med Valdemars felter.
+    sem181 = next(x for x in d181["semesters"] if x.get("resources"))
+    assert any("A.md" in r.get("vaultLink", "") for r in sem181["resources"]), sem181["resources"]
+    assert len(sem181["classes"]) == 2, "en klasse blev slettet i stedet for rapporteret"
+    assert all(r["classIds"] == [] for r in sem181["resources"] if "A.md" in r["vaultLink"]), \
+        ("classIds krympede ikke — #181's voksende-kun-bug er tilbage", sem181["resources"])
+    # Ingen tasks i kørslen => ingen opgave-rapport (kunne være en fejlet read_tasks, ikke et drop).
+    rep2: dict[str, list[str]] = {}
+    sync_data(d181, [p_mus], lambda: "MÅ-IKKE-BRUGES2", tasks=[], report=rep2)
+    assert not rep2.get("dropped_tasks"), ("opgave rapporteret uden opgave-kørsel", rep2)
+
     # wikilink_target: pipe-alias (Valdemars pæne visningstekst, 2026-08-30) må ikke blive en del
     # af stien — ellers matcher den aldrig en rigtig fil og prune_dead_links() sletter den.
     assert wikilink_target("[[sti/Titel.md]]") == "sti/Titel.md"
@@ -1788,6 +2010,91 @@ def selfcheck() -> int:
     got = p1.read_text(encoding="utf-8")
     assert "[PLAN] 2026-09-16" not in got and "[NOTE] 2026-09-09" not in got and "_forløb.md" not in got, got
     assert got.count("📎 [[") == 1, ("NFD/NFC-lækage — materiale gen-tilføjet", got)
+
+    # #183-reprocase: delt enhed-mappe hvor background.js HAR fordelt filerne (AUTO-blokkens
+    # `## Materialer` pr. plan). Den live-hændelse der skal fanges: 4 mandagslektioner i
+    # "Skolens formål", hvor #176's gæt tømte 3 af dem. Her skal hver lektion beholde PRÆCIS sit
+    # eget materiale — og en fil ingen plan nævner (MinerU kom for sent, #141) skal stadig
+    # claimes af dem alle, ellers er den utilgængelig fra Hold Course.
+    skole = patch_root / "§ FAG" / "⚖︎ LivsOplysning" / "MD" / "Skolens formål"
+    skole.mkdir(parents=True)
+    ejede = {"2026-08-17": "Rosa1.md", "2026-08-31": "Resonans.md", "2026-09-07": "Korsgaard.md"}
+    for dato, fil in ejede.items():
+        (skole / f"[PLAN] {dato} - Skolens formål.md").write_text(
+            "---\ntype: lektionsplan\nfag: LivsOplysning\nmateriale_filer: false\n---\n\n"
+            "<!-- AUTO:START -->\n# Skolens formål\n\n## Materialer\n"
+            f"- [[§ FAG/⚖︎ LivsOplysning/MD/Skolens formål/{fil}|{fil}]]\n"
+            "<!-- AUTO:END -->\n", encoding="utf-8")
+        (skole / fil).write_text("materiale", encoding="utf-8")
+    # Fjerde lektion: ingen AUTO-blok overhovedet (planen faldt ud af tidsvinduet før den blev skrevet).
+    p4 = skole / "[PLAN] 2026-09-21 - Skolens formål.md"
+    p4.write_text("---\ntype: lektionsplan\nfag: LivsOplysning\nmateriale_filer: false\n---\n", encoding="utf-8")
+    (skole / "Uden ejer.md").write_text("MinerU kom for sent", encoding="utf-8")
+
+    patch_pending_materiale(patch_root, apply=True)
+    for dato, fil in ejede.items():
+        got = (skole / f"[PLAN] {dato} - Skolens formål.md").read_text(encoding="utf-8")
+        mat = got.split("materiale_filer:")[1].split("---")[0]
+        assert fil in mat, (f"{dato} mistede sit eget materiale — #176-regressionen er tilbage", got)
+        assert "Uden ejer.md" in mat, (f"{dato} claimede ikke den ejerløse fil", got)
+        for andet in set(ejede.values()) - {fil}:
+            assert andet not in mat, (f"{dato} claimede {andet}, som en søskende beviseligt ejer", got)
+    got4 = p4.read_text(encoding="utf-8")
+    assert "Uden ejer.md" in got4 and not any(f in got4 for f in ejede.values()), \
+        ("planen uden AUTO-blok skal kun claime den ejerløse fil", got4)
+    # Idempotent — også med søskende-filtreringen aktiv.
+    assert patch_pending_materiale(patch_root, apply=True) == []
+    # Bagudrettet oprydning: en tidligere kørsel havde allerede fladet 2026-08-17 ud med alle
+    # fire filer. De tre en søskende beviseligt ejer skal fjernes igen; dens egen + den ejerløse
+    # bliver stående. Det er den eneste sletning i denne funktion — derfor kun med positivt
+    # modbevis, aldrig på formodning (#176).
+    p1 = skole / "[PLAN] 2026-08-17 - Skolens formål.md"
+    flad = p1.read_text(encoding="utf-8").replace(
+        "materiale_filer: |\n",
+        "materiale_filer: |\n"
+        "  📎 [[§ FAG/⚖︎ LivsOplysning/MD/Skolens formål/Resonans.md|Resonans.md]]\n"
+        "  📎 [[§ FAG/⚖︎ LivsOplysning/MD/Skolens formål/Korsgaard.md|Korsgaard.md]]\n")
+    p1.write_text(flad, encoding="utf-8")
+    assert patch_pending_materiale(patch_root, apply=True) == [str(p1.relative_to(patch_root))]
+    mat = p1.read_text(encoding="utf-8").split("materiale_filer:")[1].split("---")[0]
+    assert "Rosa1.md" in mat and "Uden ejer.md" in mat, ("egen + ejerløs fil blev fjernet", mat)
+    assert "Resonans.md" not in mat and "Korsgaard.md" not in mat, ("fremmed link blev stående", mat)
+
+    # Tømmes blokken helt, skal feltet tilbage til `false` — ikke et tomt `|`, som ville bryde
+    # Bases' `!= false`-filtre (samme form background.js selv skriver).
+    tom = remove_file_list_lines(
+        "---\nmateriale_filer: |\n  📎 [[a/b.md|b.md]]\ntype: lektionsplan\n---\n",
+        "materiale_filer", MATERIALE_FIL_PREFIX, {"a/b.md"})
+    assert "materiale_filer: false\ntype: lektionsplan" in tom, tom
+
+    # #181: to [PLAN]-noter med samme plan_id (den daterede rest fra før enhed-migreringen +
+    # den udaterede background.js stadig skriver). Ramte begge samme lecture, hvor hver prunede
+    # den andens Reading-opgaver via valid_file_keys — nye opgave-id'er ved hver kørsel, så
+    # data.json ændrede sig altid og trigger_obsidian_reload genstartede Obsidian hvert minut.
+    dub_dir = patch_root / "§ FAG" / "⚖︎ LivsOplysning" / "MD" / "Introduktion"
+    dub_dir.mkdir(parents=True)
+    for navn, hentet, fil in ((" 2026-08-10 -", "2026-09-01 08:00", "Gammel.md"),
+                              ("", "2026-09-06 08:00", "Ny.md")):
+        (dub_dir / f"[PLAN]{navn} Introduktion.md").write_text(
+            f'---\ntype: lektionsplan\nfag: LivsOplysning\nplan_id: "33203:1315587"\n'
+            f'start: "2026-08-10 10:00:00"\nhentet: "{hentet}"\n'
+            f"materiale_filer: |\n  📎 [[§ FAG/⚖︎ LivsOplysning/MD/Introduktion/{fil}]]\n---\n",
+            encoding="utf-8")
+    dubs: list[str] = []
+    dub_plans, _ = read_plans(patch_root, dubletter=dubs)
+    valgt = [p for p in dub_plans if p["plan_id"] == "33203:1315587"]
+    assert len(valgt) == 1, ("samme plan_id optræder flere gange — churn-bug'en er tilbage", valgt)
+    assert "hentet" in valgt[0] and valgt[0]["hentet"] == "2026-09-06 08:00", \
+        ("den ældste note vandt — friskeste hentet: skal afgøre", valgt)
+    assert len(dubs) == 1 and "2026-08-10" in dubs[0], dubs
+    # Idempotens hele vejen igennem: to kørsler i træk må give bit-identisk data.json, ellers
+    # skriver synken (og reloader Obsidian) ved hvert eneste tick.
+    ids_d = iter(f"d{n}" for n in range(500))
+    d1 = sync_data({"semesters": [], "dataVersion": 2}, dub_plans, lambda: next(ids_d))
+    snap1 = json.dumps(d1, sort_keys=True)
+    d2 = sync_data(json.loads(snap1), dub_plans, lambda: next(ids_d))
+    assert json.dumps(d2, sort_keys=True) == snap1, \
+        "data.json ændrer sig ved hver kørsel — Obsidian ville blive reloadet i ring"
 
     # reconcile_onyx (issue #146 + hold-course#10): Boox får Mac's friske indhold,
     # og en legacy `settings`-nøgle strippes fra begge kopier (device-prefs bor nu
