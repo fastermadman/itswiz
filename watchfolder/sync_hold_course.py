@@ -66,6 +66,20 @@ LOCAL_REST_API_CONFIG = VAULT_ROOT / ".obsidian" / "plugins" / "obsidian-local-r
 # main.js: COLOR_PALETTE har 6 farver, og addClass sætter colorIndex = classes.length % længden.
 COLOR_PALETTE_SIZE = 6
 
+# Spejl af `CURRENT_DATA_VERSION` i obsidian-hold-course/main.js. Nu en LEVENDE
+# kompatibilitets-kontrakt mellem de to repos, ikke bare et engangs-migrerings-flag
+# (hold-course#63 / #182). Bump denne OG plugin-konstanten i koordinerede commits når
+# en data.json-ændring IKKE er bagud-sikker for den anden side: et felt læseren skal
+# have, eller et eksisterende felt/værdi hvis betydning skifter. Rent additive,
+# presence-baserede felter en ældre læser trygt ignorerer (#41's per-lektion
+# tid/lokale/underviser, #54's 'Preparation'-type) må springe bumpet over — men skriv
+# det i commit'en; det er ikke defaulten. sync() nægter at skrive en data.json stemplet
+# HØJERE end dette (skrevet af en nyere synk end pluginet kender); lavere/fraværende
+# migrerer pluginet selv som hidtil. Delt fixture: den anden repos
+# test/fixtures/contract-data.json, verificeret af selfcheck() her og af
+# test/contract-fixture.test.js dér.
+KNOWN_DATA_VERSION = 2
+
 # Hold Courses class.courseUrl renderes som et rigtigt "Course page"-link BÅDE på fag-kortet
 # (main.js: _renderClassCard) og i fag-headeren (_renderClassView) — ét klik fra Hold Course til
 # itslearning. Formen er verificeret live 2026-08-28 (ikke gættet, jf. #118): CourseID'et er
@@ -839,7 +853,7 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     counter = [0]
     new_id = new_id or (lambda: generate_id(counter))
     data.setdefault("semesters", [])
-    data.setdefault("dataVersion", 2)
+    data.setdefault("dataVersion", KNOWN_DATA_VERSION)
     tasks = tasks or []
     # Kører før alt andet og uafhængigt af om der er planer denne gang: en lektion der er faldet
     # ud af itslearning skal også have sit gamle vswNotes ryddet (#172).
@@ -1271,6 +1285,20 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     before = data_path.read_text(encoding="utf-8")
     mtime = data_path.stat().st_mtime
     data = json.loads(before)
+
+    # Skema-versions-vagt (#182 / hold-course#63). En data.json stemplet højere end vi
+    # kender er skrevet af en nyere synk — et felt i den kan betyde noget denne kode ikke
+    # forventer. Fail-loud: nægt at skrive (også ved --apply), i stedet for at flette ind i
+    # felter hvis semantik kan have skiftet. Watch-loopet kalder hvert minut, så beskeden
+    # gentages til nogen opgraderer scriptet; intet er ødelagt imens (vi returnerer før
+    # enhver skrivning). Pluginets modstykke advarer men loader stadig — se KNOWN_DATA_VERSION.
+    seen_version = data.get("dataVersion", 0)
+    if isinstance(seen_version, int) and seen_version > KNOWN_DATA_VERSION:
+        print(f"data.json er dataVersion {seen_version}, men dette script kender kun "
+              f"{KNOWN_DATA_VERSION} — skrevet af en nyere synk. Springer over uden at skrive "
+              f"(opgradér watchfolder/sync_hold_course.py).", file=sys.stderr)
+        return 1
+
     dropped: list[str] = []
     report: dict[str, list[str]] = {}
     merged = sync_data(data, plans, tasks=tasks, dropped_out=dropped, report=report)
@@ -2146,6 +2174,42 @@ def selfcheck() -> int:
 
     # Findes Boox-kopien slet ikke på denne maskine, skal reconcile være en stille no-op.
     reconcile_onyx(patch_root / "findes-ikke.json", fresh, apply=True, quiet=True)
+
+    # ── Delt kontrakt-fixture (#182 / hold-course#63) ────────────────────────────────────────
+    #    Samme fil pluginets test/contract-fixture.test.js loader. Ligger i plugin-repoet
+    #    (pluginet ejer skemaet). Springes over hvis søster-checkout mangler — CI eller en frisk
+    #    klon har ikke nødvendigvis begge. En bevidst skema-ændring uden at fixturen (og
+    #    KNOWN_DATA_VERSION) følger med, fejler her ELLER i plugin-testen.
+    fixture = Path(__file__).resolve().parents[2] / "obsidian-hold-course" / "test" / "fixtures" / "contract-data.json"
+    if not fixture.exists():
+        print(f"kontrakt-fixture ikke fundet ({fixture}) — springer over (søster-repo ikke checket ud)")
+    else:
+        fx = json.loads(fixture.read_text(encoding="utf-8"))
+        assert fx["dataVersion"] == KNOWN_DATA_VERSION, \
+            (f"fixturens dataVersion {fx['dataVersion']} != KNOWN_DATA_VERSION {KNOWN_DATA_VERSION} "
+             f"— bump ude af sync mellem repos", fx["dataVersion"])
+        lec_fx = fx["semesters"][0]["classes"][0]["lectures"][0]
+        for stamp in ("vswPlanId", "vswDescription", "vswVaultLink"):
+            assert stamp in lec_fx, (f"fixturen mangler lecture-stemplet {stamp}", lec_fx)
+        assert "vswKey" in lec_fx["assignments"][0], lec_fx["assignments"][0]
+        assert "vswResKey" in fx["semesters"][0]["resources"][0], fx["semesters"][0]["resources"][0]
+        assert "vswFag" in fx["semesters"][0]["classes"][0], fx["semesters"][0]["classes"][0]
+        # sync_data uden planer/opgaver: ren gennemgang. Alle nøgler (også ukendte for synken:
+        # notesLink, professorEmail, exams …) og stempler skal overleve uændret.
+        snap_fx = json.dumps(fx, sort_keys=True)
+        passthrough = sync_data(json.loads(snap_fx), [], tasks=[])
+        assert json.dumps(passthrough, sort_keys=True) == snap_fx, \
+            "sync_data ændrede kontrakt-fixturen ved en tom kørsel — et felt bliver rørt der ikke burde"
+
+    # ── Skema-versions-vagt: en for-høj dataVersion afvises uden skrivning (#182) ─────────────
+    guard_path = patch_root / "guard-data.json"
+    guard_before = json.dumps({"currentSemesterId": None, "semesters": [],
+                               "dataVersion": KNOWN_DATA_VERSION + 1}, indent=2) + "\n"
+    guard_path.write_text(guard_before, encoding="utf-8")
+    rc = sync(patch_root, guard_path, apply=True, quiet=True)
+    assert rc == 1, f"for-høj dataVersion skulle give rc=1, gav {rc}"
+    assert guard_path.read_text(encoding="utf-8") == guard_before, \
+        "sync skrev data.json trods for-høj dataVersion"
 
     print("selfcheck ok")
     return 0
