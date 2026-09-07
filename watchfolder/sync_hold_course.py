@@ -348,26 +348,21 @@ def read_tasks(vault_root: Path) -> list[dict]:
     return tasks
 
 
-def read_plans(vault_root: Path, dubletter: list[str] | None = None) -> tuple[list[dict], list[str]]:
+def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
     """Alle `type: lektionsplan`-noter. `type: dublet` falder væk af sig selv (issue #113).
 
     Returnerer også stierne på de noter der mangler plan_id — de er ældre end issue #96 og kan ikke
     synkes sikkert (se ensure_lecture). De skal rettes i vaulten, ikke gættes om her, så de
     rapporteres frem for at forsvinde stille.
 
-    Samme plan_id må kun optræde ÉN gang (#181). background.js skriver alle en enheds lektioner
-    til samme sti (`MD/<enhed>/[PLAN] <enhed>.md`, writePlanNotes), så de daterede
-    `[PLAN] <dato> - <enhed>.md` fra før enhed-migreringen (#150/#155) står tilbage som rester
-    ingen skriver til længere — og den udaterede note bærer det plan_id, den lektion der skrev
-    sidst havde. To noter med samme plan_id rammer derfor samme lecture i sync_data, hvor hver
-    især prunede den andens Reading-opgaver via valid_file_keys: opgaverne blev genskabt med nye
-    id'er ved HVER kørsel, data.json ændrede sig hver gang, og trigger_obsidian_reload bad
-    Obsidian genstarte hvert minut (live-bekræftet 2026-09-06 hos Valdemar).
-
-    Vi beholder den friskeste note pr. plan_id (`hentet:`, faldende) og rapporterer resten frem
-    for at slette dem — de daterede rester rummer stadig de ANDRE lektioners sidst-kendte data,
-    og den rigtige løsning er at give hver lektion sin egen plan-note-sti i background.js, ikke
-    at kaste vaultindhold væk her."""
+    Her stod indtil #184 et dedup-plaster: to noter kunne bære samme plan_id, fordi background.js
+    skrev alle en enheds lektioner til `MD/<enhed>/[PLAN] <enhed>.md` mens de daterede noter fra
+    før enhed-migreringen (#150/#155) stod tilbage som rester. Begge ramte samme lecture i
+    sync_data og prunede hinandens Reading-opgaver via valid_file_keys — nye opgave-id'er ved hver
+    kørsel, så data.json ændrede sig altid og trigger_obsidian_reload genstartede Obsidian hvert
+    minut (live-bekræftet 2026-09-06). #184 gav hver lektion sin egen plan-note-sti, så
+    dubletter er strukturelt umulige og plasteret er væk igen. Selve håndhævelsen — en assertion
+    frem for en rapport — hører hjemme i #182s delte kontrakt-fixture."""
     plans, uden_plan_id = [], []
     for path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         fields = parse_frontmatter(path.read_text(encoding="utf-8"))
@@ -379,16 +374,7 @@ def read_plans(vault_root: Path, dubletter: list[str] | None = None) -> tuple[li
             continue
         fields["_path"] = nfc(rel)
         plans.append(fields)
-
-    friskeste: dict[str, dict] = {}
-    for plan in sorted(plans, key=lambda f: (f.get("hentet", ""), f["_path"]), reverse=True):
-        pid = plan["plan_id"]
-        if pid in friskeste:
-            if dubletter is not None:
-                dubletter.append(f'{plan["_path"]} (samme plan_id som {friskeste[pid]["_path"]})')
-            continue
-        friskeste[pid] = plan
-    return [p for p in plans if friskeste.get(p["plan_id"]) is p], uden_plan_id
+    return plans, uden_plan_id
 
 
 # ─── data.json-hjælpere ───────────────────────────────────────────────────────
@@ -1254,8 +1240,7 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         for rel in patched:
             print(f"  {rel}")
 
-    plan_dubletter: list[str] = []
-    plans, uden_plan_id = read_plans(vault_root, dubletter=plan_dubletter)
+    plans, uden_plan_id = read_plans(vault_root)
     tasks = read_tasks(vault_root)
     before = data_path.read_text(encoding="utf-8")
     mtime = data_path.stat().st_mtime
@@ -1281,12 +1266,6 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         print(f"{len(dropped)} lektion(er) i data.json er ikke længere i itslearning:")
         for d in dropped:
             print(f"  {d}")
-
-    if plan_dubletter and not quiet:
-        print(f"{len(plan_dubletter)} lektionsplan-note(r) deler plan_id med en nyere note og "
-              f"springes over (rest fra enhed-migreringen, #181 — ret stien i background.js):")
-        for rel in plan_dubletter:
-            print(f"  {rel}")
 
     # #181: samme rapportér-frem-for-slet-linje for de tre øvrige ensure_*.
     for key, overskrift in (
@@ -2067,26 +2046,28 @@ def selfcheck() -> int:
         "materiale_filer", MATERIALE_FIL_PREFIX, {"a/b.md"})
     assert "materiale_filer: false\ntype: lektionsplan" in tom, tom
 
-    # #181: to [PLAN]-noter med samme plan_id (den daterede rest fra før enhed-migreringen +
-    # den udaterede background.js stadig skriver). Ramte begge samme lecture, hvor hver prunede
-    # den andens Reading-opgaver via valid_file_keys — nye opgave-id'er ved hver kørsel, så
-    # data.json ændrede sig altid og trigger_obsidian_reload genstartede Obsidian hvert minut.
+    # #184: to søskende-lektioner i SAMME delte enhed-mappe, hver med sin egen daterede
+    # [PLAN]-note. Det er formen efter #184; før den skrev background.js begge til
+    # `[PLAN] Introduktion.md`, så kun den sidst skrevne overlevede, og den daterede rest fra før
+    # enhed-migreringen (#150/#155) bar SAMME plan_id. Begge ramte da samme lecture i sync_data og
+    # prunede hinandens Reading-opgaver via valid_file_keys — nye opgave-id'er ved hver kørsel, så
+    # data.json ændrede sig altid og trigger_obsidian_reload genstartede Obsidian hvert minut
+    # (live-bekræftet 2026-09-06). read_plans dedupede som plaster; #184 fjernede rodårsagen.
     dub_dir = patch_root / "§ FAG" / "⚖︎ LivsOplysning" / "MD" / "Introduktion"
     dub_dir.mkdir(parents=True)
-    for navn, hentet, fil in ((" 2026-08-10 -", "2026-09-01 08:00", "Gammel.md"),
-                              ("", "2026-09-06 08:00", "Ny.md")):
-        (dub_dir / f"[PLAN]{navn} Introduktion.md").write_text(
-            f'---\ntype: lektionsplan\nfag: LivsOplysning\nplan_id: "33203:1315587"\n'
-            f'start: "2026-08-10 10:00:00"\nhentet: "{hentet}"\n'
+    for dato, pid, fil in (("2026-08-10", "33203:1315587", "Foer.md"),
+                           ("2026-08-17", "33203:1315588", "Efter.md")):
+        (dub_dir / f"[PLAN] {dato} - Introduktion.md").write_text(
+            f'---\ntype: lektionsplan\nfag: LivsOplysning\nplan_id: "{pid}"\n'
+            f'start: "{dato} 10:00:00"\nhentet: "2026-09-06 08:00"\n'
             f"materiale_filer: |\n  📎 [[§ FAG/⚖︎ LivsOplysning/MD/Introduktion/{fil}]]\n---\n",
             encoding="utf-8")
-    dubs: list[str] = []
-    dub_plans, _ = read_plans(patch_root, dubletter=dubs)
-    valgt = [p for p in dub_plans if p["plan_id"] == "33203:1315587"]
-    assert len(valgt) == 1, ("samme plan_id optræder flere gange — churn-bug'en er tilbage", valgt)
-    assert "hentet" in valgt[0] and valgt[0]["hentet"] == "2026-09-06 08:00", \
-        ("den ældste note vandt — friskeste hentet: skal afgøre", valgt)
-    assert len(dubs) == 1 and "2026-08-10" in dubs[0], dubs
+    dub_plans, _ = read_plans(patch_root)
+    assert len({p["plan_id"] for p in dub_plans}) == len(dub_plans) == 2, \
+        ("hver søskende skal have sin egen note — delt filnavn er #184-bug'en", dub_plans)
+    # Hver lektion beholder SIT eget materiale: deler de én note, arver den ene den andens fil.
+    for plan, fil in zip(sorted(dub_plans, key=lambda p: p["start"]), ("Foer.md", "Efter.md")):
+        assert fil in plan.get("materiale_filer", ""), (plan["_path"], fil)
     # Idempotens hele vejen igennem: to kørsler i træk må give bit-identisk data.json, ellers
     # skriver synken (og reloader Obsidian) ved hvert eneste tick.
     ids_d = iter(f"d{n}" for n in range(500))

@@ -16,7 +16,7 @@ const NOTER_ROOT = "✎ NOTER";
 // Modulniveau, ikke kun lokal i writePlanNotes: runCollectAndDownload skal kunne sammenligne den
 // mod den senest GENNEMFØRTE version (issue #121) for at vide om en engangs-backfill er
 // nødvendig — se FRONTMATTER_VERSION_KEY og runCollectAndDownload.
-const FRONTMATTER_VERSION = 9; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129)
+const FRONTMATTER_VERSION = 10; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129), 10 = [PLAN]-note pr. lektion (#184)
 
 // chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
 // hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
@@ -614,6 +614,21 @@ function enhedFolder(plan) {
   const topic = plan.topic?.name?.trim();
   if (!topic) return weekFolderBase(plan);
   return sanitizeFilename(TOPIC_DISPLAY_NAMES[topic] ?? topic);
+}
+
+// [PLAN]-notens FILNAVN (issue #184). Mappen deles fortsat af enhedens lektioner (enhedFolder
+// ovenfor) — det er #183s ejerskabsmekanisme afhængig af — så filnavnet er det eneste sted der
+// kan skille søskende ad. `[PLAN] <enhed>.md` var ens for dem alle, så N lektioner skrev til én
+// fil hvor hver kørsel overskrev den forrige, og kun den sidst skrevne lektions plandata
+// overlevede. Den daterede form er den vaulten allerede havde fra før enhed-migreringen; #150
+// var regressionen, ikke navngivningen (ValdiVault 14-hold-course-synk.md, grundreglen om at
+// stien er en etiket og `plan_id` er identiteten — en etiket skal stadig være unik i sin mappe).
+// Lektion uden brugbart emne: mappen ER datoen, og "<dato> - <dato>" ville være ren støj — så
+// dér er `[PLAN] <dato>.md` allerede unik, samme fallback som enhedFolder selv bruger.
+function planNoteName(plan) {
+  const base = weekFolderBase(plan);
+  const enhed = enhedFolder(plan);
+  return enhed === base ? `[PLAN] ${base}` : `[PLAN] ${base} - ${enhed}`;
 }
 
 // Returnerer { url, fileName } — Viewer.aspx-kaldet bærer ALTID en FileName-parameter (fx
@@ -1345,7 +1360,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
-    const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/[PLAN] ${weekFolder}.md`;
+    const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/${planNoteName(plan)}.md`;
     const stubOk = await writeLectureNoteStub(plan, weekFolderName(plan), lektionsplanPath, forberedelse, tabId, syncTaskCompletion);
     if (!stubOk) return false;
 
