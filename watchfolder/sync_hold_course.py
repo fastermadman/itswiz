@@ -209,6 +209,16 @@ def _owned_targets(text: str, fields: dict) -> set[str]:
     return owned
 
 
+def _declared_owner(md_path: Path) -> str | None:
+    """#186: en materiale-note kan selv erklære sin lektion via `lektion: <plan_id>` i
+    frontmatter — for filer der aldrig stod i en AUTO-blok (manuelt tilføjet, eller downloadet
+    uden for background.js' tidsvindue). Ren menneske-override, background.js skriver aldrig
+    feltet: det ville fastfryse ejerskabet forbi den dag underviseren selv fjerner filen fra
+    planen. `plan_id`-navnet blev bevidst fravalgt (samme streng, men `read_plans` filtrerer på
+    `type: lektionsplan` og ville forveksle en materiale-note der har feltet med en plan)."""
+    return parse_frontmatter(md_path.read_text(encoding="utf-8")).get("lektion") or None
+
+
 def remove_file_list_lines(text: str, key: str, prefix: str, drop: set[str]) -> str:
     """Modstykket til append_file_list_field: fjerner de 📎-linjer i `key` hvis wikilink-mål står
     i `drop`. Tømmes blokken helt, bliver feltet `key: false` igen — samme form background.js selv
@@ -267,7 +277,11 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     background.js' tidsvindue, som er hele grunden til at funktionen findes), claimer alle
     søskende den som før. Aldrig under-inkluderende: #176's fejltilstand kan ikke opstå, fordi
     en fil kun fravælges dér hvor der findes positivt bevis for en anden ejer. Prisen er de
-    32%'s dublet-Reading-opgaver — kedeligt, aldrig tab af adgang til materiale."""
+    32%'s dublet-Reading-opgaver — kedeligt, aldrig tab af adgang til materiale.
+
+    #186: for materiale der ALDRIG stod i en plan.elements-liste (manuelt tilføjet af Valdemar) er
+    der intet AUTO-bevis at falde tilbage på — se _declared_owner(). Et `lektion: <plan_id>` på
+    filen selv gør det samme job som AUTO-blokken ville have gjort, hvis den havde vidst det."""
     # Samlet pr. mappe, ikke pr. note: ejerskabet nedenfor kan kun afgøres ved at se søskendene.
     folders: dict[Path, list[tuple[Path, str, dict]]] = {}
     for plan_path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
@@ -280,6 +294,18 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     patched = []
     for siblings in folders.values():
         owned = {path: _owned_targets(text, fields) for path, text, fields in siblings}
+
+        # #186: `lektion: <plan_id>` på en materiale-note i mappen overtrumfer/supplerer
+        # AUTO-blokken for netop DEN fil — dækker manuelt tilføjet materiale, som aldrig stod i
+        # nogen plan.elements-liste og derfor ellers ville forblive ejerløst for evigt.
+        declared = {
+            nfc(str(md.relative_to(vault_root))): pid
+            for md in siblings[0][0].parent.glob("*.md")
+            if not md.name.startswith(("[PLAN] ", "[NOTE] ", "_")) and (pid := _declared_owner(md))
+        }
+        for plan_path, _, fields in siblings:
+            owned[plan_path] |= {t for t, pid in declared.items() if pid == fields.get("plan_id")}
+
         for plan_path, text, fields in siblings:
             claimed_elsewhere = set().union(
                 *(t for p, t in owned.items() if p != plan_path), set()
@@ -2076,6 +2102,24 @@ def selfcheck() -> int:
     d2 = sync_data(json.loads(snap1), dub_plans, lambda: next(ids_d))
     assert json.dumps(d2, sort_keys=True) == snap1, \
         "data.json ændrer sig ved hver kørsel — Obsidian ville blive reloadet i ring"
+
+    # #186-reprocase: manuelt tilføjet materiale, som ALDRIG stod i nogen AUTO-blok (Valdemar lagde
+    # filen direkte i RAW/, ingen plan.elements nævner den) — samme "Skolens formål"-mappe, samme
+    # fem søskende. Uden `lektion:` ville "Erklæret.md" claimes af alle fem, som "Uden ejer.md"
+    # gør. Med feltet skal den ende PRÆCIS på den lektion feltets plan_id peger på.
+    (skole / "[PLAN] 2026-08-31 - Skolens formål.md").write_text(
+        (skole / "[PLAN] 2026-08-31 - Skolens formål.md").read_text(encoding="utf-8")
+        .replace("type: lektionsplan\n", 'type: lektionsplan\nplan_id: "99001:186"\n'),
+        encoding="utf-8")
+    (skole / "Erklæret.md").write_text(
+        '---\nlektion: "99001:186"\n---\nmanuelt tilføjet materiale', encoding="utf-8")
+    patch_pending_materiale(patch_root, apply=True)
+    ejer_mat = (skole / "[PLAN] 2026-08-31 - Skolens formål.md").read_text(encoding="utf-8")
+    assert "Erklæret.md" in ejer_mat.split("materiale_filer:")[1].split("---")[0], \
+        ("erklæret ejer fik ikke filen", ejer_mat)
+    for dato in ("2026-08-17", "2026-09-07", "2026-09-21"):
+        andres = (skole / f"[PLAN] {dato} - Skolens formål.md").read_text(encoding="utf-8")
+        assert "Erklæret.md" not in andres, (f"{dato} claimede en erklæret fremmed fil", andres)
 
     # reconcile_onyx (issue #146 + hold-course#10): Boox får Mac's friske indhold,
     # og en legacy `settings`-nøgle strippes fra begge kopier (device-prefs bor nu
