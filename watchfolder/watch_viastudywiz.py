@@ -208,7 +208,11 @@ def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -
 
     fields = enrich_from_plan_note(md_week_dir, f"{sanitize(doc_path.stem)}.md")
     # enhed-mappe: hele navnet er emnet; dato-fallback-mappe (intet topic): intet emne.
-    emne = fields.get("emne") or folder_emne or ("" if _DATE_OR_WEEK.fullmatch(folder) else folder)
+    # Ligger filen direkte i RAW/ uden nogen mappe imellem (manuelt tilføjet korpus/praktik,
+    # ikke lektionsbundet — fx SUP-LIT/EMU-kristendom, #67/#114), er der ingen uge og intet
+    # emne at udlede; mappenavnet ("RAW") må ikke lække ind som feltværdi.
+    no_folder_meta = folder == RAW_DIR_NAME or bool(_DATE_OR_WEEK.fullmatch(folder))
+    emne = fields.get("emne") or folder_emne or ("" if no_folder_meta else folder)
 
     # uge/ugedag/dato: fra lektionsplan-noten, ellers udledt af start, ellers udeladt (#154).
     time_fields = {k: fields[k] for k in ("uge", "ugedag", "dato") if k in fields}
@@ -947,6 +951,13 @@ def selfcheck() -> int:
         with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={}):
             fm3 = frontmatter(VAULT_ROOT / "§ FAG/♪ Musik/RAW/2026-04-15/Noget.pdf")
         assert "uge:" not in fm3 and "emne:" not in fm3, fm3
+
+        # #114/#67: fil direkte i RAW/ (manuelt tilføjet korpus, ingen mappe imellem) — hverken
+        # uge eller emne, og "RAW" må ALDRIG lække ind som feltværdi.
+        with _m.patch(f"{__name__}.enrich_from_plan_note", return_value={}):
+            fm4 = frontmatter(VAULT_ROOT / "§ FAG/♱ Religion/SUP-LIT/EMU-kristendom/RAW/Gsk_læseplan.pdf")
+        assert "uge:" not in fm4 and "emne:" not in fm4, fm4
+        assert '"RAW"' not in fm4 and ": RAW\n" not in fm4, fm4
 
         # #181/#183: i en delt enhed-mappe vælges plan-noten der EJER filen (AUTO-blokkens
         # "## Materialer"), ikke bare den første. Uden dette fik hver materiale-note tids-felter
