@@ -200,7 +200,7 @@ def plain_fag(folder_name: str) -> str:
 _DATE_OR_WEEK = re.compile(r"^(\d{4}-\d{2}-\d{2}|W\d{1,2}[a-zæøå]+)", re.IGNORECASE)
 
 
-def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -> str:
+def frontmatter(doc_path: Path, extra: str = "") -> str:
     raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
     folder = doc_path.parent.name
     _, _, folder_emne = folder.partition(" - ")
@@ -221,7 +221,7 @@ def frontmatter(doc_path: Path, note_type: str = "materiale", extra: str = "") -
 
     lines = [f"fag: {plain_fag(raw_root.parent.name)}\n"]
     lines += [f"{k}: {time_fields[k]}\n" for k in ("uge", "ugedag", "dato") if k in time_fields]
-    lines.append(f"type: {note_type}\n")
+    lines.append("type: materiale\n")
     lines.append(f'kilde: "[[{doc_path.relative_to(VAULT_ROOT).as_posix()}]]"\n')
     lines.append(f'hentet: "{format_now()}"\n')
     if emne:
@@ -248,6 +248,10 @@ def in_raw_branch(path: Path) -> bool:
 # skal kunne finde materialet i den uge det hører til — men MinerU skal kun betales én gang, og
 # vidensbasen skal kun have én note. Dubletten findes ved at hashe: ingen sidecar-database at
 # holde ved lige, og det selv-reparerer hvis noter slettes eller flyttes.
+#
+# #136/#148: kun en `type: materiale`-note tæller som originalen. Uden det kunne en gammel
+# `type: dublet`-stub (eller en lektionsplan-note der delte navn) blive valgt som "original",
+# og den kæde var netop den cirkulære-dublet-bug #136 beskriver.
 def existing_conversion(doc_path: Path) -> Path | None:
     raw_root = next(p for p in doc_path.parents if p.name == RAW_DIR_NAME)
     size = doc_path.stat().st_size
@@ -259,17 +263,44 @@ def existing_conversion(doc_path: Path) -> Path | None:
         if hashlib.sha256(other.read_bytes()).hexdigest() != digest:
             continue
         other_md = md_targets(other)[0]
-        if other_md.exists():
+        if other_md.exists() and read_frontmatter_field(
+            other_md.read_text(encoding="utf-8"), "type"
+        ) == "materiale":
             return other_md
     return None
 
 
-def write_duplicate_stub(doc_path: Path, original_md: Path) -> None:
-    dest_md = md_targets(doc_path)[0]
-    dest_md.parent.mkdir(parents=True, exist_ok=True)
-    link = original_md.relative_to(VAULT_ROOT).with_suffix("").as_posix()
-    head = frontmatter(doc_path, note_type="dublet", extra=f'note: "[[{link}]]"\n')
-    dest_md.write_text(f"{head}> Samme materiale som [[{link}]] — brugt igen i denne uge.\n", encoding="utf-8")
+# Genbrug på tværs af enhed/semester: den ægte note ligger i enheden den først blev konverteret
+# i, og den genbrugende lektions plan_id tilføjes dens `used_in:`-liste (issue #148 opgave 2 —
+# afløser den gamle `type: dublet`-redirect-note, som kunne rådne og gav #136's cirkulær-bug).
+# Additiv, fjernes aldrig automatisk — samme "intet slettes"-princip som resten af synken.
+def owning_plan_id(doc_path: Path) -> str | None:
+    md_dir = md_targets(doc_path)[0].parent
+    notes = sorted(p for p in md_dir.glob("*.md") if p.name.startswith("[PLAN] "))
+    if not notes:
+        return None
+    note = _plan_note_for(notes, f"{sanitize(doc_path.stem)}.md")
+    return read_frontmatter_field(note.read_text(encoding="utf-8"), "plan_id")
+
+
+def append_used_in(original_md: Path, plan_id: str) -> bool:
+    """Tilføjer plan_id til original_md's `used_in:`-blokliste i frontmatteren. Idempotent:
+    returnerer False hvis plan_id allerede står der, eller allerede er notens egen `lektion:`
+    (#186 — samme lektion ejer noten, så genbrugs-noteringen ville være redundant)."""
+    text = original_md.read_text(encoding="utf-8")
+    m = re.match(r"^(---\n.*?\n)(---\n)(.*)$", text, re.DOTALL)
+    if not m:
+        return False
+    fm, close, body = m.groups()
+    entry = f'  - "{plan_id}"\n'
+    if entry in fm or read_frontmatter_field(fm, "lektion") == plan_id:
+        return False
+    if re.search(r"^used_in:[ \t]*$", fm, re.MULTILINE):
+        fm = re.sub(r"^(used_in:[ \t]*\n)", rf"\1{entry}", fm, count=1, flags=re.MULTILINE)
+    else:
+        fm = fm + f"used_in:\n{entry}"
+    original_md.write_text(fm + close + body, encoding="utf-8")
+    return True
 
 
 def error_marker_path(doc_path: Path) -> Path:
@@ -643,10 +674,17 @@ def process_document(doc_path: Path) -> None:
     if already_converted(doc_path) or previously_failed(doc_path):
         return
 
+    # ponytail: en byte-dublet-RAW får ingen egen MD-fil længere, så already_converted() er
+    # altid False for den, og scan_existing() re-hasher den ved hver watcher-genstart. append_used_in
+    # er idempotent, så det er spildt arbejde men ikke forkert; dubletter er en minoritet og
+    # genstarter er sjældne. Cache på sha256 i frontmatter hvis det nogensinde bliver mærkbart.
     original_md = existing_conversion(doc_path)
     if original_md:
-        write_duplicate_stub(doc_path, original_md)
-        print(f"Dublet af {original_md.name} — henviser i stedet for at konvertere igen", flush=True)
+        plan_id = owning_plan_id(doc_path)
+        if plan_id and append_used_in(original_md, plan_id):
+            print(f"Dublet af {original_md.name} — {plan_id} tilføjet dens used_in:", flush=True)
+        else:
+            print(f"Dublet af {original_md.name} — ingen ny used_in: (mangler plan_id eller allerede noteret)", flush=True)
         return
 
     digest = hashlib.sha256(doc_path.read_bytes()).hexdigest()
@@ -982,6 +1020,39 @@ def selfcheck() -> int:
         md, att = md_targets(enhed_doc)
         assert md == VAULT_ROOT / "§ FAG/♪ Musik/MD/Musikforståelse/Frede.md", md
         assert att == VAULT_ROOT / "§ FAG/♪ Musik/MD/Musikforståelse/_attachments/Frede", att
+
+        # #148 opgave 2: byte-identisk RAW i to enhed-mapper -> plan_id appendes til originalens
+        # `used_in:` (afløser write_duplicate_stub). #136: kun `type: materiale` tæller som original.
+        old_root, VAULT_ROOT = VAULT_ROOT, root
+        try:
+            fag = root / "§ FAG/♪ Musik"
+            (fag / RAW_DIR_NAME / "Enhed A").mkdir(parents=True)
+            (fag / RAW_DIR_NAME / "Enhed B").mkdir(parents=True)
+            (fag / RAW_DIR_NAME / "Enhed A" / "Bog.pdf").write_bytes(b"identiske bytes")
+            (fag / RAW_DIR_NAME / "Enhed B" / "Bog.pdf").write_bytes(b"identiske bytes")
+            orig = fag / MD_DIR_NAME / "Enhed A" / "Bog.md"
+            orig.parent.mkdir(parents=True)
+            orig.write_text('---\ntype: materiale\nemne: "Enhed A"\n---\n\nBrødtekst.\n', encoding="utf-8")
+            (fag / MD_DIR_NAME / "Enhed B").mkdir(parents=True)
+            (fag / MD_DIR_NAME / "Enhed B" / "[PLAN] 2026-09-01 - Enhed B.md").write_text(
+                '---\ntype: lektionsplan\nplan_id: "36016:999"\n---\n\n'
+                "<!-- AUTO:START -->\n## Materialer\n- [[§ FAG/♪ Musik/MD/Enhed B/Bog.md|Bog.md]]\n<!-- AUTO:END -->\n",
+                encoding="utf-8")
+            dup = fag / RAW_DIR_NAME / "Enhed B" / "Bog.pdf"
+            assert existing_conversion(dup) == orig, "byte-identisk type:materiale-note ikke fundet som original"
+            assert owning_plan_id(dup) == "36016:999", owning_plan_id(dup)
+            assert append_used_in(orig, "36016:999") is True
+            assert 'used_in:\n  - "36016:999"\n' in orig.read_text(encoding="utf-8"), orig.read_text()
+            assert "Brødtekst." in orig.read_text(encoding="utf-8"), "brødtekst tabt ved used_in-append"
+            assert append_used_in(orig, "36016:999") is False, "used_in-append ikke idempotent"
+            # `lektion:` == plan_id -> ingen redundant used_in (#186).
+            orig.write_text('---\ntype: materiale\nlektion: "36016:111"\n---\n\nx\n', encoding="utf-8")
+            assert append_used_in(orig, "36016:111") is False, "used_in duplikerede notens egen lektion:"
+            # En `type: dublet`-note må aldrig vælges som original (#136).
+            orig.write_text('---\ntype: dublet\n---\n\nx\n', encoding="utf-8")
+            assert existing_conversion(dup) is None, "type: dublet blev accepteret som original"
+        finally:
+            VAULT_ROOT = old_root
 
         # write_conversion(): highlights i eksisterende MD beskyttes mod overskrivning (#42).
         old_root, VAULT_ROOT = VAULT_ROOT, root

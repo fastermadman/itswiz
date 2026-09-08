@@ -30,8 +30,21 @@ from watch_viastudywiz import (
     VAULT_ROOT,
     frontmatter,
     md_targets,
-    write_duplicate_stub,
 )
+
+
+# Dette er en spent engangs-migrering (kørt for længst, vaulten er to strukturer videre).
+# `write_duplicate_stub()` blev fjernet fra watch_viastudywiz.py da `type: dublet`-modellen
+# udgik til fordel for `used_in:` (#148 opgave 2) — den gamle stub-form beholdes lokalt her,
+# så scriptet stadig kan læses/køre som historisk reference.
+def write_duplicate_stub(doc_path: Path, original_md: Path) -> None:
+    dest_md = md_targets(doc_path)[0]
+    dest_md.parent.mkdir(parents=True, exist_ok=True)
+    link = original_md.relative_to(VAULT_ROOT).with_suffix("").as_posix()
+    head = frontmatter(doc_path, extra=f'note: "[[{link}]]"\n').replace(
+        "type: materiale", "type: dublet", 1
+    )
+    dest_md.write_text(f"{head}> Samme materiale som [[{link}]] — brugt igen i denne uge.\n", encoding="utf-8")
 
 WEEK_PREFIX = re.compile(r"^(W\d{1,2}[a-zæøå]+) - (.+)$")
 WEEK_FOLDER = re.compile(r"^W\d{1,2}[a-zæøå]+$")
