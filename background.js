@@ -20,7 +20,7 @@ const HOLD_COURSE_DATA_PATH = ".obsidian/plugins/hold-course/data.json";
 // Modulniveau, ikke kun lokal i writePlanNotes: runCollectAndDownload skal kunne sammenligne den
 // mod den senest GENNEMFØRTE version (issue #121) for at vide om en engangs-backfill er
 // nødvendig — se FRONTMATTER_VERSION_KEY og runCollectAndDownload.
-const FRONTMATTER_VERSION = 10; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129), 10 = [PLAN]-note pr. lektion (#184)
+const FRONTMATTER_VERSION = 11; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129), 10 = [PLAN]-note pr. lektion (#184), 11 = forberedelse_tekst (#205)
 
 // chrome.downloads.download() tvinger en Gem-som-dialog frem for nye undermapper, uanset "spørg
 // hvor filer skal gemmes"-indstillingen — udokumenteret macOS-sandbox-adfærd vi ikke kan styre
@@ -1393,9 +1393,19 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       : [];
     const forberedelse = forberedelseElements(plan);
     // Samme tekst som AUTO-sektionens brødtekst nedenfor, men som eget felt: Hold Course-synken
-    // (issue #113) læser kun frontmatter, ikke AUTO-blokken, og "Key Concepts & Lesson Goal" på
-    // lektionen i Hold Course er netop den fritekst-boks planens beskrivelse hører hjemme i.
+    // (issue #113) læser kun frontmatter, ikke AUTO-blokken. "Lesson Description" på lektionen i
+    // Hold Course (main.js, hold-course#172) er netop den read-only boks planens beskrivelse hører
+    // hjemme i — IKKE "Key Concepts & Lesson Goal", som er en anden, Valdemar-ejet fritekstboks
+    // (rettet her, 2026-09-09 — den gamle kommentar navngav den forkerte).
     const beskrivelse = stripHtml(plan.description).trim();
+    // #205: samme Forberedelse-instruktion som AUTO-blokkens "## ⚒ Forberedelse" nedenfor
+    // (el.body), men som EGET felt af samme grund som beskrivelse ovenfor — Hold Course-synken
+    // læser kun frontmatter. Uden dette felt kunne Valdemar se AT der var en Forberedelse, men
+    // ikke HVAD den bad om, uden at åbne [PLAN]-noten. Underoverskrift kun ved flere elementer,
+    // samme regel som forberedelseLines nedenfor bruger til AUTO-blokken.
+    const forberedelseTekst = forberedelse
+      .map((el) => (forberedelse.length > 1 ? `**${el.titel}**\n\n${stripHtml(el.body, true)}` : stripHtml(el.body, true)))
+      .join("\n\n").trim();
     // Ikke alle undervisere udfylder "Tilhørende litteratur"-feltet — LivsOplysning vedhæfter i
     // stedet læsestoffet som almindelige fil-elementer og skriver selve læse-instruktionen
     // ("Forberedelse: Læs indledningen af...") ind i planens frie beskrivelsestekst i stedet for i
@@ -1498,6 +1508,9 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       ...(forberedelse.length
         ? yamlBlockLines("forberedelse", forberedelse.map((el) => `⚒ ${el.titel}`).join("\n"))
         : ["forberedelse: false"]),
+      // #205: selve instruktionsteksten til feltet ovenfor — se kommentaren ved forberedelseTekst
+      // for hvorfor den har sit eget felt. Samme `false`-mønster.
+      ...(forberedelseTekst ? yamlBlockLines("forberedelse_tekst", forberedelseTekst) : ["forberedelse_tekst: false"]),
       // Alt vedhæftet fil-materiale der IKKE allerede står i litteratur_filer — dækker fag hvor
       // underviseren aldrig udfylder litteratur-feltet (se kommentaren ved materialeFiler ovenfor).
       // Samme false-mønster som de øvrige felter.

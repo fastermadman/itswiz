@@ -651,12 +651,24 @@ def ensure_lecture(cls: dict, plan: dict, new_id) -> dict:
     # (og med hold-course#5b, hvor noten flytter ud i en fil og feltet tømmes, ville det ske
     # hver gang), og en guard der bare fredede feltet ville omvendt stoppe beskrivelses-
     # opdateringer fra overhovedet at nå frem. Split i stedet: description er 100% synkens,
-    # notes er 100% Valdemars. Hold Course viser description read-only over notefeltet.
+    # notes er 100% Valdemars. Hold Course viser description read-only ("Lesson Description").
     beskrivelse = plan.get("beskrivelse", "")
     beskrivelse = "" if beskrivelse == "false" else beskrivelse
-    if beskrivelse:
-        lec["description"] = beskrivelse
-        lec["vswDescription"] = beskrivelse
+    # #205: Forberedelse-INSTRUKTIONEN (ikke kun titlen — den står allerede i assignment.title via
+    # ensure_assignment nedenfor) i samme felt som Formål ovenfor. Valdemar spurgte hvorfor han
+    # kunne se AT der var en Forberedelse uden at kunne se HVAD den bad om uden at åbne [PLAN]-
+    # noten — samme "description er 100% synkens"-begrundelse gælder her, ingen ny UI-sektion
+    # nødvendig, MarkdownRenderer.render (main.js:3679) tegner "**Forberedelse**"-overskriften fint.
+    forberedelse_tekst = plan.get("forberedelse_tekst", "")
+    forberedelse_tekst = "" if forberedelse_tekst == "false" else forberedelse_tekst
+    beskrivelse_dele = [d for d in (
+        beskrivelse,
+        f"**Forberedelse**\n\n{forberedelse_tekst}" if forberedelse_tekst else "",
+    ) if d]
+    description = "\n\n---\n\n".join(beskrivelse_dele)
+    if description:
+        lec["description"] = description
+        lec["vswDescription"] = description
     # Hold Courses "Lecture note" er Valdemars egen note for lektionen, ikke maskinens lektionsplan
     # — derfor [NOTE]-stubben, som selv linker videre til [PLAN] via sit kilde:-felt. Ét klik til
     # planen, i stedet for at bruge feltet på en note han ikke selv skriver i.
@@ -1797,6 +1809,30 @@ def selfcheck() -> int:
     lec7["notes"] = ""
     data7 = sync_data(data7, [plan_b2], lambda: "MÅ-IKKE-BRUGES")
     assert data7["semesters"][0]["classes"][0]["lectures"][0]["notes"] == "", data7
+
+    # #205: forberedelse_tekst lander i SAMME description-felt som beskrivelse, adskilt med en
+    # skillelinje — ikke et nyt felt, ingen main.js-ændring nødvendig (MarkdownRenderer.render
+    # tegner den bare som mere tekst i den eksisterende "Lesson Description"-boks).
+    plan_c = dict(plan, beskrivelse="Formål: dagens tema.", forberedelse_tekst="Læs kapitel 3.")
+    data_c = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [plan_c], lambda: "c0")
+    lec_c = data_c["semesters"][0]["classes"][0]["lectures"][0]
+    assert lec_c["description"] == (
+        "Formål: dagens tema.\n\n---\n\n**Forberedelse**\n\nLæs kapitel 3."
+    ), lec_c["description"]
+
+    # Kun forberedelse_tekst, intet beskrivelse: ingen tom skillelinje foran.
+    plan_d = dict(plan, beskrivelse="false", forberedelse_tekst="Medbring noder.")
+    data_d = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [plan_d], lambda: "d0")
+    lec_d = data_d["semesters"][0]["classes"][0]["lectures"][0]
+    assert lec_d["description"] == "**Forberedelse**\n\nMedbring noder.", lec_d["description"]
+
+    # Ingen af delene: som før #205, feltet rørt slet ikke (samme "if description:"-guard som
+    # "if beskrivelse:" altid har haft — starter tomt fra ensure_lecture()'s egen initialisering).
+    plan_e = dict(plan, beskrivelse="false", forberedelse_tekst="false")
+    data_e = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2}, [plan_e], lambda: "e0")
+    lec_e = data_e["semesters"][0]["classes"][0]["lectures"][0]
+    assert lec_e["description"] == "", lec_e
+    assert "vswDescription" not in lec_e, lec_e
 
     # Engangs-migrering: uredigeret notes (== vswNotes) flyttes til description og ryddes;
     # redigeret notes bliver stående; stemplet forsvinder i begge tilfælde. Kører også på en
