@@ -1038,31 +1038,35 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     return data
 
 
-def sync_task_completion(data: dict, vault_root: Path, dry_run: bool) -> tuple[list[str], list[str]]:
-    """Holder Forberedelse-afkrydsningen i [NOTE]-stubben og opgavens status i Hold Course ens.
-    Returnerer (krydset af i vaulten, markeret done i Hold Course).
+def sync_task_completion(data: dict, vault_root: Path) -> list[str]:
+    """Vault -> Hold Course: en Forberedelse krydset af DIREKTE i [NOTE]-stubben (uden om Hold
+    Course) sætter opgaven til `done`. Returnerer opgaverne der blev markeret done.
 
-    Hold Course -> vault: et Done-tryk krydser `- [ ] ⚒ <titel>` af i stubben, hvorfra
-    background.js' EKSISTERENDE checkbox->itslearning-mekanisme (issue #70) tager over. Ingen ny
-    itslearning-kode, kun en ny skriver af den samme linje. Extensionen skal selv have
-    `enableTaskCompletionSync` slået til, ellers ligger krydset bare der uden effekt.
+    Hold Course -> itslearning går IKKE længere via denne funktion (#202, 2026-09-09). Indtil da
+    skrev et Done-tryk i Hold Course et kryds ind i stubben, som background.js' checkbox-scanning
+    (issue #70) så opdagede ved sin næste kørsel og postede til itslearning derfra — en
+    mellemstation der kun var nødvendig fordi Hold Course endnu ikke fandtes da #70 blev bygget.
+    Nu Hold Course ER den primære indgang, læser background.js selv `assignment.status` direkte i
+    data.json (samme `|forb|`-nøgle) i stedet for at vente på at denne funktion skriver et kryds
+    ind i en fil. Det ELIMINERER ikke checkboxen i noten — den forbliver #70's oprindelige,
+    uafhængige vej: Valdemar kan stadig krydse direkte i noten uden om Hold Course, og DEN retning
+    er hvad denne funktion nu udelukkende dækker.
 
-    Vault -> Hold Course: en allerede afkrydset linje sætter opgaven til `done`. Uden den retning
-    er kæden kun envejs, og alt Valdemar fuldfører i itslearning/vaulten bliver stående som
-    "not started" i Hold Course — hvor det ophober sig som Overdue for evigt på både dashboardets
-    Today-strip, i Assignments-listen og som rød pille i kalenderen (main.js: getAllAssignments
-    filtrerer udelukkende på `status !== 'done'`). Retningen rører KUN `not-started`: har Valdemar
-    selv sat opgaven til `in-progress` i Hold Course, er det hans vurdering og ikke vores.
+    Uden denne retning ville alt Valdemar fuldfører direkte i vaulten (eller i selve itslearning,
+    som #70's egen checkbox-scanning i så fald aldrig så) blive stående som "not started" i Hold
+    Course — hvor det ophober sig som Overdue for evigt på både dashboardets Today-strip, i
+    Assignments-listen og som rød pille i kalenderen (main.js: getAllAssignments filtrerer
+    udelukkende på `status !== 'done'`). Rører KUN `not-started`: har Valdemar selv sat opgaven
+    til `in-progress` i Hold Course, er det hans vurdering og ikke vores.
 
     Bindes på OPGAVE-niveau, ikke lektion (afklaret med Valdemar 2026-08-28): en lektion kan i
     princippet have flere forberedelses-opgaver, hver med sit eget itslearning-element/URL, så kun
     en per-opgave-binding rammer den rigtige. Nøglen er assignment.vswKey's "<lecture.id>|forb|
     <titel>"-form (samme titel background.js skrev linjen med, se writeLectureNoteStub).
 
-    Begge retninger går KUN mod fuldført, aldrig tilbage — samme retning som selve
-    itslearning-synken, og derfor naturligt idempotent og uden mulighed for at de to sider kan
-    vippe frem og tilbage mod hinanden."""
-    checked, marked_done = [], []
+    Går KUN mod fuldført, aldrig tilbage — samme retning som selve itslearning-synken, og derfor
+    naturligt idempotent."""
+    marked_done = []
     for sem in data.get("semesters", []):
         for cls in sem.get("classes", []):
             for lec in cls.get("lectures", []):
@@ -1072,27 +1076,21 @@ def sync_task_completion(data: dict, vault_root: Path, dry_run: bool) -> tuple[l
                 file = vault_root / stub_rel
                 if not file.exists():
                     continue
-                text, changed = None, False
+                text = None
                 for assign in lec.get("assignments", []):
                     key = assign.get("vswKey", "")
                     if "|forb|" not in key:
                         continue
+                    if assign.get("status") != "not-started":
+                        continue
                     titel = key.split("|forb|", 1)[1]
                     if text is None:
                         text = file.read_text(encoding="utf-8")
-                    unchecked = f"- [ ] {FORBEREDELSE_PREFIX} {titel}"
                     checked_line = f"- [x] {FORBEREDELSE_PREFIX} {titel}"
-                    if assign.get("status") == "done":
-                        if unchecked in text:
-                            text = text.replace(unchecked, checked_line)
-                            changed = True
-                            checked.append(f"{titel} ({stub_rel})")
-                    elif assign.get("status") == "not-started" and checked_line in text:
+                    if checked_line in text:
                         assign["status"] = "done"
                         marked_done.append(f"{titel} ({stub_rel})")
-                if changed and not dry_run:
-                    file.write_text(text, encoding="utf-8")
-    return checked, marked_done
+    return marked_done
 
 
 def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> None:
@@ -1292,7 +1290,7 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
     merged = sync_data(data, plans, tasks=tasks, dropped_out=dropped, report=report)
     # FØR serialiseringen: vault -> Hold Course-retningen sætter status på opgaver i `merged`, og
     # de ændringer skal med i den data.json vi sammenligner og skriver.
-    checked, marked_done = sync_task_completion(merged, vault_root, dry_run=not apply)
+    marked_done = sync_task_completion(merged, vault_root)
     removed_res, removed_assign = prune_dead_links(merged, vault_root)
     after = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
 
@@ -1320,15 +1318,9 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
             for line in report[key]:
                 print(f"  {line}")
 
-    # Rapporteres UANSET om data.json selv skal genskrives: Hold Course kan have gemt et Done-tryk
-    # siden sidste kørsel uden at vores egen frontmatter-flet ændrer noget, og et Done-tryk skal
-    # krydses af i vaulten ved næste tick, ikke først når en lektionsplan-note tilfældigvis ændrer
-    # sig.
-    if checked and not quiet:
-        label = "Krydset af" if apply else "Ville krydse af (dry-run)"
-        print(f"{label}: {len(checked)} Forberedelse-opgave(r) markeret Done i Hold Course:")
-        for titel in checked:
-            print(f"  {titel}")
+    # Rapporteres UANSET om data.json selv skal genskrives: en linje krydset direkte i vaulten
+    # (uden om Hold Course) skal give udslag ved næste tick, ikke først når en lektionsplan-note
+    # tilfældigvis ændrer sig.
     if marked_done and not quiet:
         label = "Markeret Done i Hold Course" if apply else "Ville markere Done i Hold Course (dry-run)"
         print(f"{label}: {len(marked_done)} Forberedelse-opgave(r) allerede krydset af i vaulten:")
@@ -1675,46 +1667,39 @@ def selfcheck() -> int:
                       sort_keys=True) == snap4, "opgave-synk er ikke idempotent"
 
     # sync_task_completion: opgave-niveau binding, ikke lektion (Valdemars valg, 2026-08-28).
+    # #202 (2026-09-09): funktionen skriver ikke længere ind i noten — Hold Course -> itslearning
+    # går nu via background.js, som læser data.json direkte. Kun vault -> Hold Course (en linje
+    # krydset af DIREKTE i noten, uden om Hold Course) testes her.
     stub_dir = Path(tempfile.mkdtemp())
     stub_path = stub_dir / "stub.md"
     stub_path.write_text(
         "---\ntype: note\n---\n\n## ⚒ Forberedelse\n"
-        "- [ ] ⚒ Forberedelse\n- [ ] ⚒ Læs kapitel 2\n", encoding="utf-8")
+        "- [x] ⚒ Forberedelse\n- [ ] ⚒ Læs kapitel 2\n", encoding="utf-8")
     rel = str(stub_path.relative_to(stub_dir.parent))
     lec_tc = {"id": "L1", "vaultLink": rel, "assignments": [
-        {"vswKey": "L1|forb|Forberedelse", "status": "done"},
+        {"vswKey": "L1|forb|Forberedelse", "status": "not-started"},
         {"vswKey": "L1|forb|Læs kapitel 2", "status": "not-started"},
-        {"vswKey": "L1|lit|nogetandet", "status": "done"},  # ikke forberedelse — må ikke krydses
+        {"vswKey": "L1|lit|nogetandet", "status": "not-started"},  # ikke forberedelse — må ikke røres
+        {"vswKey": "L1|forb|Eget tempo", "status": "in-progress"},  # Valdemars egen vurdering, røres ikke
     ]}
     data_tc = {"semesters": [{"classes": [{"lectures": [lec_tc]}]}]}
-    checked_dry, done_dry = sync_task_completion(data_tc, stub_dir.parent, dry_run=True)
-    assert checked_dry == [f"Forberedelse ({rel})"], checked_dry
-    assert done_dry == [], done_dry                           # ingen linje er krydset af i vaulten endnu
-    assert "- [ ] ⚒ Forberedelse" in stub_path.read_text(encoding="utf-8"), "dry-run skrev alligevel"
+    marked = sync_task_completion(data_tc, stub_dir.parent)
+    assert marked == [f"Forberedelse ({rel})"], marked
+    assert lec_tc["assignments"][0]["status"] == "done", lec_tc["assignments"][0]
+    assert lec_tc["assignments"][1]["status"] == "not-started", lec_tc["assignments"][1]  # ikke krydset endnu
+    assert lec_tc["assignments"][2]["status"] == "not-started", lec_tc["assignments"][2]  # ikke forberedelse
+    assert lec_tc["assignments"][3]["status"] == "in-progress", lec_tc["assignments"][3]
+    assert sync_task_completion(data_tc, stub_dir.parent) == [], "idempotent: intet mere at markere"
 
-    checked, _ = sync_task_completion(data_tc, stub_dir.parent, dry_run=False)
-    assert checked == [f"Forberedelse ({rel})"], checked
-    written = stub_path.read_text(encoding="utf-8")
-    assert "- [x] ⚒ Forberedelse" in written, written        # den Done-markerede krydses af
-    assert "- [ ] ⚒ Læs kapitel 2" in written, written        # den ANDEN opgave, stadig not-started, rørt IKKE
-
-    # Idempotent: kør igen, ingenting sker (allerede [x], og opgaven er allerede done).
-    assert sync_task_completion(data_tc, stub_dir.parent, dry_run=False) == ([], [])
-
-    # Den anden retning: Valdemar (eller extensionen efter en itslearning-synk) krydser af i
-    # vaulten -> opgaven bliver done i Hold Course. Uden den ville alt fuldført arbejde blive
-    # stående som Overdue på dashboardet for evigt.
+    # Krydses linjen af bagefter (Valdemar, eller extensionen efter en itslearning-synk), fanger
+    # næste kørsel den.
     stub_path.write_text(
         "---\ntype: note\n---\n\n## ⚒ Forberedelse\n"
         "- [x] ⚒ Forberedelse\n- [x] ⚒ Læs kapitel 2\n", encoding="utf-8")
-    lec_tc["assignments"][1]["status"] = "not-started"
-    lec_tc["assignments"].append({"vswKey": "L1|forb|Eget tempo", "status": "in-progress"})
-    _, marked = sync_task_completion(data_tc, stub_dir.parent, dry_run=False)
-    assert marked == [f"Læs kapitel 2 ({rel})"], marked
+    marked2 = sync_task_completion(data_tc, stub_dir.parent)
+    assert marked2 == [f"Læs kapitel 2 ({rel})"], marked2
     assert lec_tc["assignments"][1]["status"] == "done", lec_tc["assignments"][1]
-    # in-progress er Valdemars egen vurdering og røres ikke, heller ikke selvom linjen mangler.
-    assert lec_tc["assignments"][3]["status"] == "in-progress", lec_tc["assignments"][3]
-    assert sync_task_completion(data_tc, stub_dir.parent, dry_run=False) == ([], [])
+    assert sync_task_completion(data_tc, stub_dir.parent) == []
 
     # prune_dead_links (#138): en gammel dublet der peger på en fil der ikke længere findes (fx
     # efter en ugemappe-flytning, fra dengang synken nøglede på hele stien) skal væk, men en
