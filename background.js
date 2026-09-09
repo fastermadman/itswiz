@@ -7,6 +7,10 @@
 const FAG_ROOT = "§ FAG";
 const NOTER_ROOT = "✎ NOTER";
 
+// #202: Hold Course-pluginets egen data.json, ikke en vaultsti under FAG_ROOT/NOTER_ROOT — læst
+// (aldrig skrevet) for at se om Valdemar har trykket Done DER, uden om et kryds i [NOTE]-stubben.
+const HOLD_COURSE_DATA_PATH = ".obsidian/plugins/hold-course/data.json";
+
 // Versionsmarkøren tvinger én genskrivning af alle lektionsplan-noter når frontmatter-skemaet
 // ændrer sig (se brugen i writePlanNotes), og koster ingenting bagefter. Bump den når frontmatter
 // får nye felter. (#73's itslearning-suffiks på materialer trænger ikke til et bump — det ÆNDRER
@@ -1035,11 +1039,49 @@ const FORB_HEADING = "## ⚒ Forberedelse";
 // already_converted() i watch_viastudywiz.py, se 12-notestruktur-egne-noter.md §6.
 // Eneste undtagelse er nye afkrydsningslinjer, som APPENDES (se nedenfor) — eksisterende linjer,
 // og dermed hans afkrydsninger, røres aldrig.
+// #202: Hold Course -> itslearning gik tidligere via [NOTE]-stubbens checkbox som mellemstation
+// (sync_hold_course.py krydsede den af, denne fil scannede stubben ved næste kørsel). Nu Hold
+// Course ER den primære indgang, læses `assignment.status` direkte i data.json i stedet — ingen
+// grund til at vente på at et separat script først skriver et kryds ind i en fil. Læst én gang pr.
+// writePlanNotes()-kørsel (kaldt fra loopet, ikke pr. lektion), ikke skrevet til her nogensinde.
+// Returnerer null ved manglende fil/ugyldig JSON — kaldere falder da tilbage til kun at læse
+// checkbox-state i noten, samme adfærd som før #202.
+async function readHoldCourseData() {
+  try {
+    const text = await readFromVault(HOLD_COURSE_DATA_PATH);
+    return text != null ? JSON.parse(text) : null;
+  } catch (err) {
+    console.warn("VIAstudyWiz: kunne ikke læse Hold Courses data.json (#202):", err);
+    return null;
+  }
+}
+
+// Forberedelse-TITLER markeret `done` i Hold Course for lektionen med dette plan_id, matchet på
+// samme vswKey-form ("<lecture.id>|forb|<titel>") sync_hold_course.py selv bruger og selv skrev
+// stemplet (`lec.vswPlanId`) ind fra. Tomt sæt hvis lektionen ikke findes endnu i data.json
+// (synken har ikke kørt for den siden #202 landede) eller intet er markeret.
+function holdCourseDoneForbTitles(holdCourseData, planKey) {
+  const done = new Set();
+  for (const sem of holdCourseData?.semesters ?? []) {
+    for (const cls of sem.classes ?? []) {
+      for (const lec of cls.lectures ?? []) {
+        if (lec.vswPlanId !== planKey) continue;
+        for (const a of lec.assignments ?? []) {
+          const idx = (a.vswKey ?? "").indexOf("|forb|");
+          if (idx !== -1 && a.status === "done") done.add(a.vswKey.slice(idx + "|forb|".length));
+        }
+        return done; // planKey er unik — ingen grund til at blive ved med at lede
+      }
+    }
+  }
+  return done;
+}
+
 // Tager hele plan'en frem for fag/uge/emne/start hver for sig: felterne udledes alligevel her, og
 // signaturen var på vej mod syv parametre da Forberedelse kom til.
 // Returnerer false hvis vault-tilladelsen mangler, ellers true (fejl på selve stubben er ikke
 // kritiske nok til at stoppe resten af kørslen — kun logges via recordError).
-async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse, tabId, syncEnabled) {
+async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse, tabId, syncEnabled, holdCourseDone) {
   const courseName = plan.courseName ?? "ukendt-fag";
   const path = noteStubPath(courseName, weekFolder);
   const labels = forberedelse.map((el) => `⚒ ${el.titel}`);
@@ -1048,11 +1090,18 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
     if (existing != null) {
       // issue #70: kun når afkrydsningen allerede er sat af Valdemar — nye stubbe kan ikke have
       // et flueben, så tjekket giver først mening her, ikke ved førstegangs-skrivning nedenfor.
+      // #202: to UAFHÆNGIGE kilder til "allerede markeret Done", forenet — et kryds direkte i
+      // noten (#70's oprindelige vej, uden om Hold Course) ELLER `assignment.status === 'done'`
+      // i Hold Courses egen data.json (den primære vej i dag). !el.isCompleted (frisk fra
+      // itslearning ved denne kørsel) gør unionen naturligt idempotent, samme som før: har
+      // itslearning allerede registreret det, POSTes der ikke igen uanset hvilken kilde der sagde ja.
       if (syncEnabled) {
         const afkrydsede = new Set(
           existing.split("\n").filter((line) => /^- \[[xX]\]/.test(line.trim())).map((line) => line.replace(/^- \[[xX]\]\s*/, "").trim())
         );
-        const skalMarkeres = forberedelse.filter((el) => !el.isCompleted && afkrydsede.has(`⚒ ${el.titel}`));
+        const skalMarkeres = forberedelse.filter((el) =>
+          !el.isCompleted && (afkrydsede.has(`⚒ ${el.titel}`) || holdCourseDone.has(el.titel))
+        );
         if (skalMarkeres.length) await completeTasks(skalMarkeres, tabId);
       }
       // Underviseren kan tilføje en Forberedelse EFTER stubben blev skrevet — uden dette ville den
@@ -1271,6 +1320,9 @@ function rawLink(courseName, weekFolder, title) {
 // advarsels-badge'et.
 async function writePlanNotes(plans, tabId, syncTaskCompletion) {
   const records = await getPlanNoteRecords();
+  // Én læsning for hele kørslen (dusinvis af planer i loopet nedenfor), ikke én pr. lektion —
+  // og kun når indstillingen overhovedet er slået til, ellers er filen ligegyldig for denne kørsel.
+  const holdCourseData = syncTaskCompletion ? await readHoldCourseData() : null;
 
   for (const [planKey, plan] of Object.entries(plans)) {
     const noteId = `plan:${planKey}`;
@@ -1361,7 +1413,8 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
     const lektionsplanPath = `${FAG_ROOT}/${fag}/MD/${weekFolder}/${planNoteName(plan)}.md`;
-    const stubOk = await writeLectureNoteStub(plan, weekFolderName(plan), lektionsplanPath, forberedelse, tabId, syncTaskCompletion);
+    const holdCourseDone = holdCourseData ? holdCourseDoneForbTitles(holdCourseData, planKey) : new Set();
+    const stubOk = await writeLectureNoteStub(plan, weekFolderName(plan), lektionsplanPath, forberedelse, tabId, syncTaskCompletion, holdCourseDone);
     if (!stubOk) return false;
 
     // Ligger i AUTO-blokken, så underviserens rettelser følger med (issue #61) — i modsætning til
