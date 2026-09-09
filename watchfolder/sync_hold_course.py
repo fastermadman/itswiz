@@ -27,17 +27,17 @@ status-pills, karakterer, noter, linkede noter, TA/kontor-tid — røres aldrig,
 nogensinde. Samme princip som
 spliceAutoSection i background.js: maskinen ejer en afgrænset zone, mennesket ejer resten.
 
-Kendt begrænsning (2026-08-28, delvist afhjulpet): Hold Course implementerer ikke
-`onExternalSettingsChange` og cacher sin data.json i hukommelsen ved plugin-opstart (main.js:
-`this.data = await this.loadData()`, kun kaldt i onload) — selv luk/genåbn af Hold Course-visningen
-render'er bare fra den allerede-indlæste kopi igen. Ingen installeret plugin tilbyder en "genindlæs
-KUN denne plugin"-kommando, så eneste udløser udefra er en fuld app-reload. trigger_obsidian_reload()
-gør præcis det, via Local REST API-pluginet (allerede installeret) — men KUN når sync() rent faktisk
-skrev en ændret data.json, ikke ved hver kørsel (en fuld reload afbryder Valdemar hvis han sidder og
-skriver i en note). Er Obsidian ikke åben, eller Local REST API ikke installeret/konfigureret, fejler
-det stille — reload er en bekvemmelighed, ikke en forudsætning: mtime-vagten nedenfor sikrer at VI
-aldrig overskriver Valdemars arbejde, og synken er idempotent, så en tabt skrivning/reload kommer
-igen ved næste kørsel.
+Pluginet opdager selv en ekstern skrivning (issue #198). Hold Course implementerer
+`onExternalSettingsChange` (forkens main.js:1401, v1.8.0) og genindlæser sin data.json plus
+repainter begge visninger af sig selv. Indtil #132 var det ikke tilfældet, og synken bad derfor
+Obsidian genstarte HELE appen via Local REST API'ets `app:reload` (trigger_obsidian_reload()) —
+en grovkornet løsning der afbrød Valdemar midt i en note, og som efter forkens hc#2 kørte oveni
+pluginets eget repaint uden at tilføje noget. Den er væk igen; omtalerne af den længere nede i
+filen er datid og forklarer #184's symptom, ikke nuværende adfærd.
+
+Skrivningen selv er stadig beskyttet af mtime-vagten i sync(): ændrer data.json sig undervejs
+(Hold Course gemte), springes flettningen over og kommer igen ved næste kørsel — synken er
+idempotent, så en tabt kørsel koster ét interval, aldrig Valdemars status-pills.
 
 Notér uden plan_id (ældre end issue #96) synkes ikke — de rapporteres, se ensure_lecture for hvorfor
 et gæt på fag+uge blev afprøvet og forkastet. Samme rapportér-ikke-slet-princip gælder den anden
@@ -49,19 +49,16 @@ Dry-run som standard, `--apply` udfører, `--selfcheck` kører den indbyggede te
 
 import json
 import re
-import ssl
 import tempfile
 import sys
 import time
 import unicodedata
-import urllib.request
 from datetime import date as _date
 from pathlib import Path
 
 VAULT_ROOT = Path.home() / "ViaVault"
 DATA_JSON = VAULT_ROOT / ".obsidian" / "plugins" / "hold-course" / "data.json"
 ONYX_DATA_JSON = VAULT_ROOT / ".obsidian-onyx" / "plugins" / "hold-course" / "data.json"
-LOCAL_REST_API_CONFIG = VAULT_ROOT / ".obsidian" / "plugins" / "obsidian-local-rest-api" / "data.json"
 
 # main.js: COLOR_PALETTE har 6 farver, og addClass sætter colorIndex = classes.length % længden.
 COLOR_PALETTE_SIZE = 6
@@ -1088,25 +1085,6 @@ def sync_task_completion(data: dict, vault_root: Path, dry_run: bool) -> tuple[l
     return checked, marked_done
 
 
-def trigger_obsidian_reload(vault_root: Path) -> None:
-    """Beder Obsidian genindlæse sig selv (`app:reload`) via Local REST API-pluginet, så Hold
-    Course viser den friske data.json med det samme i stedet for at vente på at Valdemar selv
-    reloader — se modul-docstringens "Kendt begrænsning". Kaldes kun af sync() lige efter den
-    faktisk har skrevet en ændret data.json. Fejler stille: Obsidian kører måske ikke lige nu,
-    Local REST API er måske ikke installeret, eller porten/nøglen er ukendt — ingen af de
-    tilfælde skal vælte selve synk-kørslen, reload er en bekvemmelighed oveni, ikke forudsætning."""
-    try:
-        config = json.loads(LOCAL_REST_API_CONFIG.read_text(encoding="utf-8"))
-        req = urllib.request.Request(
-            f"https://127.0.0.1:{config['port']}/commands/app%3Areload/",
-            method="POST",
-            headers={"Authorization": f"Bearer {config['apiKey']}"},
-        )
-        urllib.request.urlopen(req, context=ssl._create_unverified_context(), timeout=5)
-    except Exception as err:
-        print(f"Kunne ikke bede Obsidian genindlæse (Local REST API): {err}", file=sys.stderr)
-
-
 def reconcile_onyx(onyx_path: Path, merged: dict, apply: bool, quiet: bool) -> None:
     """Propagerer den friske Mac-tilstand ind i Boox' egen data.json (issue #146).
 
@@ -1399,8 +1377,8 @@ def sync(vault_root: Path, data_path: Path, apply: bool, quiet: bool = False) ->
         return 0
 
     data_path.write_text(after, encoding="utf-8")
-    trigger_obsidian_reload(vault_root)
-    print("Skrevet. Bedt Obsidian genindlæse (Local REST API) — fejler stille hvis det ikke lykkedes.")
+    # Ingen reload-kald: pluginets onExternalSettingsChange henter den selv (#198).
+    print("Skrevet. Hold Course henter den selv (onExternalSettingsChange).")
     return 0
 
 
