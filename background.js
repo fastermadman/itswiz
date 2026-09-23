@@ -599,9 +599,8 @@ function timeFrontmatterLines(plan) {
   return [`uge: ${isoWeek(plan)}`, `ugedag: ${weekdayDa(plan)}`, `dato: ${weekFolderBase(plan)}`];
 }
 
-// NOTER/-grenen: fortsat "<dato> - <emne>" pr. lektion. Valdemars egne noter er filet efter
-// lejlighed (levetids-reglen, ValdiVault 12-notestruktur-egne-noter.md), i modsætning til
-// RAW/MD nedenfor der files efter enhed.
+// [NOTE]-stubbens FILNAVN: fortsat "<dato> - <emne>" pr. lektion (issue #209 grupperede kun selve
+// MAPPEN efter enhed ligesom RAW/MD — filnavnet holder datoen, så stubbene sorterer kronologisk).
 function weekFolderName(plan) {
   const base = weekFolderBase(plan);
   const topic = plan.topic?.name?.trim();
@@ -1020,10 +1019,13 @@ function mdPath(courseName, weekFolder, title) {
   return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/MD/${weekFolder}/${stem}.md`;
 }
 
-// § FAG/<fag>/NOTER/<uge>/ — søskende til RAW/MD, ikke en separat NOTER-rod (issue #65 §11:
+// § FAG/<fag>/NOTER/<enhed>/ — søskende til RAW/MD, ikke en separat NOTER-rod (issue #65 §11:
 // Valdemar har ADHD og har brug for ét sted pr. fag at kigge, ikke tre rødder at huske).
-function noteStubPath(courseName, weekFolder) {
-  return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/NOTER/${weekFolder}/[NOTE] ${weekFolder}.md`;
+// Mappen er enhed-grupperet ligesom RAW/MD (issue #209: 21 enkeltfil-mapper for 6 enheder i
+// Religion, samme overhead #150/#155 allerede løste for MD/) — filnavnet bærer stadig dato+enhed
+// (weekFolder), så stubbene sorterer kronologisk i Finder uden at behøve egen mappe hver.
+function noteStubPath(courseName, enhedFolder, weekFolder) {
+  return `${FAG_ROOT}/${sanitizeFilename(courseFolderName(courseName))}/NOTER/${enhedFolder}/[NOTE] ${weekFolder}.md`;
 }
 
 // Stubbens Forberedelse-sektion (issue #59): kun titlen som afkrydsningslinje, aldrig indholdet.
@@ -1083,7 +1085,7 @@ function holdCourseDoneForbTitles(holdCourseData, planKey) {
 // kritiske nok til at stoppe resten af kørslen — kun logges via recordError).
 async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse, tabId, syncEnabled, holdCourseDone) {
   const courseName = plan.courseName ?? "ukendt-fag";
-  const path = noteStubPath(courseName, weekFolder);
+  const path = noteStubPath(courseName, enhedFolder(plan), weekFolder);
   const labels = forberedelse.map((el) => `⚒ ${el.titel}`);
   try {
     const existing = await readFromVault(path);
@@ -1328,7 +1330,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const noteId = `plan:${planKey}`;
     if (!plan) continue;
 
-    // RAW/MD files efter enhed; NOTER-stubben nedenfor får fortsat "<dato> - <emne>".
+    // RAW/MD/NOTER files alle efter enhed (issue #209) — kun selve stub-FILNAVNET bærer "<dato> - <emne>".
     const weekFolder = enhedFolder(plan);
     const courseName = plan.courseName ?? "ukendt-fag";
     // Symbol-navnet er kun til selve mappestien — fag:-feltet nedenfor skal blive ved den rene

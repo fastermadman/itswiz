@@ -161,20 +161,18 @@ def prefixed_lines(value: str, prefix: str) -> list[str]:
 def note_stub_path(plan_path: str) -> str:
     """`[NOTE]`-stubben der hører til en `[PLAN]`-note — Valdemars egen note for lektionen.
 
-    background.js skriver den til `§ FAG/<fag>/NOTER/<uge>/[NOTE] <uge>.md` (noteStubPath), hvor
-    `<uge>` er weekFolder ("<dato> - <emne>"). Det er IKKE nødvendigvis planens egen MD-mappe:
-    MD-mapper er navngivet efter emne alene og deles af alle lektioner om det emne ("Skolens
-    formål" rummer fire [PLAN]-noter med hver sin dato), mens NOTER-mapper er én pr. lektion. Et
-    naivt MD->NOTER-strengbyt på selve MAPPENAVNET ramte derfor stort set aldrig rigtigt (#203,
-    live-fundet 2026-09-09: næsten alle lektioner i vaulten). [PLAN]-FILNAVNET bærer til gengæld
-    altid weekFolder som sin egen stamme ("[PLAN] 2026-09-09 - Skolens formål.md"), uafhængigt af
-    hvilken mappe den ligger i — den er den pålidelige nøgle. Falder tilbage til selve planen hvis
-    stubben mangler."""
-    m = re.match(r'^(.*)/MD/[^/]+/\[PLAN\] (.+)\.md$', plan_path)
+    background.js skriver den til `§ FAG/<fag>/NOTER/<enhed>/[NOTE] <uge>.md` (noteStubPath), hvor
+    `<enhed>` er MAPPEN (enhedFolder) og `<uge>` ("<dato> - <emne>") er selve FILNAVNET (issue #209:
+    NOTER/ er enhed-grupperet ligesom MD/, ikke længere én mappe pr. lektion). MD-mappen i plan_path
+    ER allerede enhedFolder — samme værdi genbruges direkte til NOTER-mappen i stedet for at
+    genudlede den, så de to grene ikke kan drive fra hinanden. [PLAN]-FILNAVNET bærer uafhængigt af
+    mappen altid weekFolder som sin egen stamme ("[PLAN] 2026-09-09 - Skolens formål.md") — den er
+    stub-FILNAVNETS pålidelige nøgle. Falder tilbage til selve planen hvis stubben mangler."""
+    m = re.match(r'^(.*)/MD/([^/]+)/\[PLAN\] (.+)\.md$', plan_path)
     if not m:
         return plan_path
-    root, week_folder = m.groups()
-    stub = f"{root}/NOTER/{week_folder}/[NOTE] {week_folder}.md"
+    root, enhed, week_folder = m.groups()
+    stub = f"{root}/NOTER/{enhed}/[NOTE] {week_folder}.md"
     return stub if (VAULT_ROOT / stub).exists() else plan_path
 
 
@@ -1953,27 +1951,25 @@ def selfcheck() -> int:
     globals()["note_stub_path"] = _real_note_stub_path
     assert note_stub_path("findes/slet/ikke/MD/x/[PLAN] x.md") == "findes/slet/ikke/MD/x/[PLAN] x.md"
 
-    # #203: MD-mappen er navngivet efter EMNE og deles af flere lektioner ("Skolens formål"
-    # rummer fire [PLAN]-noter), NOTER-mappen er én pr. lektion ("<dato> - <emne>"). Et naivt
-    # MD->NOTER-strengbyt på selve mappenavnet rammer derfor næsten aldrig rigtigt — den eneste
-    # pålidelige nøgle er [PLAN]-filnavnets egen stamme, som ALTID er weekFolder. Reproducerer
-    # bugget mod en rigtig fil, ikke kun en mocket streng-form.
+    # #209: NOTER-mappen er enhed-grupperet ligesom MD/ (ikke længere én mappe pr. lektion) —
+    # mappenavnet genbruges direkte fra MD/<enhed>/-leddet, mens FILNAVNET stadig er weekFolder
+    # ("<dato> - <emne>"). Reproducerer mod en rigtig fil, ikke kun en mocket streng-form.
     vault_root_orig = globals()["VAULT_ROOT"]
     tmp_vault = Path(tempfile.mkdtemp())
     try:
         globals()["VAULT_ROOT"] = tmp_vault
-        note_dir = tmp_vault / "§ FAG" / "♱ Religion" / "NOTER" / "2026-09-09 - Hvad er religion_"
+        note_dir = tmp_vault / "§ FAG" / "♱ Religion" / "NOTER" / "Hvad er religion_"
         note_dir.mkdir(parents=True)
         (note_dir / "[NOTE] 2026-09-09 - Hvad er religion_.md").write_text("Kilde: [[x]]", encoding="utf-8")
         plan_delt_mappe = (
             "§ FAG/♱ Religion/MD/Hvad er religion_/[PLAN] 2026-09-09 - Hvad er religion_.md"
         )
         assert note_stub_path(plan_delt_mappe) == (
-            "§ FAG/♱ Religion/NOTER/2026-09-09 - Hvad er religion_/[NOTE] 2026-09-09 - Hvad er religion_.md"
+            "§ FAG/♱ Religion/NOTER/Hvad er religion_/[NOTE] 2026-09-09 - Hvad er religion_.md"
         ), note_stub_path(plan_delt_mappe)
-        # En SØSTER-lektion om samme emne (samme MD-mappe, anden dato) har sin egen stub —
-        # ikke den vi lige oprettede — og skal derfor falde tilbage til [PLAN], ikke fejlagtigt
-        # matche naboens stub via mappenavnet.
+        # En SØSTER-lektion om samme emne (samme MD-mappe, anden dato) har sin egen stub-FIL i
+        # samme mappe — ikke den vi lige oprettede — og skal derfor falde tilbage til [PLAN], ikke
+        # fejlagtigt matche naboens stub.
         soester_plan = (
             "§ FAG/♱ Religion/MD/Hvad er religion_/[PLAN] 2026-09-11 - Hvad er religion_.md"
         )
