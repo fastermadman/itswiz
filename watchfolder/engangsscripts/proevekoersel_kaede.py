@@ -68,8 +68,13 @@ def main() -> int:
 
         data0 = json.loads(Path(m.DATA_JSON).read_text(encoding="utf-8"))
         plans, _ = m.read_plans(tmp)
+        # Som sync(): sync_data efterfulgt af prune_dead_links (opgaver/Library-poster på filer der ikke
+        # findes). Uden oprydningen ville tallet være oppustet af stale links (#218: 27 uløste mål).
         d1 = m.sync_data(copy.deepcopy(data0), plans)
+        removed_res, removed_tasks = m.prune_dead_links(d1, tmp)
+        print(f"prune_dead_links: {removed_res} Library-poster og {removed_tasks} opgaver på døde filer ryddet")
         d2 = m.sync_data(copy.deepcopy(d1), plans, lambda: "MÅ-IKKE-BRUGES")
+        m.prune_dead_links(d2, tmp)
         print("sync 1 -> 2 identisk (ingen evig genskrivning):",
               json.dumps(d1, sort_keys=True) == json.dumps(d2, sort_keys=True))
         print("Reading (opgaver, gentagne mål): nu", reading_stats(data0), "-> efter kæde", reading_stats(d1))
