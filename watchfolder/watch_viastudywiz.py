@@ -787,12 +787,14 @@ def sync_hold_course_quietly() -> None:
 
 def main():
     VAULT_ROOT.mkdir(parents=True, exist_ok=True)
-    scan_existing()
+    # #226: Hold Course-synken må aldrig vente på MinerU-køen — én PDF der uploades igen (20 min
+    # timeout × 3 forsøg) blokerede ellers synken i timevis. Synk først, scan i baggrundstråd.
     sync_hold_course_quietly()
 
     observer = Observer()
     observer.schedule(DocumentHandler(), str(VAULT_ROOT), recursive=True)
     observer.start()
+    threading.Thread(target=scan_existing, daemon=True).start()
     print(f"Overvåger {VAULT_ROOT} ...", flush=True)
     try:
         while True:
