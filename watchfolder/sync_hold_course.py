@@ -245,6 +245,18 @@ def _is_dublet(md_path: Path) -> bool:
     return parse_frontmatter(md_path.read_text(encoding="utf-8")).get("type") == "dublet"
 
 
+# #208: "I dag er sat af til at I kan forberede jer …" — dagens indhold ER forberedelsen.
+PREP_DAY_RE = re.compile(r"sat\s+af\s+til[^.\n]{0,60}forbere", re.IGNORECASE)
+
+
+def _is_prep_day(fields: dict) -> bool:
+    """En ren forberedelsesdag: `beskrivelse` siger at dagen er sat af til forberedelse, og noten har
+    ingen egen `forberedelse_tekst`. Den har aldrig krævet noget specifikt læsestof selv, så at lade
+    den stå uden orphan-links taber ikke adgang til noget (#208)."""
+    own = fields.get("forberedelse_tekst")
+    return not (own and own != "false") and bool(PREP_DAY_RE.search(fields.get("beskrivelse") or ""))
+
+
 def remove_file_list_lines(text: str, key: str, prefix: str, drop: set[str]) -> str:
     """Modstykket til append_file_list_field: fjerner de 📎-linjer i `key` hvis wikilink-mål står
     i `drop`. Tømmes blokken helt, bliver feltet `key: false` igen — samme form background.js selv
@@ -305,6 +317,10 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
     en fil kun fravælges dér hvor der findes positivt bevis for en anden ejer. Prisen er de
     32%'s dublet-Reading-opgaver — kedeligt, aldrig tab af adgang til materiale.
 
+    #208: rene forberedelsesdage (_is_prep_day) arver aldrig orphans — de har aldrig krævet specifikt
+    læsestof selv, og deres "arvede" liste viste sig som dublet-Reading-opgaver i Hold Course.
+    Kun undertypen indsnævres; fallback'en gælder fortsat alle andre noter uændret.
+
     #186: for materiale der ALDRIG stod i en plan.elements-liste (manuelt tilføjet af Valdemar) er
     der intet AUTO-bevis at falde tilbage på — se _declared_owner(). Et `lektion: <plan_id>` på
     filen selv gør det samme job som AUTO-blokken ville have gjort, hvis den havde vidst det."""
@@ -352,6 +368,8 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
                 and not _is_dublet(md)
             ]
             orphans = [o for o in orphans if o not in linked and o not in claimed_elsewhere]
+            if _is_prep_day(fields):
+                orphans = []  # #208: rene forberedelsesdage arver aldrig orphan-filer
 
             # Oprydning efter tidligere kørslers udfladning: samme regel bagudrettet. Kun
             # `materiale_filer` (det eneste felt denne funktion nogensinde har skrevet i) og kun
@@ -2070,6 +2088,28 @@ def selfcheck() -> int:
     pointer.write_text("---\ntype: dublet\nnote: \"[[Ny-fil]]\"\n---\n", encoding="utf-8")
     assert patch_pending_materiale(patch_root, apply=True) == [], "dublet-pointer blev linket ind"
     pointer.unlink()
+
+    # #208: ren forberedelsesdag arver ikke orphans; almindelig lektion og forberedelsesdag MED
+    # egen forberedelse_tekst gør.
+    prep_dir = patch_root / "§ FAG" / "♱ Religion" / "MD" / "Forberedelse"
+    prep_dir.mkdir(parents=True)
+    def _plan(name, pid, beskr, forb):
+        (prep_dir / f"[PLAN] {name}.md").write_text(
+            f"---\ntype: lektionsplan\nfag: Religion\nplan_id: \"{pid}\"\n"
+            f"beskrivelse: {beskr}\nforberedelse_tekst: {forb}\n"
+            "materiale_filer: false\n---\n\n<!-- AUTO:START -->\n# T\n<!-- AUTO:END -->\n",
+            encoding="utf-8")
+    _plan("2026-09-18 - X", "1", "Vi gennemgår kapitel 3.", "false")
+    _plan("2026-09-23 - X", "2", "I dag er sat af til at I kan forberede jer til næste gang.", "false")
+    _plan("2026-09-24 - X", "3", "I dag er sat af til forberedelse.", "Læs kapitel 4.")
+    (prep_dir / "Tekst.md").write_text("noget", encoding="utf-8")
+    got = sorted(Path(x).name for x in patch_pending_materiale(patch_root, apply=True) if "Forberedelse" in x)
+    assert got == ["[PLAN] 2026-09-18 - X.md", "[PLAN] 2026-09-24 - X.md"], got
+    assert "Tekst.md" not in (prep_dir / "[PLAN] 2026-09-23 - X.md").read_text(encoding="utf-8")
+    assert _is_prep_day({"beskrivelse": "I dag er sat af til forberedelse", "forberedelse_tekst": "false"})
+    assert not _is_prep_day({"beskrivelse": "Vi læser", "forberedelse_tekst": "false"})
+    assert not _is_prep_day({"beskrivelse": "sat af til forberedelse", "forberedelse_tekst": "Læs s. 3"})
+    import shutil; shutil.rmtree(prep_dir)  # senere tests tæller alle planer i patch_root
 
     # issue #158: delt enhedsmappe — søskende-[PLAN]/[NOTE]-noter + _forløb.md må ALDRIG linkes
     # ind, og et allerede-linket materiale med NFD-kodet ø/å i stien må ikke gen-tilføjes hver kørsel.
