@@ -28,6 +28,29 @@ og hvad macOS/Syncthing faktisk skriver til disk fik `background.js`s egen flytt
 (`moveDirInVault`) til fejlagtigt at tro en flytning allerede var sket — oprydningen bagefter blev
 lavet via Local REST API's `MOVE`, netop for at wikilinks fulgte med.
 
+## Kør/test
+
+Ingen build og ingen dependencies. Verifikationsløkken for Python-laget (kun stdlib, rører ikke vaulten):
+
+```bash
+python3 watchfolder/sync_hold_course.py --selfcheck && python3 watchfolder/watch_viastudywiz.py --selfcheck
+node --check background.js   # kun syntaks — der findes ingen JS-tests
+```
+
+`.githooks/pre-push` kører selvtjekkene (aktivér: `git config core.hooksPath .githooks`). Et selvtjek der
+begynder at kræve `~/ViaVault` tester ikke længere ren logik — det var fejlen i #139.
+
+## Grænsen mellem hvad der kan bevises og hvad der skal prøves
+
+Selvtjekkene dækker ren logik: frontmatter-parsing, wikilinks, `sync_data`, stemplet ejerskab, highlight-beskyttelse.
+Grønne selvtjek betyder at logikken er rigtig — **ikke** at pipelinen virker. Ikke dækket, og kan ikke blive det uden
+den rigtige omverden: itslearnings API/DOM, `background.js` (service worker, File System Access), Hold Course-pluginet
+i Obsidian, den kørende launchd-proces og hvad Syncthing/macOS faktisk skriver til disk (NFC/NFD, #131).
+
+Rører et issue en af dem, lukkes det først når et console-snippet er kørt live og det eksakte output er citeret i
+issue-kommentaren — kodegennemgang alene er ikke bevis. Husk genstart af driftsprocesserne (afsnittet nedenfor)
+før du prøver: ellers tester du gammel kode.
+
 ## Genstart driftsprocesser efter kodeændringer i sync/extension-laget
 
 `watchfolder/watch_viastudywiz.py` (launchd-job `com.valdemar.viastudywiz-watchfolder`) importerer

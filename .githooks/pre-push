@@ -6,3 +6,4 @@
 set -e
 root=$(git rev-parse --show-toplevel)
 python3 "$root/watchfolder/sync_hold_course.py" --selfcheck
+python3 "$root/watchfolder/watch_viastudywiz.py" --selfcheck
