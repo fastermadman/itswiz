@@ -18,8 +18,8 @@ GitHub issues/milestones og arkitekturnoter, ingen statusprosa der kan gå foræ
 
 (Håndhæves af PreToolUse-hook `.claude/hooks/vault-move-guard.sh`.)
 
-Brug Obsidian-CLI'en (`/Applications/Obsidian.app/Contents/MacOS/obsidian move path=<fra> to=<til>`,
-kræver Obsidian åben; `rename` findes også; verificeret 2026-09-25 at wikilinks opdateres) — ikke `mv`/`cp`,
+Brug Obsidian-CLI'en (`/Applications/Obsidian.app/Contents/MacOS/obsidian vault=ViaVault move path=<fra> to=<til>`,
+kræver Obsidian åben; angiv ALTID `vault=ViaVault` eller `vault=ValdiVault` som første parameter, ellers rammer den sidst fokuserede vault; `rename` findes også; verificeret 2026-09-25 at wikilinks opdateres) — ikke `mv`/`cp`,
 ikke `mcp__filesystem__move_file`/`mcp__Desktop_Commander__move_file`. Grunden: Obsidians egen
 move-mekanisme opdaterer automatisk alle `[[wikilinks]]` andre steder i vaulten der peger på filen;
 en rå filsystem-flytning gør det ikke, og efterlader døde links i alt der linkede til den gamle

@@ -10,5 +10,5 @@ if [[ "$tool" == "Bash" ]]; then
 else
   jq -r '.tool_input | [.source, .destination] | join(" ")' <<<"$in" | grep -Eq 'ViaVault|ValdiVault' || exit 0
 fi
-echo "Flyt/omdøb ikke vault-filer med rå filsystem-værktøjer: brug obsidian move path=<fra> to=<til> (binær: /Applications/Obsidian.app/Contents/MacOS/obsidian; wikilinks følger med)." >&2
+echo "Flyt/omdøb ikke vault-filer med rå filsystem-værktøjer: brug obsidian vault=<ViaVault|ValdiVault> move path=<fra> to=<til> (altid vault=, ellers rammes sidst fokuserede vault; binær: /Applications/Obsidian.app/Contents/MacOS/obsidian; wikilinks følger med)." >&2
 exit 2
