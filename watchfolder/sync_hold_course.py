@@ -435,6 +435,7 @@ def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
     dubletter er strukturelt umulige og plasteret er væk igen. Selve håndhævelsen — en assertion
     frem for en rapport — hører hjemme i #182s delte kontrakt-fixture."""
     plans, uden_plan_id = [], []
+    declared_by_folder: dict[Path, dict[str, str]] = {}
     for path in sorted(vault_root.rglob("[[]PLAN[]] *.md")):
         fields = parse_frontmatter(path.read_text(encoding="utf-8"))
         if fields.get("type") != "lektionsplan" or not fields.get("fag"):
@@ -444,6 +445,18 @@ def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
             uden_plan_id.append(rel)
             continue
         fields["_path"] = nfc(rel)
+        # #221: hvad planen BEVISELIGT ejer — resten af dens materiale_filer er fallback-afledt.
+        text = path.read_text(encoding="utf-8")
+        if path.parent not in declared_by_folder:
+            declared_by_folder[path.parent] = {
+                nfc(str(md.relative_to(vault_root))): pid
+                for md in path.parent.glob("*.md")
+                if not md.name.startswith(("[PLAN] ", "[NOTE] ", "_")) and (pid := _declared_owner(md))
+            }
+        fields["_owned"] = sorted(
+            _owned_targets(text, fields)
+            | {t for t, pid in declared_by_folder[path.parent].items() if pid == fields["plan_id"]}
+        )
         plans.append(fields)
     return plans, uden_plan_id
 
@@ -914,6 +927,8 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
     touched: dict[tuple[str, str], set[str]] = {}
     # #181: {resource_id: {class_id}} for DENNE kørsel — grundlaget for at classIds kan krympe igen.
     seen_res: dict[str, set[str]] = {}
+    # #221: (klasse, mål) -> plan_id der har fået Reading-opgaven for et FALLBACK-afledt link.
+    fallback_claimed: dict[tuple[str, str], str] = {}
 
     for plan in sorted(plans, key=lambda p: (p["fag"], p.get("start", ""))):
         if not plan.get("start"):
@@ -987,6 +1002,15 @@ def sync_data(data: dict, plans: list[dict], new_id=None, tasks: list[dict] | No
             target = nfc(wikilink_target(line) or "")
             if not target:
                 continue
+            # #221: et link planen ikke beviseligt ejer (patch_pending_materiale-fallback, #141/#183)
+            # bliver til én Reading-opgave pr. klasse — på den TIDLIGSTE lektion (planerne løbes
+            # igennem kronologisk), aldrig for sent. Linket i noten bevares på alle søskende, så
+            # #183s "aldrig tab af adgang" gælder uændret; kun opgave-dubletterne udebliver, og den
+            # oprydning nedenfor fjerner dem der allerede findes. Plan uden `_owned` (fx tests) er
+            # upåvirket.
+            if "_owned" in plan and target not in plan["_owned"]:
+                if fallback_claimed.setdefault((cls["id"], target), plan["plan_id"]) != plan["plan_id"]:
+                    continue
             res = ensure_resource(sem, cls, target, new_id)
             seen_res.setdefault(res["id"], set()).add(cls["id"])  # #181
             key = f'{akey}|mat|{stable_key(target)}'
@@ -1931,6 +1955,39 @@ def selfcheck() -> int:
     lec6 = data6["semesters"][0]["classes"][0]["lectures"][0]
     titles6 = sorted(a["title"] for a in lec6["assignments"] if a["type"] == "Reading")
     assert titles6 == ["Ekstra", "Frede V Nielsen Ars og Scientia"], titles6
+
+    # #221: fallback-afledt materiale (ikke i plan["_owned"]) giver kun én Reading-opgave pr. klasse,
+    # på den tidligste lektion; beviseligt ejet materiale giver opgave på sin egen lektion.
+    tgt221 = "§ FAG/♱ Religion/MD/Enhed/Tekst.md"
+    def _p221(pid, day, owned):
+        d = dict(plan, plan_id=pid, fag="Religion", litteratur="false", litteratur_filer="false",
+                 forberedelse="false", materiale_filer=f"📎 [[{tgt221}]]", start=f"2026-09-{day} 09:00:00",
+                 stop=f"2026-09-{day} 10:00:00", _path=f"§ FAG/♱ Religion/MD/Enhed/[PLAN] {day}.md")
+        if owned is not None:
+            d["_owned"] = owned
+        return d
+    def _reads(dat):
+        lecs = sorted(dat["semesters"][0]["classes"][0]["lectures"], key=lambda l: l["date"])
+        return [len([a for a in l["assignments"] if a["type"] == "Reading"]) for l in lecs]
+    ids7 = iter(f"g{n}" for n in range(500))
+    # Før (ingen _owned): alle tre får opgaven — som før #221.
+    data7 = sync_data({"currentSemesterId": None, "semesters": [], "dataVersion": 2},
+                      [_p221("7:1", "22", None), _p221("7:2", "15", None), _p221("7:3", "29", None)],
+                      lambda: next(ids7))
+    assert _reads(data7) == [1, 1, 1], _reads(data7)
+    # Efter: ingen har bevis -> kun den tidligste (15.) beholder opgaven; de andre ryddes.
+    data7 = sync_data(data7, [_p221("7:1", "22", []), _p221("7:2", "15", []), _p221("7:3", "29", [])],
+                      lambda: next(ids7))
+    assert _reads(data7) == [1, 0, 0], _reads(data7)
+    # Idempotent.
+    snap7 = json.dumps(data7, sort_keys=True)
+    assert json.dumps(sync_data(json.loads(snap7), [_p221("7:1", "22", []), _p221("7:2", "15", []),
+                                                    _p221("7:3", "29", [])], lambda: "MÅ-IKKE-BRUGES"),
+                      sort_keys=True) == snap7
+    # Den 29. har BEVIS for teksten -> får sin egen opgave (den 22. er stadig kun fallback).
+    data7 = sync_data(data7, [_p221("7:1", "22", []), _p221("7:2", "15", []), _p221("7:3", "29", [tgt221])],
+                      lambda: next(ids7))
+    assert _reads(data7) == [1, 0, 1], _reads(data7)
 
     # #176-følgeskade: forsvinder en fil fra materiale_filer igen (fx efter en dedupe-oprydning
     # af en tidligere krydslink-fejl), skal den tilhørende Reading-opgave forsvinde med — ikke
