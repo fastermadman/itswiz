@@ -16,6 +16,8 @@ GitHub issues/milestones og arkitekturnoter, ingen statusprosa der kan gå foræ
 
 ## Flyt/omdøb ALDRIG vault-filer med rå filsystem-værktøjer
 
+(Håndhæves af PreToolUse-hook `.claude/hooks/vault-move-guard.sh`.)
+
 Brug Obsidians egen move (via `mcp__enquire__obsidian_rename_note`, eller Local REST API's
 `MOVE`-verb med `Destination`-header hvis enquire-serveren ikke er tilgængelig) — ikke `mv`/`cp`,
 ikke `mcp__filesystem__move_file`/`mcp__Desktop_Commander__move_file`. Grunden: Obsidians egen
@@ -57,6 +59,6 @@ Glemmes begge dele, ser man ændringer der "ikke virker" selvom koden er korrekt
 This project has a graphify-rs knowledge graph at /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/.
 
 Rules:
-- Before answering architecture or codebase questions, read /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/GRAPH_REPORT.md for god nodes and community structure
+- On-demand: læs kun GRAPH_REPORT.md (/Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/) når spørgsmålet er arkitektur/tværgående, ikke ved hver søgning
 - If /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/wiki/index.md exists, navigate it instead of reading raw files
 - After modifying code files in this session, run `graphify-rs build --path . --output /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)

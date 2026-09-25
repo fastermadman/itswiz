@@ -2,13 +2,13 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Bash|mcp__filesystem__move_file|mcp__Desktop_Commander__move_file",
         "hooks": [
           {
-            "command": "[ -f \"/Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/graph.json\" ] && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify-rs: Knowledge graph exists. Read /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}' || true",
-            "type": "command"
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/vault-move-guard.sh"
           }
-        ],
-        "matcher": "Glob|Grep"
+        ]
       }
     ]
   }
