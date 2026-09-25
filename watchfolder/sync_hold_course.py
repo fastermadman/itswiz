@@ -365,6 +365,7 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
                 for md in sorted(plan_path.parent.glob("*.md"))
                 if nfc(md.name) != nfc(plan_path.name)
                 and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
+                and ".sync-conflict-" not in md.name  # Syncthing-artefakt, ikke materiale
                 and not _is_dublet(md)
             ]
             orphans = [o for o in orphans if o not in linked and o not in claimed_elsewhere]
@@ -2145,6 +2146,10 @@ def selfcheck() -> int:
     pointer.write_text("---\ntype: dublet\nnote: \"[[Ny-fil]]\"\n---\n", encoding="utf-8")
     assert patch_pending_materiale(patch_root, apply=True) == [], "dublet-pointer blev linket ind"
     pointer.unlink()
+    conflict = week_dir / "Ny-fil.sync-conflict-20260923-200003-7X4NAWL.md"
+    conflict.write_text("konflikt", encoding="utf-8")
+    assert patch_pending_materiale(patch_root, apply=True) == [], "sync-conflict-fil blev linket ind"
+    conflict.unlink()
 
     # #208: ren forberedelsesdag arver ikke orphans; almindelig lektion og forberedelsesdag MED
     # egen forberedelse_tekst gør.
