@@ -238,6 +238,13 @@ def _declared_owner(md_path: Path) -> str | None:
     return parse_frontmatter(md_path.read_text(encoding="utf-8")).get("lektion") or None
 
 
+def _is_dublet(md_path: Path) -> bool:
+    """`type: dublet`-pointernoter (fra før enhed-modellen, #217) er ikke materiale: de peger blot
+    videre til den rigtige note. Efter #214 lå de i samme mappe som deres mål og blev ellers
+    claimet som læsestof af alle søskende-planer."""
+    return parse_frontmatter(md_path.read_text(encoding="utf-8")).get("type") == "dublet"
+
+
 def remove_file_list_lines(text: str, key: str, prefix: str, drop: set[str]) -> str:
     """Modstykket til append_file_list_field: fjerner de 📎-linjer i `key` hvis wikilink-mål står
     i `drop`. Tømmes blokken helt, bliver feltet `key: false` igen — samme form background.js selv
@@ -342,6 +349,7 @@ def patch_pending_materiale(vault_root: Path, apply: bool) -> list[str]:
                 for md in sorted(plan_path.parent.glob("*.md"))
                 if nfc(md.name) != nfc(plan_path.name)
                 and not md.name.startswith(("[PLAN] ", "[NOTE] ", "_"))
+                and not _is_dublet(md)
             ]
             orphans = [o for o in orphans if o not in linked and o not in claimed_elsewhere]
 
@@ -2056,6 +2064,12 @@ def selfcheck() -> int:
 
     # Idempotent: ingen nye orphans tilbage efter patchen.
     assert patch_pending_materiale(patch_root, apply=True) == []
+
+    # #217/#218: en type: dublet-pointernote i mappen er ikke materiale og må ikke linkes ind.
+    pointer = week_dir / "2026-08-20 - Titel lektionsplan.md"
+    pointer.write_text("---\ntype: dublet\nnote: \"[[Ny-fil]]\"\n---\n", encoding="utf-8")
+    assert patch_pending_materiale(patch_root, apply=True) == [], "dublet-pointer blev linket ind"
+    pointer.unlink()
 
     # issue #158: delt enhedsmappe — søskende-[PLAN]/[NOTE]-noter + _forløb.md må ALDRIG linkes
     # ind, og et allerede-linket materiale med NFD-kodet ø/å i stien må ikke gen-tilføjes hver kørsel.
