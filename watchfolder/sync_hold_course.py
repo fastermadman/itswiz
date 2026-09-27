@@ -454,8 +454,15 @@ def read_plans(vault_root: Path) -> tuple[list[dict], list[str]]:
                 for md in path.parent.glob("*.md")
                 if not md.name.startswith(("[PLAN] ", "[NOTE] ", "_")) and (pid := _declared_owner(md))
             }
+        auto_owned = _owned_targets(text, fields)
+        # #232: AUTO-bevis og `lektion:` uenige -> stemplet er forældet (fx omplanlagt). lektion:
+        # vinder som hidtil; kun en advarsel.
+        for t in auto_owned:
+            pid = declared_by_folder[path.parent].get(t)
+            if pid and pid != fields["plan_id"]:
+                print(f"Advarsel: {t} står i {fields['plan_id']}s Materialer, men lektion: siger {pid}", flush=True)
         fields["_owned"] = sorted(
-            _owned_targets(text, fields)
+            auto_owned
             | {t for t, pid in declared_by_folder[path.parent].items() if pid == fields["plan_id"]}
         )
         plans.append(fields)

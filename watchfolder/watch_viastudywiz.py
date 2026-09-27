@@ -270,6 +270,35 @@ def existing_conversion(doc_path: Path) -> Path | None:
     return None
 
 
+# #232: kun BEVIST ejerskab (planens AUTO `## Materialer` nævner filen) stemples som `lektion:`.
+# Bevidst strengere end _plan_note_for(), der falder tilbage på første note — et gæt må ikke
+# fastfryses. Ingen bevis -> None, og sync-fallback'en (#141/#183 + dedup #221) tager over.
+def proven_plan_id(doc_path: Path) -> str | None:
+    md_dir, md_name = md_targets(doc_path)[0].parent, f"{sanitize(doc_path.stem)}.md"
+    for note in sorted(p for p in md_dir.glob("*.md") if p.name.startswith("[PLAN] ")):
+        text = note.read_text(encoding="utf-8")
+        block = sync_hold_course.AUTO_MATERIALER_RE.search(text)
+        if block and any(link.rsplit("/", 1)[-1] == md_name
+                         for link in re.findall(r"\[\[([^|\]]+)", block.group(1))):
+            return read_frontmatter_field(text, "plan_id")
+    return None
+
+
+# Bevar menneske-/synk-ejede felter når en note skrives om (genkonvertering, .ny.md): `lektion:`
+# (#186-override) og `used_in:`-blokken (#148). Uden dette mister en genkonvertering dem.
+def carried_fields(previous_md: Path) -> str:
+    if not previous_md.exists():
+        return ""
+    text = previous_md.read_text(encoding="utf-8")
+    fm = text.split("---", 2)[1] if text.startswith("---") else ""
+    out = ""
+    if (lektion := read_frontmatter_field(fm, "lektion")):
+        out += f'lektion: "{lektion}"\n'
+    if (m := re.search(r"^used_in:[ \t]*\n(?:[ \t]+-[^\n]*\n?)+", fm, re.MULTILINE)):
+        out += m.group(0) if m.group(0).endswith("\n") else m.group(0) + "\n"
+    return out
+
+
 # Genbrug på tværs af enhed/semester: den ægte note ligger i enheden den først blev konverteret
 # i, og den genbrugende lektions plan_id tilføjes dens `used_in:`-liste (issue #148 opgave 2 —
 # afløser den gamle `type: dublet`-redirect-note, som kunne rådne og gav #136's cirkulær-bug).
@@ -639,6 +668,12 @@ def write_conversion(doc_path: Path, full_md: Path, images_dir: Path) -> None:
         dest_images = dest_images.with_name(f"{dest_images.name}.ny")
 
     extra_fm = f'sektion: "{running_header}"\n' if running_header else ""
+    # #232: eksisterende `lektion:`/`used_in:` følger med; ellers stemples bevist ejer (kun watcheren
+    # stempler — background.js skriver aldrig feltet, #186).
+    carried = carried_fields(md_targets(doc_path)[0])
+    if "lektion:" not in carried and (owner := proven_plan_id(doc_path)):
+        carried = f'lektion: "{owner}"\n' + carried
+    extra_fm += carried
     text = frontmatter(doc_path, extra=extra_fm) + to_wikilinks(md_text)
     dest_md.write_text(text, encoding="utf-8")
 
@@ -1079,6 +1114,28 @@ def selfcheck() -> int:
                 assert "==vigtig markering==" in dest_md.read_text(encoding="utf-8"), "highlight blev overskrevet"
                 assert ny_md.exists(), "ny konvertering blev ikke skrevet ved siden af"
                 assert "Anden ny tekst." in ny_md.read_text(encoding="utf-8")
+
+                # #232: bevist ejer stemples; ingen bevis -> intet gæt; lektion:/used_in: overlever
+                # genkonvertering og .ny.md.
+                dest_md.unlink(); ny_md.unlink()
+                md_dir = dest_md.parent
+                (md_dir / "[PLAN] 2026-08-17 - X.md").write_text(
+                    '---\ntype: lektionsplan\nplan_id: "36016:111"\n---\n\n<!-- AUTO:START -->\n## Materialer\n'
+                    f"- [[a/b/{dest_md.name}|Titel]]\n<!-- AUTO:END -->\n", encoding="utf-8")
+                (md_dir / "[PLAN] 2026-09-07 - X.md").write_text(
+                    '---\ntype: lektionsplan\nplan_id: "36016:222"\n---\n\nIntet materiale.\n', encoding="utf-8")
+                write_conversion(raw_pdf, full_md, no_images_dir)
+                assert 'lektion: "36016:111"' in dest_md.read_text(encoding="utf-8"), dest_md.read_text()
+                (md_dir / "[PLAN] 2026-08-17 - X.md").write_text("---\ntype: lektionsplan\nplan_id: \"36016:111\"\n---\n", encoding="utf-8")
+                dest_md.unlink()
+                write_conversion(raw_pdf, full_md, no_images_dir)
+                assert "lektion:" not in dest_md.read_text(encoding="utf-8"), "stemplede uden bevis"
+                dest_md.write_text(dest_md.read_text(encoding="utf-8").replace(
+                    "type: materiale\n", 'type: materiale\nlektion: "36016:222"\nused_in:\n  - "36016:333"\n')
+                    + "\n==markering==\n", encoding="utf-8")
+                write_conversion(raw_pdf, full_md, no_images_dir)
+                ny_txt = ny_md.read_text(encoding="utf-8")
+                assert 'lektion: "36016:222"' in ny_txt and '  - "36016:333"' in ny_txt, ny_txt
         finally:
             VAULT_ROOT = old_root
 
