@@ -23,3 +23,9 @@ test('tool.call-hooken renser både result og text', async ($, on) => {
   expect(JSON.stringify(r)).not.toContain('fake-mineru')
   expect(JSON.stringify(r)).toContain('MINERU_API_TOKEN=[REDACTED]')
 })
+
+test('fejlresultat renses og returneres som deny', async ($, on) => {
+  on('tool.call', () => ({ isError: true, result: 'boom', text: 'fejl: Bearer fake.bearer-0123456789' }))
+  const r: any = await $.tool.call({ tool: 'Bash', command: 'false' })
+  expect(r.deny).toBe('fejl: Bearer [REDACTED]')
+})

@@ -28,11 +28,12 @@ export function register(on) {
     const r = await next(e)
     if (r.deny !== undefined) return r
     try {
+      // Fejlresultater har ingen skema-gyldig `result`: modellen får teksten som deny (= fejl).
+      if (r.isError) return { deny: scrub(r.text ?? String(r.result)) }
       // `ref`/`text` er kernens egne, uskrubbede beskeder: core bruger dem ordret, hvis de
       // returneres uændret. Derfor droppes de, så kernen mapper det rensede `result` påny.
       const { ref, text, ...rest } = r
-      const out = scrub(rest)
-      return r.isError ? { ...out, text: scrub(text) } : out
+      return scrub(rest)
     } catch {
       // Fail-closed: hellere ingen output end urenset output.
       return { deny: 'secret-redactor: kunne ikke rense output, resultatet er holdt tilbage.' }
