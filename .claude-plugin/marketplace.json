@@ -1,0 +1,12 @@
+{
+  "name": "viastudywiz-mods",
+  "description": "Claude Code-mods til VIAstudyWiz-repoet",
+  "owner": { "name": "FasterMadman" },
+  "plugins": [
+    {
+      "name": "secret-redactor",
+      "source": "./mods/secret-redactor",
+      "description": "Renser tokens/cookies fra tool-output (#235)"
+    }
+  ]
+}

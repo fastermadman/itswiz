@@ -1,0 +1,5 @@
+{
+  "name": "secret-redactor",
+  "version": "0.1.0",
+  "description": "Renser MinerU-token, WOPI access_token, itslearning CSRF/cookie og Bearer-tokens fra tool-output, før Claude læser det (#235)."
+}
