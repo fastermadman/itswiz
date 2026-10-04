@@ -11,5 +11,16 @@
         ]
       }
     ]
+  },
+  "extraKnownMarketplaces": {
+    "viastudywiz-mods": {
+      "source": {
+        "source": "github",
+        "repo": "fastermadman/viastudywiz-extension"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "secret-redactor@viastudywiz-mods": true
   }
 }
