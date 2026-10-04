@@ -77,6 +77,10 @@ Fejler den stille (forkert port/nøgle, Obsidian ikke åben), er en manuel Cmd+R
 Glemmes begge dele, ser man ændringer der "ikke virker" selvom koden er korrekt — bekræftet live
 2026-09-05/06 to gange i træk under #176/#177/#179-arbejdet.
 
+## Secret-redaction
+
+I et nyt checkout/worktree skal `claude plugin install secret-redactor@viastudywiz-mods --scope project` køres én gang (appens binær, 2.1.286+), og derefter `/reload-plugins` — ellers er mod'en slået til i settings men ikke indlæst.
+
 ## graphify-rs
 
 This project has a graphify-rs knowledge graph at /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/.
