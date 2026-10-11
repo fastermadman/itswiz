@@ -16,4 +16,4 @@ hentes ind i vaulten uden Chrome. Logikken er kopieret fra `../background.js` (f
 5. **Høst nu** (knap i fanen eller kommando). **Sti-test** henter én fil pr. download-vej til
    `ItsWiz-test/` og rører ikke `§ FAG` eller `✎ NOTER`.
 
-Kun desktop. Ingen build, ingen dependencies. Test: `node --test plugin/`.
+Kun desktop. Ingen build, ingen dependencies. Test: `node --test plugin/test/*.test.js`.

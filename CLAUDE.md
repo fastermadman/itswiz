@@ -88,7 +88,7 @@ obsidian vault=ViaVault plugin:reload id=itswiz
 ```
 
 Høstlogikken i `plugin/main.js` er kopieret fra `background.js`, som er frosset indtil #244: ret kun
-i pluginet. `node --test plugin/` kræver at kopiens rene funktioner giver samme output som
+i pluginet. `node --test plugin/test/*.test.js` kræver at kopiens rene funktioner giver samme output som
 `background.js` (`plugin/test/parity.test.js`), og kører også i `pre-push`.
 
 ## Secret-redaction
