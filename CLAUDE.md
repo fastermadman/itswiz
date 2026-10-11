@@ -77,6 +77,16 @@ Fejler den stille (forkert port/nøgle, Obsidian ikke åben), er en manuel Cmd+R
 Glemmes begge dele, ser man ændringer der "ikke virker" selvom koden er korrekt — bekræftet live
 2026-09-05/06 to gange i træk under #176/#177/#179-arbejdet.
 
+## ItsWiz-pluginet (`plugin/`)
+
+`plugin/` er ItsWiz: Obsidian-pluginet der afløser extensionen og Python/launchd-laget (milestone
+"ItsWiz: fra Chrome til Obsidian"). Ingen build. `~/ViaVault/.obsidian/plugins/itswiz/` symlinker
+`main.js`/`manifest.json` herfra. Obsidian genindlæser ikke pluginet selv efter en filændring:
+
+```bash
+obsidian vault=ViaVault plugin:reload id=itswiz
+```
+
 ## Secret-redaction
 
 I et nyt checkout/worktree skal `claude plugin install secret-redactor@viastudywiz-mods --scope project` køres én gang (appens binær, 2.1.286+), og derefter `/reload-plugins` — ellers er mod'en slået til i settings men ikke indlæst.

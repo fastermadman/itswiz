@@ -1,0 +1,10 @@
+{
+  "id": "itswiz",
+  "name": "ItsWiz",
+  "version": "0.0.1",
+  "minAppVersion": "1.8.0",
+  "description": "itslearning inside Obsidian: harvest lesson plans and materials into your vault. Spike: go/no-go test only.",
+  "author": "FasterMadman",
+  "authorUrl": "https://github.com/fastermadman",
+  "isDesktopOnly": true
+}
