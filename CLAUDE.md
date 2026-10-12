@@ -30,70 +30,39 @@ lavet via Local REST API's `MOVE`, netop for at wikilinks fulgte med.
 
 ## Kør/test
 
-Ingen build og ingen dependencies. Verifikationsløkken for Python-laget (kun stdlib, rører ikke vaulten):
+Repoet er ItsWiz-pluginet i `plugin/` (Obsidian-plugin, milestone "ItsWiz: fra Chrome til Obsidian"). Chrome-extensionen
+og Python/launchd-laget (`watchfolder/watch_viastudywiz.py`, `sync_hold_course.py`, plisten) blev fjernet i #244 og findes
+kun i git-historikken; `watchfolder/engangsscripts/` er bevaret som arkiv. Ingen build og ingen dependencies:
 
 ```bash
-python3 watchfolder/sync_hold_course.py --selfcheck && python3 watchfolder/watch_viastudywiz.py --selfcheck
-node --check background.js   # kun syntaks — der findes ingen JS-tests
+node --check plugin/main.js && node --test plugin/test/*.test.js
 ```
 
-`.githooks/pre-push` kører selvtjekkene (aktivér: `git config core.hooksPath .githooks`). Et selvtjek der
-begynder at kræve `~/ViaVault` tester ikke længere ren logik — det var fejlen i #139.
+`.githooks/pre-push` kører det samme (aktivér: `git config core.hooksPath .githooks`). `plugin/test/hcsync.test.js`
+afspiller de optagede kald fra den slettede Python-synks selvtjek (`plugin/test/fixtures/`); `convert.test.js` holder
+konverteringen på watch-scriptets gamle output.
 
 ## Grænsen mellem hvad der kan bevises og hvad der skal prøves
 
-Selvtjekkene dækker ren logik: frontmatter-parsing, wikilinks, `sync_data`, stemplet ejerskab, highlight-beskyttelse.
-Grønne selvtjek betyder at logikken er rigtig — **ikke** at pipelinen virker. Ikke dækket, og kan ikke blive det uden
-den rigtige omverden: itslearnings API/DOM, `background.js` (service worker, File System Access), Hold Course-pluginet
-i Obsidian, den kørende launchd-proces og hvad Syncthing/macOS faktisk skriver til disk (NFC/NFD, #131).
+Testene dækker ren logik: frontmatter-parsing, wikilinks, Hold Course-synk, konvertering, kalender-mapping.
+Grønne tests betyder at logikken er rigtig — **ikke** at pipelinen virker. Ikke dækket, og kan ikke blive det uden
+den rigtige omverden: itslearnings API/DOM, Obsidians vindues-/netværks-API'er, Hold Course-pluginet og hvad
+Syncthing/macOS faktisk skriver til disk (NFC/NFD, #131).
 
-Rører et issue en af dem, lukkes det først når et console-snippet er kørt live og det eksakte output er citeret i
-issue-kommentaren — kodegennemgang alene er ikke bevis. Husk genstart af driftsprocesserne (afsnittet nedenfor)
-før du prøver: ellers tester du gammel kode.
+Rører et issue en af dem, lukkes det først når det er prøvet live i Obsidian mod `~/ViaVault`, og det eksakte output er
+citeret i issue-kommentaren — kodegennemgang alene er ikke bevis.
 
-## Genstart driftsprocesser efter kodeændringer i sync/extension-laget
+## Genindlæs pluginet efter kodeændringer
 
-`watchfolder/watch_viastudywiz.py` (launchd-job `com.valdemar.viastudywiz-watchfolder`) importerer
-`sync_hold_course` som modul ved opstart og holder den i hukommelsen — en `git pull`/commit til
-`sync_hold_course.py` eller `background.js` ændrer INTET i den kørende proces, før den genstartes:
-
-```bash
-launchctl kickstart -k gui/$(id -u)/com.valdemar.viastudywiz-watchfolder
-```
-
-Samme problem gælder Obsidians Hold Course-plugin (`main.js`, symlinket fra `obsidian-hold-course`):
-Obsidian genindlæser ikke plugin-kode af sig selv efter en ekstern filændring. Er Local REST API sat
-op og porten kendt (se `~/ViaVault/.obsidian/plugins/obsidian-local-rest-api/data.json`), kan en
-reload trigges uden at forlade appen:
-
-```python
-import sys; sys.path.insert(0, "watchfolder")
-from pathlib import Path
-import sync_hold_course as m
-m.trigger_obsidian_reload(Path.home() / "ViaVault")
-```
-
-Fejler den stille (forkert port/nøgle, Obsidian ikke åben), er en manuel Cmd+R i Obsidian reserven.
-Glemmes begge dele, ser man ændringer der "ikke virker" selvom koden er korrekt — bekræftet live
-2026-09-05/06 to gange i træk under #176/#177/#179-arbejdet.
-
-## ItsWiz-pluginet (`plugin/`)
-
-`plugin/` er ItsWiz: Obsidian-pluginet der afløser extensionen og Python/launchd-laget (milestone
-"ItsWiz: fra Chrome til Obsidian"). Ingen build. `~/ViaVault/.obsidian/plugins/itswiz/` symlinker
-`main.js`/`manifest.json` herfra. Obsidian genindlæser ikke pluginet selv efter en filændring:
+`~/ViaVault/.obsidian/plugins/itswiz/` symlinker `main.js`/`manifest.json` herfra. Obsidian genindlæser ikke plugin-kode
+af sig selv efter en ekstern filændring (bekræftet live 2026-09-05/06), så ellers tester du gammel kode:
 
 ```bash
 obsidian vault=ViaVault plugin:reload id=itswiz
 ```
 
-Høstlogikken i `plugin/main.js` er kopieret fra `background.js`, som er frosset indtil #244: ret kun
-i pluginet. `node --test plugin/test/*.test.js` kræver at kopiens rene funktioner giver samme output som
-`background.js` (`plugin/test/parity.test.js`), og kører også i `pre-push`.
-
-Hold Course-synken kører i ItsWiz (#242) via Hold Course' `api.update()` (hold-course#84); launchd-watcheren er
-slået fra (`launchctl disable` + `bootout`). `plugin/test/hcsync.test.js` afspiller alle `sync_hold_course.py
---selfcheck`-kald mod JS-porten (optaget af `plugin/test/record_hcsync.py`); ret synken i pluginet, ikke i Python.
+Samme gælder Hold Course-pluginet (`id=hold-course`, symlinket fra `obsidian-hold-course`). Hold Course-synken kører via
+Hold Course' `api.update()` (hold-course#84).
 
 ## Secret-redaction
 

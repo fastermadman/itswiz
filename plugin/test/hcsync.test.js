@@ -1,6 +1,6 @@
 'use strict';
 
-// #242: afspiller hvert kald sync_hold_course.py's --selfcheck laver (optaget af record_hcsync.py)
+// #242: afspiller hvert kald sync_hold_course.py's --selfcheck lavede (optaget af record_hcsync.py; begge slettet i #244)
 // mod JS-porten i plugin/main.js og kræver samme returværdi, samme muterede argumenter og samme
 // vault-filer bagefter. Grøn her = porten opfører sig som Python-synken på alle selvtjekkets cases.
 
