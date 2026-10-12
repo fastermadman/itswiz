@@ -2706,6 +2706,8 @@ async function processDocument(file, { force = false } = {}) {
       writeCache(digest, zips);
     }
     await writeConversion(file, zips.map(unzip));
+    // En gammel fejlmarkør (fx fra før opdelingen, #211) må ikke stå tilbage, når MD'en findes.
+    if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
     console.log(`ItsWiz: færdig: ${file.name}`);
   } catch (err) {
     if (!(err instanceof MineruError)) {
