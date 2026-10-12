@@ -2372,7 +2372,8 @@ function formatPageMarker(label, footnotes, trailingRule = true) {
     : `\n\n*— side ${label} —*${trailer}`;
 }
 
-function insertPageMarkers(fullMd, blocks, layout) {
+// pageOffset: bid nr. i × 100 sider (#211), så sidemarkøren uden trykt sidetal viser PDF-siden.
+function insertPageMarkers(fullMd, blocks, layout, pageOffset = 0) {
   const sizes = pageSizes(layout);
   const pages = groupBlocksByPage(blocks);
   let result = fullMd;
@@ -2394,7 +2395,7 @@ function insertPageMarkers(fullMd, blocks, layout) {
         result = result.slice(0, lineStart) + marker + result.slice(lineStart);
         idx += marker.length;
       }
-      pendingLabel = printedPageNumber(group) ?? String(pageIdx + 1);
+      pendingLabel = printedPageNumber(group) ?? String(pageIdx + 1 + pageOffset);
       pendingFootnotes = pageFootnotes(group);
       searchPos = idx + anchor.length;
     }
@@ -2404,7 +2405,7 @@ function insertPageMarkers(fullMd, blocks, layout) {
 }
 
 // Zip-indhold → { body, sektion }: det watcherens write_conversion() skriver under frontmatteren.
-function conversionBody(entries) {
+function conversionBody(entries, pageOffset = 0) {
   if (!entries.has("full.md")) throw new MineruError("MinerU-zippen mangler full.md");
   let md = entries.get("full.md").toString("utf8");
   let sektion = null;
@@ -2415,11 +2416,18 @@ function conversionBody(entries) {
     if (blocks) {
       let layout = null;
       try { layout = entries.has("layout.json") ? JSON.parse(entries.get("layout.json").toString("utf8")) : null; } catch {}
-      md = insertPageMarkers(md, blocks, layout);
+      md = insertPageMarkers(md, blocks, layout, pageOffset);
       sektion = runningHeader(blocks);
     }
   }
   return { body: toWikilinks(md), sektion };
+}
+
+// Bidder fra en opdelt PDF (#211) sættes sammen i sideorden. ponytail: sektion: tages fra første
+// bid; et løbende sidehoved der kun dominerer senere bidder bliver ikke fundet.
+function joinedBody(parts) {
+  const bodies = parts.map((entries, i) => conversionBody(entries, i * MINERU_CHUNK_PAGES));
+  return { body: bodies.map((b) => b.body).join("\n\n"), sektion: bodies[0].sektion };
 }
 
 // MinerU-zips bruger kun stored/deflate (målt på cachen 2026-10-12), så Nodes zlib rækker.
@@ -2473,35 +2481,67 @@ async function testMineruToken(token) {
   return res.status === 200;
 }
 
-async function mineruConvert(token, fileName, dataId, bytes) {
-  const resp = await mineruRequest(token, "POST", "/file-urls/batch", { files: [{ name: fileName, data_id: dataId }], model_version: "vlm" });
-  if (resp.code !== 0) throw new MineruError(`file-urls/batch fejlede: ${JSON.stringify(resp)}`);
-  const { batch_id: batchId, file_urls: [uploadUrl] } = resp.data;
+// MinerU afviser PDF'er over 200 sider (#211). Sidetallet tælles på de bytes der uploades (efter
+// PDFable, som kan fordoble det ved at splitte opslag), og en lang PDF sendes som flere filer med
+// hver sin page_ranges. ponytail: regex på "/Type /Page" tæller ikke sider i komprimerede object
+// streams; så findes 0, filen sendes hel, og MinerU's egen afvisning markerer den som før.
+const MINERU_MAX_PAGES = 200;
+const MINERU_CHUNK_PAGES = 100;
 
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const put = await withTimeout(requestUrl({ url: uploadUrl, method: "PUT", body: bytes, throw: false }), UPLOAD_TIMEOUT_MS, "upload");
-      if (put.status >= 400) throw new Error(`upload HTTP ${put.status}`);
-      break;
-    } catch (err) {
-      if (attempt === UPLOAD_RETRIES) throw err;
-      console.warn(`ItsWiz: upload-forsøg ${attempt}/${UPLOAD_RETRIES} for ${fileName} fejlede (${err.message}) — prøver igen om ${UPLOAD_RETRY_BACKOFF_MS / 1000}s`);
-      await sleep(UPLOAD_RETRY_BACKOFF_MS);
+function pdfPageCount(bytes) {
+  return (Buffer.from(bytes).toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
+}
+
+function pageRanges(pages) {
+  if (pages <= MINERU_MAX_PAGES) return null;
+  const ranges = [];
+  for (let first = 1; first <= pages; first += MINERU_CHUNK_PAGES) ranges.push(`${first}-${Math.min(first + MINERU_CHUNK_PAGES - 1, pages)}`);
+  return ranges;
+}
+
+// Returnerer én zip pr. bid, i sideorden.
+async function mineruConvert(token, fileName, dataId, bytes) {
+  const ranges = fileName.toLowerCase().endsWith(".pdf") ? pageRanges(pdfPageCount(bytes)) : null;
+  const files = ranges
+    ? ranges.map((r, i) => ({ name: fileName, data_id: `${dataId.slice(0, 120)}-${i + 1}`, page_ranges: r }))
+    : [{ name: fileName, data_id: dataId }];
+  if (ranges) console.log(`ItsWiz: ${fileName} sendes i ${ranges.length} bidder (${ranges.join(", ")})`);
+  const resp = await mineruRequest(token, "POST", "/file-urls/batch", { files, model_version: "vlm" });
+  if (resp.code !== 0) throw new MineruError(`file-urls/batch fejlede: ${JSON.stringify(resp)}`);
+  const { batch_id: batchId, file_urls: uploadUrls } = resp.data;
+
+  for (const uploadUrl of uploadUrls) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const put = await withTimeout(requestUrl({ url: uploadUrl, method: "PUT", body: bytes, throw: false }), UPLOAD_TIMEOUT_MS, "upload");
+        if (put.status >= 400) throw new Error(`upload HTTP ${put.status}`);
+        break;
+      } catch (err) {
+        if (attempt === UPLOAD_RETRIES) throw err;
+        console.warn(`ItsWiz: upload-forsøg ${attempt}/${UPLOAD_RETRIES} for ${fileName} fejlede (${err.message}) — prøver igen om ${UPLOAD_RETRY_BACKOFF_MS / 1000}s`);
+        await sleep(UPLOAD_RETRY_BACKOFF_MS);
+      }
     }
   }
 
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  const deadline = Date.now() + POLL_TIMEOUT_MS * files.length;
   while (Date.now() < deadline) {
-    const result = (await mineruRequest(token, "GET", `/extract-results/batch/${batchId}`)).data.extract_result[0];
-    if (result.state === "done") {
-      const zip = await withTimeout(requestUrl({ url: result.full_zip_url, throw: false }), 120e3, "zip-download");
-      if (zip.status >= 400) throw new Error(`zip-download HTTP ${zip.status}`);
-      return zip.arrayBuffer;
+    const results = (await mineruRequest(token, "GET", `/extract-results/batch/${batchId}`)).data.extract_result;
+    const failed = results.find((r) => r.state === "failed");
+    if (failed) throw new MineruError(`MinerU-fejl: ${failed.err_msg}`);
+    if (results.length === files.length && results.every((r) => r.state === "done")) {
+      const byId = new Map(results.map((r) => [r.data_id, r]));
+      const zips = [];
+      for (const f of files) {
+        const zip = await withTimeout(requestUrl({ url: (byId.get(f.data_id) ?? results[zips.length]).full_zip_url, throw: false }), 120e3, "zip-download");
+        if (zip.status >= 400) throw new Error(`zip-download HTTP ${zip.status}`);
+        zips.push(zip.arrayBuffer);
+      }
+      return zips;
     }
-    if (result.state === "failed") throw new MineruError(`MinerU-fejl: ${result.err_msg}`);
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`timeout efter ${POLL_TIMEOUT_MS / 1000}s`);
+  throw new Error(`timeout efter ${(POLL_TIMEOUT_MS * files.length) / 1000}s`);
 }
 
 // Samme mappe som watcheren, så dens zips genbruges (#99). Fejer forældede filer ved skrivning.
@@ -2509,19 +2549,29 @@ function cacheDir() {
   return require("path").join(require("os").homedir(), ".viastudywiz-cache");
 }
 
-function cachedZip(digest) {
+// Én zip: <digest>.zip (watcherens format). Flere bidder: <digest>.p1.zip, .p2.zip …
+function cachedZips(digest) {
   const fs = require("fs");
-  const file = require("path").join(cacheDir(), `${digest}.zip`);
+  const path = require("path");
+  const names = [`${digest}.zip`];
+  if (!fs.existsSync(path.join(cacheDir(), names[0]))) {
+    names.length = 0;
+    for (let i = 1; fs.existsSync(path.join(cacheDir(), `${digest}.p${i}.zip`)); i++) names.push(`${digest}.p${i}.zip`);
+  }
   try {
-    if (Date.now() - fs.statSync(file).mtimeMs > CACHE_TTL_MS) return fs.unlinkSync(file), null;
-    const b = fs.readFileSync(file);
-    return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+    const files = names.map((n) => path.join(cacheDir(), n));
+    if (!files.length) return null;
+    if (files.some((f) => Date.now() - fs.statSync(f).mtimeMs > CACHE_TTL_MS)) return files.forEach((f) => fs.unlinkSync(f)), null;
+    return files.map((f) => {
+      const b = fs.readFileSync(f);
+      return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+    });
   } catch {
     return null;
   }
 }
 
-function writeCache(digest, arrayBuffer) {
+function writeCache(digest, zips) {
   const fs = require("fs");
   const path = require("path");
   const dir = cacheDir();
@@ -2530,7 +2580,7 @@ function writeCache(digest, arrayBuffer) {
     const f = path.join(dir, name);
     if (name.endsWith(".zip") && Date.now() - fs.statSync(f).mtimeMs > CACHE_TTL_MS) fs.unlinkSync(f);
   }
-  fs.writeFileSync(path.join(dir, `${digest}.zip`), Buffer.from(arrayBuffer));
+  zips.forEach((zip, i) => fs.writeFileSync(path.join(dir, zips.length === 1 ? `${digest}.zip` : `${digest}.p${i + 1}.zip`), Buffer.from(zip)));
 }
 
 const sha256 = (arrayBuffer) => require("crypto").createHash("sha256").update(Buffer.from(arrayBuffer)).digest("hex");
@@ -2600,9 +2650,10 @@ async function existingConversion(file, bytes, digest) {
   return null;
 }
 
-async function writeConversion(file, entries) {
+// parts: én zip-indholds-Map pr. bid (#211), i sideorden.
+async function writeConversion(file, parts) {
   const t = mdTargets(file.path);
-  const { body, sektion } = conversionBody(entries);
+  const { body, sektion } = joinedBody(parts);
   const previous = await readFromVault(t.md);
   // #42: skriv ved siden af, hvis den eksisterende note har highlights.
   const protect = previous != null && HIGHLIGHT_RE.test(previous);
@@ -2617,7 +2668,7 @@ async function writeConversion(file, entries) {
   const extra = (sektion ? `sektion: "${sektion}"\n` : "") + carried;
   await writeVaultFile(destMd, materialeFrontmatter(file.path, planNotes, formatNow(), extra) + body);
 
-  const images = [...entries].filter(([n]) => n.startsWith("images/"));
+  const images = parts.flatMap((entries) => [...entries].filter(([n]) => n.startsWith("images/")));
   if (images.length) {
     const { adapter } = plugin.app.vault;
     if (await adapter.exists(normalizePath(destImages))) await adapter.rmdir(normalizePath(destImages), true);
@@ -2645,16 +2696,16 @@ async function processDocument(file, { force = false } = {}) {
   }
 
   try {
-    let zip = cachedZip(digest);
-    if (zip) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
+    let zips = cachedZips(digest);
+    if (zips) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
     else {
       console.log(`ItsWiz: uploader til MinerU: ${file.name}`);
       // #250: MinerU afviser data_id over 128 bytes.
       const dataId = Buffer.from(stemName(file.basename)).subarray(0, 128).toString("utf8").replace(/�+$/, "");
-      zip = await mineruConvert(mineruToken(), file.name, dataId, (await pdfable(file, bytes)) ?? bytes);
-      writeCache(digest, zip);
+      zips = await mineruConvert(mineruToken(), file.name, dataId, (await pdfable(file, bytes)) ?? bytes);
+      writeCache(digest, zips);
     }
-    await writeConversion(file, unzip(zip));
+    await writeConversion(file, zips.map(unzip));
     console.log(`ItsWiz: færdig: ${file.name}`);
   } catch (err) {
     if (!(err instanceof MineruError)) {
@@ -2866,6 +2917,9 @@ Object.assign(module.exports, {
   insertPageMarkers,
   runningHeader,
   conversionBody,
+  joinedBody,
+  pageRanges,
+  pdfPageCount,
   unzip,
   noteStubPath,
   planLiteratureText,

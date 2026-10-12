@@ -33,3 +33,10 @@ test('ejer-lektion findes også via RAW-link og NFD-navn (#241)', () => {
   assert.strictEqual(plugin.provenPlanId(notes, 'Musikforståelse.md'.normalize('NFD')), '2');
   assert.strictEqual(plugin.provenPlanId(notes, 'Ukendt.md'), null);
 });
+
+test('PDF over 200 sider deles i bidder på 100 (#211)', () => {
+  assert.strictEqual(plugin.pageRanges(200), null);
+  assert.deepStrictEqual(plugin.pageRanges(282), ['1-100', '101-200', '201-282']);
+  const pdf = Buffer.from('<< /Type /Pages /Count 2 >> << /Type /Page >> <</Type/Page/Parent 1 0 R>>', 'latin1');
+  assert.strictEqual(plugin.pdfPageCount(pdf), 2);
+});
