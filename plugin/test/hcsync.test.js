@@ -70,3 +70,29 @@ CASES.forEach((c, i) => {
 test('alle optagede funktioner har en JS-modpart', () => {
   for (const c of CASES) assert.ok(RUN[c.fn], c.fn);
 });
+
+test('Boox-fletning: kun hvad Boox ændrede siden base, og Boox\' egne nye opgaver', () => {
+  const base = { semesters: [{ id: 's', classes: [{ id: 'c', assignments: [], lectures: [{ id: 'l', status: 'not-started', notes: '', assignments: [
+    { id: 'a', title: 'Læs', status: 'not-started', grade: '', vswKey: 'k' },
+    { id: 'b', title: 'Skriv', status: 'not-started', grade: '', vswKey: 'k2' },
+  ] }] }] }] };
+  const boox = structuredClone(base);
+  const mac = structuredClone(base);
+  const [booxA, booxB] = boox.semesters[0].classes[0].lectures[0].assignments;
+  booxA.status = 'done';                       // krydset af på Boox
+  booxB.grade = '7';                            // karakter sat på Boox
+  boox.semesters[0].classes[0].assignments.push({ id: 'egen', title: 'Egen', status: 'not-started' });
+  boox.semesters[0].classes[0].assignments.push({ id: 'stemplet', title: 'Synk', vswKey: 'x' });
+  mac.semesters[0].classes[0].lectures[0].assignments[1].status = 'in-progress'; // Mac ændrede et andet felt
+  mac.semesters[0].classes[0].lectures[0].notes = 'Mac-note';                   // Boox rørte det ikke
+
+  const merged = m.mergeBooxEdits(mac, boox, base);
+  const [macA, macB] = mac.semesters[0].classes[0].lectures[0].assignments;
+  assert.equal(macA.status, 'done');
+  assert.equal(macB.grade, '7');
+  assert.equal(macB.status, 'in-progress', 'Boox\' uændrede felt må ikke vinde over Mac');
+  assert.equal(mac.semesters[0].classes[0].lectures[0].notes, 'Mac-note');
+  assert.deepEqual(mac.semesters[0].classes[0].assignments.map((a) => a.id), ['egen'], 'kun brugerens egne nye objekter');
+  assert.equal(merged.length, 3);
+  assert.deepEqual(m.mergeBooxEdits(mac, structuredClone(mac), structuredClone(mac)), [], 'intet at flette når intet er ændret');
+});

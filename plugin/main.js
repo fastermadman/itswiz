@@ -1525,6 +1525,7 @@ const DEFAULT_SETTINGS = {
   enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
   enableConversion: false,
+  enableHoldCourseSync: false,
 };
 
 async function getSettings() {
@@ -3459,6 +3460,190 @@ function forloebMirrors(data, genereret, isDir, readText) {
   return writes;
 }
 
+// ── Hold Course-synken i drift (#242): afløser watcherens minut-tick og sync() ──
+
+const HC_API_VERSION = 1;
+const HC_ONYX_DIR = ".obsidian-onyx/plugins/hold-course";
+const HC_ONYX_DATA = `${HC_ONYX_DIR}/data.json`;
+const BOOX_TICK_MS = 60e3;
+
+const holdCourse = () => plugin.app.plugins.plugins["hold-course"];
+
+function holdCourseApi() {
+  const api = holdCourse()?.api;
+  if (api?.version >= HC_API_VERSION) return api;
+  if (!plugin.hcApiWarned) {
+    plugin.hcApiWarned = true;
+    new Notice(`ItsWiz: Hold Course-synken kræver Hold Course med API version ${HC_API_VERSION} (hold-course#84). Opdatér Hold Course.`, 0);
+  }
+  return null;
+}
+
+const obsidianVault = () => ({
+  list: async () => plugin.app.vault.getFiles().map((f) => f.path),
+  read: (p) => plugin.app.vault.adapter.read(normalizePath(p)),
+  write: (p, text) => writeVaultFile(p, text),
+});
+
+// Læser filerne på forhånd, så syncData/syncTaskCompletion kan slå dem op synkront inde i update().
+async function readAll(paths) {
+  const texts = new Map();
+  for (const p of new Set(paths)) {
+    const text = await readFromVault(p);
+    if (text != null) texts.set(nfc(p), text);
+  }
+  return (p) => texts.get(nfc(p)) ?? null;
+}
+
+const localTimestamp = () => {
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+};
+
+function logLines(heading, lines) {
+  if (lines?.length) console.log(`ItsWiz: ${lines.length} ${heading}:\n  ${lines.join("\n  ")}`);
+}
+
+async function runHoldCourseSync() {
+  const api = holdCourseApi();
+  if (!api) return;
+  const vault = obsidianVault();
+  logLines("lektionsplan-note(r) fik materiale_filer opdateret (#141/#183)", await patchPendingMateriale(vault, true));
+  const [plans, udenPlanId] = await readPlans(vault);
+  const tasks = await readTasks(vault);
+
+  const files = plugin.app.vault.getAllLoadedFiles();
+  const paths = new Set(files.map((f) => nfc(f.path)));
+  const dirs = new Set(files.filter((f) => f instanceof TFolder).map((f) => nfc(f.path)));
+  const exists = (p) => paths.has(nfc(p));
+  const stubFor = (p) => hcNoteStubPath(p, exists);
+  const lectureLinks = (holdCourse().data.semesters ?? []).flatMap((s) => (s.classes ?? []).flatMap((c) => (c.lectures ?? []).map((l) => l.vswVaultLink || l.vaultLink)));
+  const readText = await readAll([...lectureLinks, ...plans.map((p) => stubFor(p._path))].filter((p) => p && exists(p)));
+
+  const { result: r, restored } = await api.update((data) => {
+    const dropped = [], report = {};
+    syncData(data, plans, null, tasks, dropped, report, stubFor);
+    const marked = syncTaskCompletion(data, readText);
+    const [removedRes, removedAssign] = pruneDeadLinks(data, exists);
+    return { dropped, report, marked, removedRes, removedAssign };
+  });
+
+  logLines("lektionsplan-note(r) uden plan_id springes over (ret dem i vaulten)", udenPlanId);
+  logLines("lektion(er) i Hold Course er ikke længere i itslearning (#173)", r.dropped);
+  logLines("fag fik ingen lektioner i et ellers aktivt semester", r.report.dropped_classes);
+  logLines("afleveringsopgave(r) er ikke længere i itslearning", r.report.dropped_tasks);
+  logLines("materiale(r) i Library bruges ikke længere af nogen klasse", r.report.orphaned_resources);
+  logLines("Forberedelse-opgave(r) krydset af i vaulten, markeret Done", r.marked);
+  if (r.removedRes || r.removedAssign) console.log(`ItsWiz: ryddet op: ${r.removedRes} død(e) Library-post(er), ${r.removedAssign} død(e) opgave(r).`);
+  logLines("felt(er) rullet tilbage af Hold Course (synken ejer dem ikke)", restored);
+
+  const mirrorPaths = [...paths].filter((p) => p.startsWith(`${FAG_ROOT}/`) && (p.endsWith("/_forløb.md") || p.includes("/_HoldCourse/")));
+  const mirrorText = await readAll(mirrorPaths);
+  const writes = forloebMirrors(holdCourse().data, localTimestamp(), (p) => dirs.has(nfc(p)), mirrorText);
+  for (const [p, text] of writes) await writeVaultFile(p, text);
+  if (writes.length) console.log(`ItsWiz: skrev ${writes.length} _forløb.md (holdbarheds-spejl, #152).`);
+
+  await syncBoox();
+}
+
+// Én kørsel ad gangen; hændelser under en kørsel giver én kørsel mere bagefter, ikke en pr. hændelse.
+let hcSyncTimer = null, hcSyncRunning = null, hcSyncAgain = false;
+function scheduleHoldCourseSync(delayMs = 5000) {
+  clearTimeout(hcSyncTimer);
+  hcSyncTimer = setTimeout(async () => {
+    if (!(await getSettings()).enableHoldCourseSync) return;
+    if (hcSyncRunning) return void (hcSyncAgain = true);
+    hcSyncRunning = runHoldCourseSync()
+      .catch((err) => {
+        console.error("ItsWiz: Hold Course-synk fejlede:", err);
+        new Notice(`ItsWiz: Hold Course-synk fejlede\n${err.message}`);
+      })
+      .finally(() => {
+        hcSyncRunning = null;
+        if (hcSyncAgain) (hcSyncAgain = false), scheduleHoldCourseSync();
+      });
+  }, delayMs);
+}
+
+const touchesHoldCourseInput = (path) => path.endsWith(".md") && (path.startsWith(`${FAG_ROOT}/`) || path.includes("OPGAVER"));
+
+// ── Boox (.obsidian-onyx): Boox' Hold Course har sin egen data.json (#146, hold-course#10) ──
+//
+// Python-reconcilen overskrev Boox' kopi hvert minut, så noget krydset af på Boox gik tabt, og
+// Mac og Boox skrev den samme fil (5 Syncthing-konflikter 1/9–1/10). Nu en tre-vejs-fletning mod
+// den kopi ItsWiz sidst skrev (`base`): hvad Boox har ændret siden (status, karakter, noter, nye
+// egne opgaver), hentes ind på Mac'en først, og kopien skrives kun når indholdet er anderledes.
+// ponytail: noget slettet på Boox kommer igen fra Mac'en; fletning af sletninger når det savnes.
+
+const BOOX_USER_FIELDS = ["status", "grade", "notes"];
+
+function eachItem(obj, fn) {
+  for (const [list, v] of Object.entries(obj)) {
+    if (!Array.isArray(v)) continue;
+    for (const item of v) if (item && typeof item === "object" && item.id) fn(item, obj, list), eachItem(item, fn);
+  }
+}
+
+// Fletter Boox' ændringer siden `base` ind i `mac` (muterer). Returnerer hvad der blev flettet.
+function mergeBooxEdits(mac, boox, base) {
+  const macById = new Map(), baseById = new Map();
+  eachItem(mac, (item) => macById.set(item.id, item));
+  eachItem(base, (item) => baseById.set(item.id, item));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const merged = [], added = new Set();
+  eachItem(boox, (item, parent, list) => {
+    const own = macById.get(item.id), old = baseById.get(item.id);
+    if (own && old) {
+      for (const f of BOOX_USER_FIELDS) {
+        if (!same(item[f], old[f]) && !same(item[f], own[f])) {
+          own[f] = structuredClone(item[f]);
+          merged.push(`${item.title ?? item.id}: ${f}`);
+        }
+      }
+      return;
+    }
+    // Oprettet på Boox: ikke i base (så ikke slettet på Mac), intet vsw-stempel (brugerens eget).
+    if (own || old || added.has(parent.id) || Object.keys(item).some((k) => k.startsWith("vsw"))) return;
+    const macParent = parent === boox ? mac : macById.get(parent.id);
+    if (!macParent) return;
+    (macParent[list] ??= []).push(structuredClone(item));
+    added.add(item.id);
+    merged.push(`ny: ${item.title ?? item.id}`);
+  });
+  return merged;
+}
+
+const booxContent = (data) => `${JSON.stringify(Object.fromEntries(Object.entries(data).filter(([k]) => k !== "settings")), null, 2)}\n`;
+const onyxBasePath = () => `${plugin.manifest.dir}/onyx-base.json`;
+
+async function syncBoox() {
+  const api = holdCourseApi();
+  const { adapter } = plugin.app.vault;
+  if (!api || !(await adapter.exists(HC_ONYX_DATA))) return;
+
+  const conflicts = (await adapter.list(HC_ONYX_DIR)).files.filter((f) => f.includes(".sync-conflict-"));
+  const known = (plugin.data.knownOnyxConflicts ??= []);
+  const fresh = conflicts.filter((f) => !known.includes(f));
+  if (fresh.length) {
+    new Notice(`ItsWiz: ${fresh.length} Syncthing-konflikt(er) i Boox' Hold Course-data:\n${fresh.map((f) => f.split("/").pop()).join("\n")}`, 0);
+    known.push(...fresh);
+    await plugin.saveData(plugin.data);
+  }
+
+  const text = await adapter.read(HC_ONYX_DATA);
+  // Uden base (første kørsel) flettes intet: Python-reconcilen har netop overskrevet Boox' kopi
+  // med Mac'ens, så Boox har intet eget at give.
+  const base = (await adapter.exists(onyxBasePath())) ? await adapter.read(onyxBasePath()) : null;
+  if (base && text !== base) {
+    const boox = JSON.parse(text);
+    const { result } = await api.update((data) => mergeBooxEdits(data, boox, JSON.parse(base)), { userEdits: true });
+    logLines("ændring(er) fra Boox hentet ind i Hold Course", result);
+  }
+  const desired = booxContent(holdCourse().data);
+  if (desired !== text) await adapter.write(HC_ONYX_DATA, desired);
+  if (desired !== base) await adapter.write(onyxBasePath(), desired);
+}
+
 // ── Obsidian-delen ──
 
 class ItsWizView extends ItemView {
@@ -3522,6 +3707,11 @@ class ItsWizSettingTab extends PluginSettingTab {
       .setName("Konvertér RAW-filer")
       .setDesc("Sender nye PDF- og Office-filer under RAW/ til MinerU og skriver MD-noten. Valgfrit: slået fra linker lektionsplanerne til originalfilen. Slå først til, når watch_viastudywiz.py er stoppet, ellers konverteres hver fil to gange.")
       .addToggle((t) => t.setValue(s.enableConversion ?? false).onChange((v) => ((s.enableConversion = v), save(), v && scanExisting())));
+    containerEl.createEl("h3", { text: "Hold Course" });
+    new Setting(containerEl)
+      .setName("Synk til Hold Course")
+      .setDesc("Lektionsplaner, materialer og opgaver skrives ind i Hold Course, og Boox' kopi holdes ajour. Slå først til, når watch_viastudywiz.py er stoppet, ellers skriver begge.")
+      .addToggle((t) => t.setValue(s.enableHoldCourseSync ?? false).onChange((v) => ((s.enableHoldCourseSync = v), save(), v && scheduleHoldCourseSync(0))));
     const tokenDesc = createFragment((f) => {
       f.appendText("Hentes på ");
       f.createEl("a", { text: "mineru.net", href: MINERU_TOKEN_URL });
@@ -3569,10 +3759,19 @@ class ItsWizPlugin extends Plugin {
       // Efter layout-ready: før det fyrer Obsidian "create" for hver eksisterende fil.
       this.registerEvent(this.app.vault.on("create", (f) => onVaultCreate(f)));
       getSettings().then((st) => st.enableConversion && scanExisting());
+      for (const ev of ["create", "modify", "delete"]) {
+        this.registerEvent(this.app.vault.on(ev, (f) => touchesHoldCourseInput(f.path) && scheduleHoldCourseSync()));
+      }
+      this.registerEvent(this.app.vault.on("rename", (f, old) => (touchesHoldCourseInput(f.path) || touchesHoldCourseInput(old)) && scheduleHoldCourseSync()));
+      scheduleHoldCourseSync();
       runCollectAndDownload({ auto: true });
     });
     this.convert = (path, opts) => processDocument(this.app.vault.getAbstractFileByPath(path), opts);
+    this.syncHoldCourse = () => runHoldCourseSync();
     this.registerInterval(window.setInterval(() => tick(), KEEPALIVE_MINUTES * 60e3));
+    this.registerInterval(window.setInterval(async () => {
+      if ((await getSettings()).enableHoldCourseSync && !hcSyncRunning) syncBoox().catch((err) => console.error("ItsWiz: Boox-synk fejlede:", err));
+    }, BOOX_TICK_MS));
   }
 
   onunload() {
@@ -3650,4 +3849,5 @@ Object.assign(module.exports, {
   renderForloeb,
   stripGenereret,
   forloebMirrors,
+  mergeBooxEdits,
 });
