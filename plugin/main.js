@@ -80,7 +80,10 @@ async function collectRangeInPage(startUnix, endUnix) {
   // fetchPlan ovenfor (samme /v2-endpoint som alt andet), så resten af koden ikke skal kende to
   // forskellige plan-objektformer.
   async function fetchCoursePlansPage(courseId, pageIndex, pageSize) {
-    const url = `${BASE}/restapi/personal/course/${courseId}/plans/current/v1?PageIndex=${pageIndex}&PageSize=${pageSize}&ChildId=0`;
+    // ItsWiz: all/v1 frem for current/v1. current/v1 starter i dag, så planer i daysBack-delen af
+    // vinduet manglede; all/v1 er hele kursets historik, ældste først (målt 2026-10-12: 103 planer
+    // for Musik, 3 sider).
+    const url = `${BASE}/restapi/personal/course/${courseId}/plans/all/v1?PageIndex=${pageIndex}&PageSize=${pageSize}&ChildId=0`;
     return fetchJson(url);
   }
 
@@ -89,7 +92,7 @@ async function collectRangeInPage(startUnix, endUnix) {
   // for daysForward end en uendelig løkke. Stopper tidligere hvis en side kommer tilbage kortere end
   // pageSize (sidste side) eller tom.
   const ORPHAN_PLAN_PAGE_SIZE = 50;
-  const MAX_ORPHAN_PLAN_PAGES = 5;
+  const MAX_ORPHAN_PLAN_PAGES = 20; // ItsWiz: all/v1 er ældste først, så 5 sider nåede ikke frem til i dag
 
   async function fetchOrphanPlanCandidateIds(courseId) {
     const ids = [];
@@ -1401,6 +1404,10 @@ const VIEW_TYPE = "itswiz-browser";
 // Web viewer holder allerede onBeforeRequest på sin egen partition (adblock).
 const PARTITION = "persist:itswiz";
 const BASE = "https://via.itslearning.com";
+// Forsiden (BASE selv) er login-siden, og at indlæse den logger en aktiv session ud: REST-API'et
+// svarer 401 bagefter i alle vinduer på partitionen (målt trin for trin 2026-10-12). Start derfor
+// altid på en side der kræver login; er man logget ud, sender itslearning selv videre til login.
+const START_URL = `${BASE}/CourseCards`;
 const TEST_ROOT = "ItsWiz-test";
 const WATCH_URLS = ["*://*.itslearning.com/*", "*://*.officeapps.live.com/*"];
 
@@ -1771,7 +1778,7 @@ async function downloadTaskAttachment(task, root = NOTER_ROOT) {
 
 async function openHarvestWindow() {
   harvestWin = new (remote().BrowserWindow)({ show: false, webPreferences: { partition: PARTITION } });
-  await harvestWin.loadURL(BASE, { userAgent: UA });
+  await harvestWin.loadURL(START_URL, { userAgent: UA });
   net = new Net(remote().session.fromPartition(PARTITION));
 }
 
@@ -1814,8 +1821,12 @@ async function collectAndDownload(startUnix, endUnix) {
     );
     // Download FØR noteskrivning (#129): writePlanNotes linker kun til filer der findes.
     if (settings.enableFileDownloads) {
-      await downloadFileElements(result.plans, null);
-      await writePlanNotes(result.plans, null, settings.enableTaskCompletionSync);
+      // ItsWiz: myEvents returnerer kun begivenheder fra stjernemarkerede rum (målt 2026-10-12:
+      // 0 events i september med alle 12 rum uden stjerne), og stjernerne er fjernet for kalenderens
+      // skyld (#243). De "forældreløse" planer fra plans/all/v1 er derfor nu den primære kilde.
+      const plans = { ...result.plans, ...result.orphanPlans };
+      await downloadFileElements(plans, null);
+      await writePlanNotes(plans, null, settings.enableTaskCompletionSync);
       await writeTaskNotes(result.tasks ?? []);
     }
     notifyRunSummary();
@@ -1837,6 +1848,7 @@ async function runCollectAndDownload() {
     return;
   }
   isRunning = true;
+  plugin.lastRun = null;
   new Notice("ItsWiz: høster…");
   try {
     const syncedVersion = plugin.data[FRONTMATTER_VERSION_KEY];
@@ -1858,7 +1870,10 @@ async function runCollectAndDownload() {
     console.error("VIAstudyWiz fejl:", err);
     new Notice(`ItsWiz: kørsel fejlede\n${err.message ?? err}`, 0);
     if (/Ikke logget ind/.test(err.message)) plugin.openView();
+    plugin.lastRun = { failure: err.message };
   } finally {
+    // Seneste kørsel, til C (#240, statusbar) og til at aflæse en kørsel udefra (obsidian eval).
+    plugin.lastRun = { ...plugin.lastRun, finishedAt: new Date().toISOString(), files: runFilesDownloaded, errors: runErrorMessages, changed: runChangedNotes };
     isRunning = false;
   }
 }
@@ -1892,10 +1907,10 @@ async function runPathTest(daysBack = 90, daysForward = 30) {
     await openHarvestWindow();
     const now = Math.floor(Date.now() / 1000);
     const result = await collect(now - daysBack * 86400, now + daysForward * 86400);
-    const elements = Object.values(result.plans).filter(Boolean).flatMap((p) => p.elements ?? []);
+    const elements = Object.values({ ...result.plans, ...result.orphanPlans }).filter(Boolean).flatMap((p) => p.elements ?? []);
     const files = elements.filter((e) => !NON_FILE_TYPE_NAMES.has(e.typeName));
     const lower = (e) => e.title.toLowerCase();
-    log.push(`Vindue: ${daysBack} dage tilbage, ${daysForward} frem. ${Object.keys(result.plans).length} planer, ${files.length} fil-elementer, ${result.tasks.length} opgaver.`, "");
+    log.push(`Vindue: ${daysBack} dage tilbage, ${daysForward} frem. ${Object.keys({ ...result.plans, ...result.orphanPlans }).length} planer, ${files.length} fil-elementer, ${result.tasks.length} opgaver.`, "");
 
     const pdf = files.find((e) => lower(e).endsWith(".pdf"));
     if (!pdf) step(false, "PDF: intet element i vinduet");
@@ -2013,7 +2028,7 @@ class ItsWizView extends ItemView {
     this.webview.setAttribute("partition", PARTITION);
     this.webview.setAttribute("useragent", UA);
     this.webview.setAttribute("allowpopups", "");
-    this.webview.setAttribute("src", BASE);
+    this.webview.setAttribute("src", START_URL);
     this.webview.style.cssText = "flex:1;width:100%";
     this.webview.addEventListener("did-navigate", (e) => (this.urlEl.textContent = e.url));
     root.appendChild(this.webview);
