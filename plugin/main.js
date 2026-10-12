@@ -3967,8 +3967,8 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("PDFable-program")
-      .setDesc("Valgfrit. Sti til PDFable (bitonalpdf), som retter skæve, liggende og dobbeltside-scans før MinerU. Tom: originalen uploades.")
-      .addText((t) => t.setPlaceholder("/sti/til/bitonalpdf").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
+      .setDesc("Valgfrit. Sti til PDFable-programmet (filen pdfable), som retter skæve, liggende og dobbeltside-scans før MinerU. Tom: originalen uploades.")
+      .addText((t) => t.setPlaceholder("/sti/til/pdfable").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
   }
 }
 
