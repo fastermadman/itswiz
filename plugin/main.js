@@ -851,6 +851,12 @@ function rawLink(courseName, weekFolder, title) {
   return `[[${full}|${alias}]]`;
 }
 
+// #241: MinerU er et tilvalg. Uden MD-note peger linket på RAW-originalen; når MD dukker op, ændrer
+// AUTO-hashet sig og linket skifter til MD ved næste høst.
+function fileLink(courseName, weekFolder, title, hasMd) {
+  return hasMd ? mdLink(courseName, weekFolder, title) : rawLink(courseName, weekFolder, title);
+}
+
 // Lektionsplanen hentes allerede til kalender-beskrivelsen — som note i ugemappen binder den
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
 // AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
@@ -879,6 +885,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const fagField = courseDisplayName(courseName);
     const existingIds = await existingMaterialeIds(plan, courseName, weekFolder);
     const rawIds = await existingRawIds(plan, courseName, weekFolder);
+    const hasFile = (el) => existingIds.has(el.id) || rawIds.has(el.id);
 
     // planId'et er stabilt selv når itslearning redigerer start/stop-felterne på en eksisterende
     // plan i stedet for at oprette en ny (fx en reel udskydelse, live-bekræftet 2026-08-27 på
@@ -922,16 +929,17 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // selv skal skrive i og aflevere (samme klasse som Forberedelse-elementernes SharePoint-links,
     // issue #59), er MinerU-renderingen ubrugelig til det.
     const materials = (plan.elements ?? [])
-      .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && existingIds.has(el.id)))
+      .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && hasFile(el)))
       .map((el) => {
         if (el.typeName === "Link") return `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`;
+        if (!existingIds.has(el.id)) return `- ${rawLink(courseName, weekFolder, el.title)} · [${el.title} (web)](https://via.itslearning.com${el.url})`;
         const raw = rawIds.has(el.id) ? ` · ${rawLink(courseName, weekFolder, el.title)}` : "";
         return `- ${mdLink(courseName, weekFolder, el.title)}${raw} · [${el.title} (web)](https://via.itslearning.com${el.url})`;
       });
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
     const literatureFiles = literature
-      ? matchLiteratureElements(literature, plan.elements ?? []).filter((el) => existingIds.has(el.id))
+      ? matchLiteratureElements(literature, plan.elements ?? []).filter(hasFile)
       : [];
     const forberedelse = forberedelseElements(plan);
     // Samme tekst som AUTO-sektionens brødtekst nedenfor, men som eget felt: Hold Course-synken
@@ -960,7 +968,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Link/Mappe/Arbejdsopgave/Afleveringsopgave, samme filter som materials-listen bruger.
     const literatureFileTitles = new Set(literatureFiles.map((el) => el.title));
     const materialeFiler = (plan.elements ?? [])
-      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title) && existingIds.has(el.id));
+      .filter((el) => !NON_FILE_TYPE_NAMES.has(el.typeName) && !literatureFileTitles.has(el.title) && hasFile(el));
 
     // Skrives hver kørsel, uafhængigt af lektionsplan-hashet nedenfor — stubben skal findes før
     // timen selv når planens indhold ikke har ændret sig siden sidste kørsel.
@@ -1041,7 +1049,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       // parse brødteksten. `false` når matchLiteratureElements ikke fandt noget, samme mønster som
       // litteratur/forberedelse ovenfor.
       ...(literatureFiles.length
-        ? yamlBlockLines("litteratur_filer", literatureFiles.map((el) => `📎 ${mdLink(courseName, weekFolder, el.title)}`).join("\n"))
+        ? yamlBlockLines("litteratur_filer", literatureFiles.map((el) => `📎 ${fileLink(courseName, weekFolder, el.title, existingIds.has(el.id))}`).join("\n"))
         : ["litteratur_filer: false"]),
       // Kun titlerne, ikke indholdet: Properties-panelet og basens kolonne skal kunne læses på et
       // blik, og selve teksten står i AUTO-sektionen nedenfor. `false` frem for at udelade feltet,
@@ -1057,7 +1065,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       // underviseren aldrig udfylder litteratur-feltet (se kommentaren ved materialeFiler ovenfor).
       // Samme false-mønster som de øvrige felter.
       ...(materialeFiler.length
-        ? yamlBlockLines("materiale_filer", materialeFiler.map((el) => `📎 ${mdLink(courseName, weekFolder, el.title)}`).join("\n"))
+        ? yamlBlockLines("materiale_filer", materialeFiler.map((el) => `📎 ${fileLink(courseName, weekFolder, el.title, existingIds.has(el.id))}`).join("\n"))
         : ["materiale_filer: false"]),
       ...(beskrivelse ? yamlBlockLines("beskrivelse", beskrivelse) : ["beskrivelse: false"]),
       "---",
@@ -2230,6 +2238,7 @@ Object.assign(module.exports, {
   courseFolderName,
   rawPath,
   mdPath,
+  fileLink,
   noteStubPath,
   planLiteratureText,
   matchLiteratureElements,
