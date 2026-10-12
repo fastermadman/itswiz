@@ -1525,7 +1525,6 @@ const DEFAULT_SETTINGS = {
   enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
   enableConversion: false,
-  mineruToken: "",
 };
 
 async function getSettings() {
@@ -2149,6 +2148,11 @@ const AUTO_MATERIALER_RE = /^## Materialer\n([\s\S]*?)(?=\n## |\n<!-- AUTO:END|$
 const HIGHLIGHT_RE = /==[^=\n]+==/;
 const DAYS_DA_MON = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"];
 
+// Nøglen ligger i Obsidians localStorage pr. enhed, ikke i data.json: plugin-data i ViaVault er
+// git-tracket og pushes til GitHub, og synkes til Boox'en.
+const MINERU_TOKEN_KEY = "itswiz-mineru-token";
+const mineruToken = () => plugin.app.loadLocalStorage(MINERU_TOKEN_KEY) ?? "";
+
 // MinerU har sagt nej (fx over 200 sider): markeres som fejlet. Alt andet (netværk, timeout) er
 // forbigående og prøves igen ved næste start (#250).
 class MineruError extends Error {}
@@ -2587,7 +2591,6 @@ async function processDocument(file, { force = false } = {}) {
   const t = mdTargets(file.path);
   const marker = errorMarkerPath(file.path);
   if (!force && ((await existsInVault(t.md)) || (await plugin.app.vault.adapter.exists(normalizePath(marker))))) return;
-  const { mineruToken } = await getSettings();
   const bytes = await plugin.app.vault.readBinary(file);
   const digest = sha256(bytes);
 
@@ -2609,7 +2612,7 @@ async function processDocument(file, { force = false } = {}) {
       console.log(`ItsWiz: uploader til MinerU: ${file.name}`);
       // #250: MinerU afviser data_id over 128 bytes.
       const dataId = Buffer.from(stemName(file.basename)).subarray(0, 128).toString("utf8").replace(/�+$/, "");
-      zip = await mineruConvert(mineruToken, file.name, dataId, bytes);
+      zip = await mineruConvert(mineruToken(), file.name, dataId, bytes);
       writeCache(digest, zip);
     }
     await writeConversion(file, unzip(zip));
@@ -2633,8 +2636,8 @@ function isConvertible(file) {
 }
 
 async function queueConversion(file) {
-  const { enableConversion, mineruToken } = await getSettings();
-  if (!enableConversion || !mineruToken || !isConvertible(file) || queuedConversions.has(file.path)) return;
+  const { enableConversion } = await getSettings();
+  if (!enableConversion || !mineruToken() || !isConvertible(file) || queuedConversions.has(file.path)) return;
   queuedConversions.add(file.path);
   conversionQueue = conversionQueue
     .then(() => processDocument(file))
@@ -2741,11 +2744,11 @@ class ItsWizSettingTab extends PluginSettingTab {
       .setDesc(tokenDesc)
       .addText((t) => {
         t.inputEl.type = "password";
-        t.setValue(s.mineruToken ?? "").onChange((v) => ((s.mineruToken = v.trim()), save()));
+        t.setValue(mineruToken()).onChange((v) => this.app.saveLocalStorage(MINERU_TOKEN_KEY, v.trim() || null));
       })
       .addButton((b) =>
         b.setButtonText("Test nøgle").onClick(async () => {
-          const ok = s.mineruToken && (await testMineruToken(s.mineruToken).catch(() => false));
+          const ok = mineruToken() && (await testMineruToken(mineruToken()).catch(() => false));
           new Notice(ok ? "ItsWiz: MinerU-nøglen virker." : "ItsWiz: MinerU afviste nøglen.");
         })
       );
