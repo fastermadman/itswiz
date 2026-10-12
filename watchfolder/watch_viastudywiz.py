@@ -360,7 +360,8 @@ def submit(doc_path: Path) -> str:
     resp = api_request(
         "POST",
         "/file-urls/batch",
-        {"files": [{"name": doc_path.name, "data_id": sanitize(doc_path.stem)}], "model_version": "vlm"},
+        # #250: MinerU afviser data_id over 128 tegn (lange bognavne i Litteratur/SUP-LIT).
+        {"files": [{"name": doc_path.name, "data_id": sanitize(doc_path.stem)[:128]}], "model_version": "vlm"},
     )
     if resp.get("code") != 0:
         raise RuntimeError(f"file-urls/batch fejlede: {resp}")
@@ -737,7 +738,12 @@ def process_document(doc_path: Path) -> None:
             print(f"Cache-hit, springer MinerU-kald over: {doc_path.name}", flush=True)
         integrate_output(doc_path, zip_bytes)
         print(f"Færdig: {doc_path.name}", flush=True)
-    except (requests.RequestException, RuntimeError, TimeoutError, OSError) as exc:
+    except (requests.RequestException, TimeoutError) as exc:
+        # #250: netværk og poll-timeout er forbigående (fx MinerU-CDN'ens udløbne certifikat
+        # 2026-10-05) — ingen markør, så filen prøves igen ved næste watcher-start.
+        # ponytail: en fil der altid timer ud uploades igen ved hver genstart; genstarter er sjældne.
+        print(f"Forbigående fejl ved {doc_path.name} (prøves igen ved næste start): {exc}", file=sys.stderr, flush=True)
+    except (RuntimeError, OSError) as exc:
         print(f"Fejl ved {doc_path.name}: {exc}", file=sys.stderr, flush=True)
         error_marker_path(doc_path).write_text(str(exc), encoding="utf-8")
 
