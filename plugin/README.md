@@ -20,4 +20,9 @@ hentes ind i vaulten uden Chrome. Logikken er kopieret fra `../background.js` (f
    Statusbaren viser sidste kørsel og antal fejl; klik for fejllisten. Udløbet itslearning-login fornyes
    automatisk via Microsofts "Forbliv logget ind"; lykkes det ikke, kommer én besked og ItsWiz-fanen åbner.
 
+7. **Kalender (#243):** slå "Personlige kalenderevents i itslearning" til i indstillingerne (default fra). Hver høst
+   opretter/retter/flytter ét personligt event pr. lektion og afleveringsfrist og aflyser (`AFLYST · `) lektioner,
+   der er forsvundet fra itslearning. ItsWiz rører kun events i `calendarEventMap` i `data.json`. Kommandoen
+   **Fjern alle ItsWiz-kalenderevents** sletter dem igen.
+
 Kun desktop. Ingen build, ingen dependencies. Test: `node --test plugin/test/*.test.js`.

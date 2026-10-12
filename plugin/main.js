@@ -2083,12 +2083,13 @@ async function calendarCallInPage(method, path, body, withToken) {
   const headers = { "x-requested-with": "XMLHttpRequest", "content-type": "application/json; charset=UTF-8" };
   if (withToken) {
     const html = await (await fetch("/Calendar/Schedule.aspx", { credentials: "include" })).text();
-    const settings = html.match(/antiForgeryHeaderSettings\s*=\s*(\{[^}]*\})/)?.[1] ?? "";
-    const token = settings.match(/["']?(?:value|token)["']?\s*:\s*["']([^"']{16,})["']/i)?.[1];
-    if (!token) throw new Error("fandt ikke anti-forgery-token i Schedule.aspx");
-    headers["__ITSL_ANTIFORGERY_TOKEN__"] = token;
+    // Målt 2026-10-12: antiForgeryHeaderSettings = {"headerName":"__ITSL_ANTIFORGERY_TOKEN__","headerValue":"…"}.
+    const raw = html.match(/antiForgeryHeaderSettings\s*=\s*(\{[^}]*\})/)?.[1];
+    const { headerName, headerValue } = raw ? JSON.parse(raw) : {};
+    if (!headerName || !headerValue) throw new Error("fandt ikke anti-forgery-token i Schedule.aspx");
+    headers[headerName] = headerValue;
   }
-  const res = await fetch(path, { method, credentials: "include", headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await fetch(path, { method, credentials: "include", headers, body: body == null ? undefined : JSON.stringify(body) });
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch {}
@@ -2102,10 +2103,10 @@ async function calendarCall(method, path, body, withToken = false) {
 }
 
 const calendarCreate = async (it) =>
-  (await calendarCall("POST", "/RestApi/calendar/createEventWithLocation", {
+  Number((await calendarCall("POST", "/RestApi/calendar/createEventWithLocation", {
     location: "0", groupId: 0, start: it.start, end: it.end, title: it.title, description: it.description,
     extraDescription: "", elementIds: "[]", nextEventId: 0, EventIdToCopy: 0,
-  })).createdEvent.id;
+  })).createdEvent.id);
 
 async function calendarEdit(eventId, title, description) {
   await calendarCall("PUT", "/RestApi/calendar/editEventTitle", { EventId: eventId, Text: title, HasResources: false });
@@ -2114,15 +2115,15 @@ async function calendarEdit(eventId, title, description) {
 
 // Sletning er idempotent (204 også ved gentagelse). Kun id'er ItsWiz selv har oprettet kommer hertil.
 const calendarDelete = (eventId) =>
-  calendarCall("DELETE", `/RestApi/calendarevents/deleteevent/events/${eventId}/v1?deleteRecurringSeries=false`, undefined, true);
+  calendarCall("DELETE", `/RestApi/calendarevents/deleteevent/events/${eventId}/v1?deleteRecurringSeries=false`, null, true); // null, ikke undefined: inPage kan ikke serialisere undefined
 
 // eventId -> {title, description} for personlige events i [fromIso, toIso].
 async function calendarListPersonal(fromIso, toIso) {
   const filter = JSON.stringify({ courseIds: [], projectIds: [], personal: true, hierarchyIds: [] });
   const unix = (iso) => Math.floor(Date.parse(iso + "Z") / 1000);
   const r = await calendarCall("POST", "/RestApi/calendar/myEvents", { filter, start: unix(fromIso) - 86400, end: unix(toIso) + 86400 });
-  const list = Array.isArray(r) ? r : r?.EntityArray ?? r?.events ?? [];
-  return new Map(list.map((e) => [Number(e.activityId), { title: e.EventTitle, description: e.description ?? "" }]));
+  // Målt 2026-10-12: en array af {id (streng), EventTitle, start, end, description, …}. `title` er kategorien ("Personlig").
+  return new Map((r ?? []).map((e) => [Number(e.id), { title: e.EventTitle, description: e.description ?? "" }]));
 }
 
 const saveCalendar = () => plugin.saveData(plugin.data);
@@ -2145,6 +2146,7 @@ async function syncCalendar(result) {
   const map = plugin.data.calendarEventMap;
   const nowIso = new Date().toISOString();
   const items = calendarItems(result, nowIso);
+  plugin.lastCalendar = { items: items.length, plans: Object.keys({ ...result.plans, ...result.orphanPlans }).length, tasks: (result.tasks ?? []).length }; // aflæses udefra (obsidian eval)
   const starts = [...items, ...Object.values(map)];
   if (starts.length === 0) return;
   const existing = await calendarListPersonal(
@@ -2182,6 +2184,7 @@ async function syncCalendar(result) {
     }
   }
   await drainCalendarDeleteQueue();
+  Object.assign(plugin.lastCalendar, { counts, existing: existing.size });
   console.log(`ItsWiz: kalender ${JSON.stringify(counts)}, ${items.length} events i vinduet`);
 }
 
