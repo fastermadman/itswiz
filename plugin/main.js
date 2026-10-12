@@ -1886,7 +1886,7 @@ function officeChain(url) {
   return "native download";
 }
 
-async function runPathTest(daysBack = 90, daysForward = 30) {
+async function runPathTest(daysBack = 135, daysForward = 30) {
   if (isRunning) return new Notice("ItsWiz: en kørsel er allerede i gang.");
   isRunning = true;
   new Notice("ItsWiz: sti-test kører…");
@@ -1919,10 +1919,10 @@ async function runPathTest(daysBack = 90, daysForward = 30) {
       step(true, `PDF: "${pdf.title}" via PDF-kæden → ${await save("PDF", pdf, url, ".pdf")}`);
     }
 
-    // Prøv Office-elementer til alle tre veje er set eller 8 er prøvet: hvilken vej der rammer,
+    // Prøv Office-elementer til alle tre veje er set eller 30 er prøvet: hvilken vej der rammer,
     // afgøres af itslearning pr. dokument, ikke af os.
     const seen = new Set();
-    for (const el of files.filter((e) => OFFICE_EXTENSIONS.some((x) => lower(e).endsWith(x))).slice(0, 8)) {
+    for (const el of files.filter((e) => OFFICE_EXTENSIONS.some((x) => lower(e).endsWith(x))).slice(0, 30)) {
       try {
         const url = await resolveOfficeDownloadUrl(el.url);
         const chain = officeChain(url);
