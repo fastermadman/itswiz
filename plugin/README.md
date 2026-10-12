@@ -16,4 +16,8 @@ hentes ind i vaulten uden Chrome. Logikken er kopieret fra `../background.js` (f
 5. **Høst nu** (knap i fanen eller kommando). **Sti-test** henter én fil pr. download-vej til
    `ItsWiz-test/` og rører ikke `§ FAG` eller `✎ NOTER`.
 
+6. Derefter kører høsten af sig selv ved Obsidian-start og med intervallet i indstillingerne (default 24 timer).
+   Statusbaren viser sidste kørsel og antal fejl; klik for fejllisten. Udløbet itslearning-login fornyes
+   automatisk via Microsofts "Forbliv logget ind"; lykkes det ikke, kommer én besked og ItsWiz-fanen åbner.
+
 Kun desktop. Ingen build, ingen dependencies. Test: `node --test plugin/test/*.test.js`.

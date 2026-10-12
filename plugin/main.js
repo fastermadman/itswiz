@@ -2,7 +2,7 @@
 // Kun desktop. Ingen build, ingen dependencies. Logikken nedenfor er kopieret fra background.js
 // (#239, plan i issue-kommentaren); background.js er frosset til den slettes i #244.
 
-const { Plugin, ItemView, PluginSettingTab, Setting, Notice, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
+const { Plugin, ItemView, Modal, PluginSettingTab, Setting, Notice, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
 
 // Vaultens to rodmapper hedder faktisk "🎓 FAG" og "📝 NOTER" (omdøbt manuelt i Finder for at
 // gøre dem nemmere at få øje på), men var tidligere hardcodet som literal "FAG"/"NOTER" i hver
@@ -1515,6 +1515,7 @@ const DEFAULT_SETTINGS = {
   daysForward: 30,
   enableFileDownloads: true,
   enableTaskCompletionSync: false,
+  alarmIntervalHours: 24,
 };
 
 async function getSettings() {
@@ -1616,8 +1617,18 @@ function param(url, name) {
   }
 }
 
-function hiddenWindow(url) {
+// Obsidian lægger en will-navigate-lytter på hvert nyt vindue, der sender enhver side-startet
+// navigation (JS-videresendelse, formular-post) til standardbrowseren i stedet. itslearning laver
+// den slags under almindelig indlæsning, så hver høst åbnede en CourseCards-fane i browseren
+// (set 2026-10-12). Vores vinduer er skjulte og skal navigere selv, så lytteren fjernes.
+function itslWindow() {
   const win = new (remote().BrowserWindow)({ show: false, webPreferences: { partition: PARTITION } });
+  win.webContents.removeAllListeners("will-navigate");
+  return win;
+}
+
+function hiddenWindow(url) {
+  const win = itslWindow();
   win.loadURL(url, { userAgent: UA }).catch(() => {});
   return win;
 }
@@ -1776,9 +1787,17 @@ async function downloadTaskAttachment(task, root = NOTER_ROOT) {
 
 // ── Kørslen (afløser collectAndDownload/runCollectAndDownload) ──
 
+// Logget ud sender START_URL videre med JS (log_out.aspx), som afbryder loadURL med ERR_ABORTED.
+// Det er ikke en fejl: collect() tjekker selv login bagefter.
+async function loadStart() {
+  await harvestWin.loadURL(START_URL, { userAgent: UA }).catch((err) => {
+    if (err.code !== "ERR_ABORTED") throw err;
+  });
+}
+
 async function openHarvestWindow() {
-  harvestWin = new (remote().BrowserWindow)({ show: false, webPreferences: { partition: PARTITION } });
-  await harvestWin.loadURL(START_URL, { userAgent: UA });
+  harvestWin = itslWindow();
+  await loadStart();
   net = new Net(remote().session.fromPartition(PARTITION));
 }
 
@@ -1790,12 +1809,80 @@ function closeHarvestWindow() {
 }
 
 const LOGIN_ERROR = "Ikke logget ind på itslearning. Log ind i ItsWiz-fanen og prøv igen.";
+const KEEPALIVE_MINUTES = 10;
+
+// REST-kald direkte fra partitionens session: samme cookies som fanen, intet vindue.
+async function restStatus(path, method = "GET") {
+  const res = await remote().session.fromPartition(PARTITION).fetch(BASE + path, { method, credentials: "include" });
+  return res.status;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const isLoggedIn = async () => (await restStatus("/restapi/personal/courses/cards/starred/v1")) === 200;
+
+// Automatisk gen-login: Microsoft husker "Forbliv logget ind" i ESTSAUTHPERSISTENT-cookien på
+// partitionen. En udløbet session sender START_URL via log_out.aspx?SessionExpired=3 videre til
+// itslearning.via.dk, som går direkte til Microsoft-SSO, og så længe cookien lever, kører hele
+// kæden igennem uden input (målt 2026-10-12: 401 → 200 på REST uden klik). Kræver Microsoft
+// input (kontovalg, MFA), giver vi op.
+//
+// Et webview uden for skærmen, ikke et skjult vindue: i et skjult BrowserWindow gik kæden i stå
+// på Microsofts auto-postede SAML-svar ("Working…"), også uden Obsidians will-navigate-lytter.
+async function relogin(timeoutMs = 45000) {
+  const wv = document.createElement("webview");
+  wv.setAttribute("partition", PARTITION);
+  wv.setAttribute("useragent", UA);
+  wv.setAttribute("src", START_URL);
+  wv.style.cssText = "position:fixed;left:-10000px;top:0;width:800px;height:600px";
+  document.body.appendChild(wv);
+  try {
+    for (const end = Date.now() + timeoutMs; Date.now() < end; ) {
+      await sleep(1500);
+      if (await isLoggedIn()) {
+        console.log("ItsWiz: automatisk gen-login lykkedes");
+        return true;
+      }
+    }
+    console.warn(`ItsWiz: automatisk gen-login gav op på ${wv.getURL()}`);
+    return false;
+  } finally {
+    wv.remove();
+  }
+}
+
+// Udløbet login fra automatikken giver én besked og åbner fanen, ikke en ny besked hvert interval.
+// Nulstilles af næste lykkedes kørsel eller keep-alive.
+function notifyLoginNeeded(auto) {
+  if (auto && plugin.loginNotified) return;
+  plugin.loginNotified = true;
+  new Notice(`ItsWiz: ${LOGIN_ERROR}`, 0);
+  plugin.openView();
+}
+
+// Hvert KEEPALIVE_MINUTES: hold itslearning-sessionen varm som en åben fane gør, og start en
+// planlagt kørsel når alarmIntervalHours er gået.
+async function tick() {
+  if (isRunning) return;
+  const { alarmIntervalHours } = await getSettings();
+  if (Date.now() - (plugin.lastStartedAt ?? 0) >= alarmIntervalHours * 3600e3) return runCollectAndDownload({ auto: true });
+  try {
+    let ok = (await restStatus("/restapi/keepalive/online/v1", "POST")) === 200 || (await isLoggedIn());
+    if (!ok && !plugin.loginNotified) ok = await relogin();
+    if (!ok) return notifyLoginNeeded(true);
+    // Logget ind igen siden beskeden (fx manuelt i fanen): høst med det samme.
+    if (plugin.loginNotified) runCollectAndDownload({ auto: true });
+  } catch (err) {
+    console.warn("ItsWiz: keep-alive fejlede:", err);
+  }
+}
 
 async function collect(startUnix, endUnix) {
   // Udløbet login svarer 401 med JSON ("Accesstoken is empty, invalid or has expired."), målt
   // 2026-10-12, ikke kun en login-side som #134 så i Chrome.
-  const status = await inPage(() => fetch("/restapi/personal/courses/cards/starred/v1").then((r) => r.status));
-  if (status === 401 || status === 403) throw new Error(LOGIN_ERROR);
+  if (!(await isLoggedIn())) {
+    if (!(await relogin())) throw new Error(LOGIN_ERROR);
+    await loadStart();
+  }
   try {
     return await inPage(collectRangeInPage, startUnix, endUnix);
   } catch (err) {
@@ -1837,20 +1924,23 @@ async function collectAndDownload(startUnix, endUnix) {
   }
 }
 
-async function runCollectAndDownload() {
+// auto: startet af opstart/interval, ikke et klik. Så ingen "høster…"-besked og højst én login-besked.
+async function runCollectAndDownload({ auto = false } = {}) {
   if (isRunning) {
-    new Notice("ItsWiz: en kørsel er allerede i gang.");
+    if (!auto) new Notice("ItsWiz: en kørsel er allerede i gang.");
     return;
   }
-  // Uden importen ville første kørsel backfille 400 dage og skrive alle lektionsplaner om (#239).
-  if (plugin.data.syncedFrontmatterVersion == null && (await existsInVault(FAG_ROOT))) {
-    new Notice("ItsWiz: vaulten har allerede VIAstudyWiz-noter. Kør \"Importér VIAstudyWiz-data fra udklipsholderen\" før første høst.", 0);
-    return;
-  }
+  // Låsen sættes før første await, ellers kan to triggere begge nå forbi tjekket.
   isRunning = true;
+  plugin.lastStartedAt = Date.now();
   plugin.lastRun = null;
-  new Notice("ItsWiz: høster…");
+  updateStatusBar();
   try {
+    // Uden importen ville første kørsel backfille 400 dage og skrive alle lektionsplaner om (#239).
+    if (plugin.data.syncedFrontmatterVersion == null && (await existsInVault(FAG_ROOT))) {
+      throw new Error("Vaulten har allerede VIAstudyWiz-noter. Kør \"Importér VIAstudyWiz-data fra udklipsholderen\" før første høst.");
+    }
+    if (!auto) new Notice("ItsWiz: høster…");
     const syncedVersion = plugin.data[FRONTMATTER_VERSION_KEY];
     const isBackfill = syncedVersion !== FRONTMATTER_VERSION;
 
@@ -1862,20 +1952,46 @@ async function runCollectAndDownload() {
       console.log(`VIAstudyWiz: frontmatter-version ${syncedVersion ?? "(ingen)"} -> ${FRONTMATTER_VERSION}, backfiller ${BACKFILL_DAYS_BACK} dage tilbage`);
     }
     await collectAndDownload(start, end);
+    plugin.loginNotified = false;
     if (isBackfill) {
       plugin.data[FRONTMATTER_VERSION_KEY] = FRONTMATTER_VERSION;
       await plugin.saveData(plugin.data);
     }
   } catch (err) {
     console.error("VIAstudyWiz fejl:", err);
-    new Notice(`ItsWiz: kørsel fejlede\n${err.message ?? err}`, 0);
-    if (/Ikke logget ind/.test(err.message)) plugin.openView();
+    if (err.message === LOGIN_ERROR) notifyLoginNeeded(auto);
+    else new Notice(`ItsWiz: kørsel fejlede\n${err.message ?? err}`, 0);
     plugin.lastRun = { failure: err.message };
   } finally {
     // Seneste kørsel, til C (#240, statusbar) og til at aflæse en kørsel udefra (obsidian eval).
     plugin.lastRun = { ...plugin.lastRun, finishedAt: new Date().toISOString(), files: runFilesDownloaded, errors: runErrorMessages, changed: runChangedNotes };
     isRunning = false;
+    updateStatusBar();
   }
+}
+
+// ── Statusbar: sidste kørsel og antal fejl, klik viser fejllisten ──
+
+function updateStatusBar() {
+  const el = plugin.statusEl;
+  if (!el) return;
+  const r = plugin.lastRun;
+  if (isRunning) return el.setText("ItsWiz: høster…");
+  if (!r) return el.setText("ItsWiz: ikke kørt");
+  const time = new Date(r.finishedAt).toLocaleTimeString("da-DK", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit" });
+  const errors = (r.errors?.length ?? 0) + (r.failure ? 1 : 0);
+  el.setText(`ItsWiz ${time}${r.failure ? " · fejlede" : errors ? ` · ${errors} fejl` : ""}`);
+}
+
+function showRunErrors() {
+  const r = plugin.lastRun;
+  const lines = [...(r?.failure ? [`Kørslen fejlede: ${r.failure}`] : []), ...(r?.errors ?? [])];
+  const modal = new Modal(plugin.app);
+  modal.titleEl.setText(r ? `ItsWiz: kørsel ${new Date(r.finishedAt).toLocaleString("da-DK", { timeZone: TIME_ZONE })}` : "ItsWiz: ikke kørt endnu");
+  if (r) modal.contentEl.createEl("p", { text: `${r.files ?? 0} fil(er) hentet, ${r.changed?.length ?? 0} note(r) ændret.` });
+  if (lines.length) modal.contentEl.createEl("pre", { text: lines.join("\n"), attr: { style: "white-space:pre-wrap" } });
+  else if (r) modal.contentEl.createEl("p", { text: "Ingen fejl." });
+  modal.open();
 }
 
 // ── Sti-test: én fil pr. download-vej til ItsWiz-test/, rører ikke § FAG eller ✎ NOTER ──
@@ -2044,6 +2160,7 @@ class ItsWizSettingTab extends PluginSettingTab {
     for (const [key, name, desc] of [
       ["daysBack", "Dage tilbage", "Hvor langt tilbage hver kørsel kigger."],
       ["daysForward", "Dage frem", "Hvor langt frem hver kørsel kigger."],
+      ["alarmIntervalHours", "Interval (timer)", "Automatisk kørsel ved Obsidian-start og derefter med dette interval."],
     ]) {
       new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
         t.setValue(String(s[key] ?? DEFAULT_SETTINGS[key])).onChange((v) => {
@@ -2076,6 +2193,12 @@ class ItsWizPlugin extends Plugin {
     this.addCommand({ id: "path-test", name: "Sti-test (én fil pr. download-vej til ItsWiz-test/)", callback: () => runPathTest() });
     this.addCommand({ id: "import", name: "Importér VIAstudyWiz-data fra udklipsholderen", callback: () => importExtensionData() });
     this.addSettingTab(new ItsWizSettingTab(this.app, this));
+    this.statusEl = this.addStatusBarItem();
+    this.statusEl.addClass("mod-clickable");
+    this.statusEl.onClickEvent(() => showRunErrors());
+    updateStatusBar();
+    this.app.workspace.onLayoutReady(() => runCollectAndDownload({ auto: true }));
+    this.registerInterval(window.setInterval(() => tick(), KEEPALIVE_MINUTES * 60e3));
   }
 
   onunload() {
