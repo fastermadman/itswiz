@@ -91,6 +91,10 @@ Høstlogikken i `plugin/main.js` er kopieret fra `background.js`, som er frosset
 i pluginet. `node --test plugin/test/*.test.js` kræver at kopiens rene funktioner giver samme output som
 `background.js` (`plugin/test/parity.test.js`), og kører også i `pre-push`.
 
+Hold Course-synken kører i ItsWiz (#242) via Hold Course' `api.update()` (hold-course#84); launchd-watcheren er
+slået fra (`launchctl disable` + `bootout`). `plugin/test/hcsync.test.js` afspiller alle `sync_hold_course.py
+--selfcheck`-kald mod JS-porten (optaget af `plugin/test/record_hcsync.py`); ret synken i pluginet, ikke i Python.
+
 ## Secret-redaction
 
 I et nyt checkout/worktree skal `claude plugin install secret-redactor@viastudywiz-mods --scope project` køres én gang (appens binær, 2.1.286+), og derefter `/reload-plugins` — ellers er mod'en slået til i settings men ikke indlæst.
