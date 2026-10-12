@@ -87,6 +87,10 @@ Glemmes begge dele, ser man ændringer der "ikke virker" selvom koden er korrekt
 obsidian vault=ViaVault plugin:reload id=itswiz
 ```
 
+Høstlogikken i `plugin/main.js` er kopieret fra `background.js`, som er frosset indtil #244: ret kun
+i pluginet. `node --test plugin/test/*.test.js` kræver at kopiens rene funktioner giver samme output som
+`background.js` (`plugin/test/parity.test.js`), og kører også i `pre-push`.
+
 ## Secret-redaction
 
 I et nyt checkout/worktree skal `claude plugin install secret-redactor@viastudywiz-mods --scope project` køres én gang (appens binær, 2.1.286+), og derefter `/reload-plugins` — ellers er mod'en slået til i settings men ikke indlæst.

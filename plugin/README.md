@@ -1,17 +1,19 @@
-# ItsWiz (spike)
+# ItsWiz
 
-Go/no-go-test: kan VIAstudyWiz' itslearning-høst køre inde i Obsidian i stedet for Chrome?
-
-Testen beviser fire ting, som `viastudywiz-extension/background.js` i dag har brug for Chrome til:
-login på itslearning i en indlejret browser, REST-API'et med den session, PDF-kæden og Office-kæden
-(itslearnings filecache, native download eller WOPI). Den skriver kun til `ItsWiz-test/` i vaulten.
+VIAstudyWiz' itslearning-høst som Obsidian-plugin: lektionsplaner, materialer og afleveringsopgaver
+hentes ind i vaulten uden Chrome. Logikken er kopieret fra `../background.js` (frosset indtil #244).
 
 ## Brug
 
-1. Symlink ind i vaulten (gjort for ViaVault):
-   `mkdir -p ~/ViaVault/.obsidian/plugins/itswiz && ln -sf "$PWD"/plugin/{main.js,manifest.json} ~/ViaVault/.obsidian/plugins/itswiz/` (fra repo-roden)
+1. Symlink ind i vaulten (gjort for ViaVault), fra repo-roden:
+   `mkdir -p ~/ViaVault/.obsidian/plugins/itswiz && ln -sf "$PWD"/plugin/{main.js,manifest.json} ~/ViaVault/.obsidian/plugins/itswiz/`
 2. Obsidian → Indstillinger → Community plugins → slå **ItsWiz** til.
-3. Klik eksamenshatten i venstre bjælke, log ind på itslearning i fanen.
-4. Klik **Kør test**. Resultatet står i `ItsWiz-test/rapport.md`.
+3. Klik eksamenshatten i venstre bjælke og log ind på itslearning i fanen.
+4. Første gang i en vault, hvor extensionen har kørt: kør i extensionens service worker-konsol
+   `chrome.storage.local.get(null).then((d) => copy(JSON.stringify(d)))` og derefter kommandoen
+   **Importér VIAstudyWiz-data fra udklipsholderen**. Ellers nægter ItsWiz at høste, fordi første
+   kørsel ville skrive alle lektionsplaner om.
+5. **Høst nu** (knap i fanen eller kommando). **Sti-test** henter én fil pr. download-vej til
+   `ItsWiz-test/` og rører ikke `§ FAG` eller `✎ NOTER`.
 
-Kun desktop. Ingen build, ingen dependencies.
+Kun desktop. Ingen build, ingen dependencies. Test: `node --test plugin/test/*.test.js`.
