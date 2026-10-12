@@ -1,7 +1,7 @@
 # ItsWiz
 
 VIAstudyWiz' itslearning-høst som Obsidian-plugin: lektionsplaner, materialer og afleveringsopgaver
-hentes ind i vaulten uden Chrome. Logikken er kopieret fra `../background.js` (frosset indtil #244).
+hentes ind i vaulten uden Chrome. Logikken er kopieret fra Chrome-extensionens `background.js`, som blev slettet i #244.
 
 ## Brug
 
@@ -9,10 +9,9 @@ hentes ind i vaulten uden Chrome. Logikken er kopieret fra `../background.js` (f
    `mkdir -p ~/ViaVault/.obsidian/plugins/itswiz && ln -sf "$PWD"/plugin/{main.js,manifest.json} ~/ViaVault/.obsidian/plugins/itswiz/`
 2. Obsidian → Indstillinger → Community plugins → slå **ItsWiz** til.
 3. Klik eksamenshatten i venstre bjælke og log ind på itslearning i fanen.
-4. Første gang i en vault, hvor extensionen har kørt: kør i extensionens service worker-konsol
-   `chrome.storage.local.get(null).then((d) => copy(JSON.stringify(d)))` og derefter kommandoen
-   **Importér VIAstudyWiz-data fra udklipsholderen**. Ellers nægter ItsWiz at høste, fordi første
-   kørsel ville skrive alle lektionsplaner om.
+4. ViaVault har fået extensionens data importeret (kommandoen **Importér VIAstudyWiz-data fra
+   udklipsholderen**, #239). Extensionen er væk (#244), så i en ny vault med gamle VIAstudyWiz-noter
+   nægter ItsWiz at høste, fordi første kørsel ville skrive alle lektionsplaner om.
 5. **Høst nu** (knap i fanen eller kommando). **Sti-test** henter én fil pr. download-vej til
    `ItsWiz-test/` og rører ikke `§ FAG` eller `✎ NOTER`.
 

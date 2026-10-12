@@ -1,6 +1,6 @@
 // ItsWiz: VIAstudyWiz' itslearning-høst som Obsidian-plugin (milestone "ItsWiz: fra Chrome til Obsidian").
-// Kun desktop. Ingen build, ingen dependencies. Logikken nedenfor er kopieret fra background.js
-// (#239, plan i issue-kommentaren); background.js er frosset til den slettes i #244.
+// Kun desktop. Ingen build, ingen dependencies. Logikken nedenfor er kopieret fra Chrome-extensionens
+// background.js (#239, plan i issue-kommentaren); extensionen er slettet i #244 og findes kun i git-historikken.
 
 const { Plugin, ItemView, Modal, PluginSettingTab, Setting, Notice, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
 
@@ -701,7 +701,7 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
 // issue #70: CustomActivity-siden er en almindelig WebForms-postback uden UpdatePanel, så et rent
 // form-POST med de skjulte felter er nok — samme GET som fetchActivityBody allerede laver.
 // Selvstændig funktion (ingen closures over ydre scope) fordi den injiceres i itslearning-fanen
-// via chrome.scripting.executeScript, samme grund som fetchActivityBody kun kan køre i selve
+// via extensionens scripting.executeScript, samme grund som fetchActivityBody kun kan køre i selve
 // fanen: session-cookien findes kun der.
 // Toggleknappen er en rigtig checkbox (name="…$TaskCompletedToggle$input") med en onchange der
 // kalder __doPostBack('…$TaskCompletedToggle', '') — issuets oprindelige live-måling (2026-08-12)
@@ -1042,7 +1042,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       `hentet: "${formatNow()}"`,
       "type: lektionsplan",
       // Samme stabile id som weekFolder-flytningen (issue #96) sporer på — synligt her frem for
-      // kun i chrome.storage.local, så identiteten overlever en nulstillet extension-storage og
+      // kun i extensionens storage.local, så identiteten overlever en nulstillet extension-storage og
       // kan slås op direkte i vaulten (fx grep efter planKey for at rekonstruere cachen manuelt).
       `plan_id: "${planKey}"`,
       ...(literature ? yamlBlockLines("litteratur", `▥ ${literature}`) : ["litteratur: false"]),
@@ -1251,7 +1251,7 @@ async function downloadFileElements(plans, tabId) {
 
   // Logget her (før dedup-filteret) betyder man kan teste filter-ændringer ved bare at
   // genklikke extension-ikonet og læse service worker-konsollen, uden at skulle rydde
-  // downloadedElementIds i chrome.storage.local for at se hvad der matcher.
+  // downloadedElementIds i extensionens storage.local for at se hvad der matcher.
   console.table(
     matchingElements.map(({ element }) => ({
       titel: element.title,
@@ -1399,10 +1399,10 @@ let isRunning = false;
 const FRONTMATTER_VERSION_KEY = "syncedFrontmatterVersion";
 const BACKFILL_DAYS_BACK = 400;
 
-// ─── ItsWiz: erstatninger for chrome.* ──────────────────────────────────────────────────────────
-// Alt over denne linje er kopieret fra background.js (frosset indtil #244), kun med de rettelser
+// ─── ItsWiz: erstatninger for Chrome-API'erne ──────────────────────────────────────────────
+// Alt over denne linje er kopieret fra background.js (slettet i #244), kun med de rettelser
 // der er markeret "ItsWiz:". Alt herunder erstatter det Chrome gav: faner, webRequest, downloads,
-// File System Access og chrome.storage.local.
+// File System Access og extensionens storage.local.
 
 // ponytail: modul-globalt plugin-objekt, samme form som background.js' globale tilstand. Én
 // plugin-instans pr. Obsidian-vindue, så det holder.
@@ -1501,7 +1501,7 @@ async function moveDirInVault(oldPath, newPath) {
   return { moved: true };
 }
 
-// ── Storage (afløser chrome.storage.local) ──
+// ── Storage (afløser extensionens storage.local) ──
 
 async function getDownloadedIds() {
   return new Set(plugin.data.downloadedElementIds);
@@ -1644,7 +1644,7 @@ function notifyRunSummary() {
   new Notice(`ItsWiz: ${runFilesDownloaded} fil(er) hentet.${changed}`, 15000);
 }
 
-// ── Skjulte vinduer og netværksopsnapning (afløser chrome.tabs/webRequest/downloads) ──
+// ── Skjulte vinduer og netværksopsnapning (afløser Chromes tabs/webRequest/downloads) ──
 
 // Én lytter pr. webRequest-event pr. session (Electron-reglen), fordelt til ventende kald.
 // Installeres kun under en kørsel: hvert onBeforeRequest koster en IPC-rundtur gennem remote.
@@ -1730,7 +1730,7 @@ function hiddenWindow(url) {
   return win;
 }
 
-// Afløser chrome.scripting.executeScript: kører en selvstændig funktion i itslearning-siden.
+// Afløser Chromes scripting.executeScript: kører en selvstændig funktion i itslearning-siden.
 async function inPage(func, ...args) {
   return harvestWin.webContents.executeJavaScript(`(${func})(${args.map((a) => JSON.stringify(a)).join(",")})`);
 }
@@ -2331,8 +2331,7 @@ async function runPathTest(daysBack = 135, daysForward = 30) {
 }
 
 // ── Engangs-import fra extensionen ──
-// Kør i extensionens service worker-konsol (chrome://extensions → VIAstudyWiz → service worker):
-//   chrome.storage.local.get(null).then((d) => copy(JSON.stringify(d)))
+// Brugt én gang ved skiftet (#239): et JSON-dump af extensionens storage.local i udklipsholderen,
 // og så kommandoen "Importér VIAstudyWiz-data fra udklipsholderen" her. calendarEventMap hører
 // til F (#243) og tages ikke med.
 async function importExtensionData() {
