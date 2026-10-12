@@ -360,8 +360,8 @@ def submit(doc_path: Path) -> str:
     resp = api_request(
         "POST",
         "/file-urls/batch",
-        # #250: MinerU afviser data_id over 128 tegn (lange bognavne i Litteratur/SUP-LIT).
-        {"files": [{"name": doc_path.name, "data_id": sanitize(doc_path.stem)[:128]}], "model_version": "vlm"},
+        # #250: MinerU afviser data_id over 128 BYTES (lange bognavne i Litteratur/SUP-LIT; "·" er 2 bytes).
+        {"files": [{"name": doc_path.name, "data_id": sanitize(doc_path.stem).encode()[:128].decode(errors="ignore")}], "model_version": "vlm"},
     )
     if resp.get("code") != 0:
         raise RuntimeError(f"file-urls/batch fejlede: {resp}")
