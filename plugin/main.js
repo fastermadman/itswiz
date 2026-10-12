@@ -1525,6 +1525,7 @@ const DEFAULT_SETTINGS = {
   enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
   enableConversion: false,
+  enableHoldCourseSync: false,
 };
 
 async function getSettings() {
@@ -2372,7 +2373,8 @@ function formatPageMarker(label, footnotes, trailingRule = true) {
     : `\n\n*— side ${label} —*${trailer}`;
 }
 
-function insertPageMarkers(fullMd, blocks, layout) {
+// pageOffset: bid nr. i × 100 sider (#211), så sidemarkøren uden trykt sidetal viser PDF-siden.
+function insertPageMarkers(fullMd, blocks, layout, pageOffset = 0) {
   const sizes = pageSizes(layout);
   const pages = groupBlocksByPage(blocks);
   let result = fullMd;
@@ -2394,7 +2396,7 @@ function insertPageMarkers(fullMd, blocks, layout) {
         result = result.slice(0, lineStart) + marker + result.slice(lineStart);
         idx += marker.length;
       }
-      pendingLabel = printedPageNumber(group) ?? String(pageIdx + 1);
+      pendingLabel = printedPageNumber(group) ?? String(pageIdx + 1 + pageOffset);
       pendingFootnotes = pageFootnotes(group);
       searchPos = idx + anchor.length;
     }
@@ -2404,7 +2406,7 @@ function insertPageMarkers(fullMd, blocks, layout) {
 }
 
 // Zip-indhold → { body, sektion }: det watcherens write_conversion() skriver under frontmatteren.
-function conversionBody(entries) {
+function conversionBody(entries, pageOffset = 0) {
   if (!entries.has("full.md")) throw new MineruError("MinerU-zippen mangler full.md");
   let md = entries.get("full.md").toString("utf8");
   let sektion = null;
@@ -2415,11 +2417,18 @@ function conversionBody(entries) {
     if (blocks) {
       let layout = null;
       try { layout = entries.has("layout.json") ? JSON.parse(entries.get("layout.json").toString("utf8")) : null; } catch {}
-      md = insertPageMarkers(md, blocks, layout);
+      md = insertPageMarkers(md, blocks, layout, pageOffset);
       sektion = runningHeader(blocks);
     }
   }
   return { body: toWikilinks(md), sektion };
+}
+
+// Bidder fra en opdelt PDF (#211) sættes sammen i sideorden. ponytail: sektion: tages fra første
+// bid; et løbende sidehoved der kun dominerer senere bidder bliver ikke fundet.
+function joinedBody(parts) {
+  const bodies = parts.map((entries, i) => conversionBody(entries, i * MINERU_CHUNK_PAGES));
+  return { body: bodies.map((b) => b.body).join("\n\n"), sektion: bodies[0].sektion };
 }
 
 // MinerU-zips bruger kun stored/deflate (målt på cachen 2026-10-12), så Nodes zlib rækker.
@@ -2473,35 +2482,67 @@ async function testMineruToken(token) {
   return res.status === 200;
 }
 
-async function mineruConvert(token, fileName, dataId, bytes) {
-  const resp = await mineruRequest(token, "POST", "/file-urls/batch", { files: [{ name: fileName, data_id: dataId }], model_version: "vlm" });
-  if (resp.code !== 0) throw new MineruError(`file-urls/batch fejlede: ${JSON.stringify(resp)}`);
-  const { batch_id: batchId, file_urls: [uploadUrl] } = resp.data;
+// MinerU afviser PDF'er over 200 sider (#211). Sidetallet tælles på de bytes der uploades (efter
+// PDFable, som kan fordoble det ved at splitte opslag), og en lang PDF sendes som flere filer med
+// hver sin page_ranges. ponytail: regex på "/Type /Page" tæller ikke sider i komprimerede object
+// streams; så findes 0, filen sendes hel, og MinerU's egen afvisning markerer den som før.
+const MINERU_MAX_PAGES = 200;
+const MINERU_CHUNK_PAGES = 100;
 
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const put = await withTimeout(requestUrl({ url: uploadUrl, method: "PUT", body: bytes, throw: false }), UPLOAD_TIMEOUT_MS, "upload");
-      if (put.status >= 400) throw new Error(`upload HTTP ${put.status}`);
-      break;
-    } catch (err) {
-      if (attempt === UPLOAD_RETRIES) throw err;
-      console.warn(`ItsWiz: upload-forsøg ${attempt}/${UPLOAD_RETRIES} for ${fileName} fejlede (${err.message}) — prøver igen om ${UPLOAD_RETRY_BACKOFF_MS / 1000}s`);
-      await sleep(UPLOAD_RETRY_BACKOFF_MS);
+function pdfPageCount(bytes) {
+  return (Buffer.from(bytes).toString("latin1").match(/\/Type\s*\/Page(?![s\w])/g) ?? []).length;
+}
+
+function pageRanges(pages) {
+  if (pages <= MINERU_MAX_PAGES) return null;
+  const ranges = [];
+  for (let first = 1; first <= pages; first += MINERU_CHUNK_PAGES) ranges.push(`${first}-${Math.min(first + MINERU_CHUNK_PAGES - 1, pages)}`);
+  return ranges;
+}
+
+// Returnerer én zip pr. bid, i sideorden.
+async function mineruConvert(token, fileName, dataId, bytes) {
+  const ranges = fileName.toLowerCase().endsWith(".pdf") ? pageRanges(pdfPageCount(bytes)) : null;
+  const files = ranges
+    ? ranges.map((r, i) => ({ name: fileName, data_id: `${dataId.slice(0, 120)}-${i + 1}`, page_ranges: r }))
+    : [{ name: fileName, data_id: dataId }];
+  if (ranges) console.log(`ItsWiz: ${fileName} sendes i ${ranges.length} bidder (${ranges.join(", ")})`);
+  const resp = await mineruRequest(token, "POST", "/file-urls/batch", { files, model_version: "vlm" });
+  if (resp.code !== 0) throw new MineruError(`file-urls/batch fejlede: ${JSON.stringify(resp)}`);
+  const { batch_id: batchId, file_urls: uploadUrls } = resp.data;
+
+  for (const uploadUrl of uploadUrls) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const put = await withTimeout(requestUrl({ url: uploadUrl, method: "PUT", body: bytes, throw: false }), UPLOAD_TIMEOUT_MS, "upload");
+        if (put.status >= 400) throw new Error(`upload HTTP ${put.status}`);
+        break;
+      } catch (err) {
+        if (attempt === UPLOAD_RETRIES) throw err;
+        console.warn(`ItsWiz: upload-forsøg ${attempt}/${UPLOAD_RETRIES} for ${fileName} fejlede (${err.message}) — prøver igen om ${UPLOAD_RETRY_BACKOFF_MS / 1000}s`);
+        await sleep(UPLOAD_RETRY_BACKOFF_MS);
+      }
     }
   }
 
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  const deadline = Date.now() + POLL_TIMEOUT_MS * files.length;
   while (Date.now() < deadline) {
-    const result = (await mineruRequest(token, "GET", `/extract-results/batch/${batchId}`)).data.extract_result[0];
-    if (result.state === "done") {
-      const zip = await withTimeout(requestUrl({ url: result.full_zip_url, throw: false }), 120e3, "zip-download");
-      if (zip.status >= 400) throw new Error(`zip-download HTTP ${zip.status}`);
-      return zip.arrayBuffer;
+    const results = (await mineruRequest(token, "GET", `/extract-results/batch/${batchId}`)).data.extract_result;
+    const failed = results.find((r) => r.state === "failed");
+    if (failed) throw new MineruError(`MinerU-fejl: ${failed.err_msg}`);
+    if (results.length === files.length && results.every((r) => r.state === "done")) {
+      const byId = new Map(results.map((r) => [r.data_id, r]));
+      const zips = [];
+      for (const f of files) {
+        const zip = await withTimeout(requestUrl({ url: (byId.get(f.data_id) ?? results[zips.length]).full_zip_url, throw: false }), 120e3, "zip-download");
+        if (zip.status >= 400) throw new Error(`zip-download HTTP ${zip.status}`);
+        zips.push(zip.arrayBuffer);
+      }
+      return zips;
     }
-    if (result.state === "failed") throw new MineruError(`MinerU-fejl: ${result.err_msg}`);
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`timeout efter ${POLL_TIMEOUT_MS / 1000}s`);
+  throw new Error(`timeout efter ${(POLL_TIMEOUT_MS * files.length) / 1000}s`);
 }
 
 // Samme mappe som watcheren, så dens zips genbruges (#99). Fejer forældede filer ved skrivning.
@@ -2509,19 +2550,29 @@ function cacheDir() {
   return require("path").join(require("os").homedir(), ".viastudywiz-cache");
 }
 
-function cachedZip(digest) {
+// Én zip: <digest>.zip (watcherens format). Flere bidder: <digest>.p1.zip, .p2.zip …
+function cachedZips(digest) {
   const fs = require("fs");
-  const file = require("path").join(cacheDir(), `${digest}.zip`);
+  const path = require("path");
+  const names = [`${digest}.zip`];
+  if (!fs.existsSync(path.join(cacheDir(), names[0]))) {
+    names.length = 0;
+    for (let i = 1; fs.existsSync(path.join(cacheDir(), `${digest}.p${i}.zip`)); i++) names.push(`${digest}.p${i}.zip`);
+  }
   try {
-    if (Date.now() - fs.statSync(file).mtimeMs > CACHE_TTL_MS) return fs.unlinkSync(file), null;
-    const b = fs.readFileSync(file);
-    return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+    const files = names.map((n) => path.join(cacheDir(), n));
+    if (!files.length) return null;
+    if (files.some((f) => Date.now() - fs.statSync(f).mtimeMs > CACHE_TTL_MS)) return files.forEach((f) => fs.unlinkSync(f)), null;
+    return files.map((f) => {
+      const b = fs.readFileSync(f);
+      return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+    });
   } catch {
     return null;
   }
 }
 
-function writeCache(digest, arrayBuffer) {
+function writeCache(digest, zips) {
   const fs = require("fs");
   const path = require("path");
   const dir = cacheDir();
@@ -2530,7 +2581,7 @@ function writeCache(digest, arrayBuffer) {
     const f = path.join(dir, name);
     if (name.endsWith(".zip") && Date.now() - fs.statSync(f).mtimeMs > CACHE_TTL_MS) fs.unlinkSync(f);
   }
-  fs.writeFileSync(path.join(dir, `${digest}.zip`), Buffer.from(arrayBuffer));
+  zips.forEach((zip, i) => fs.writeFileSync(path.join(dir, zips.length === 1 ? `${digest}.zip` : `${digest}.p${i + 1}.zip`), Buffer.from(zip)));
 }
 
 const sha256 = (arrayBuffer) => require("crypto").createHash("sha256").update(Buffer.from(arrayBuffer)).digest("hex");
@@ -2600,9 +2651,10 @@ async function existingConversion(file, bytes, digest) {
   return null;
 }
 
-async function writeConversion(file, entries) {
+// parts: én zip-indholds-Map pr. bid (#211), i sideorden.
+async function writeConversion(file, parts) {
   const t = mdTargets(file.path);
-  const { body, sektion } = conversionBody(entries);
+  const { body, sektion } = joinedBody(parts);
   const previous = await readFromVault(t.md);
   // #42: skriv ved siden af, hvis den eksisterende note har highlights.
   const protect = previous != null && HIGHLIGHT_RE.test(previous);
@@ -2617,7 +2669,7 @@ async function writeConversion(file, entries) {
   const extra = (sektion ? `sektion: "${sektion}"\n` : "") + carried;
   await writeVaultFile(destMd, materialeFrontmatter(file.path, planNotes, formatNow(), extra) + body);
 
-  const images = [...entries].filter(([n]) => n.startsWith("images/"));
+  const images = parts.flatMap((entries) => [...entries].filter(([n]) => n.startsWith("images/")));
   if (images.length) {
     const { adapter } = plugin.app.vault;
     if (await adapter.exists(normalizePath(destImages))) await adapter.rmdir(normalizePath(destImages), true);
@@ -2645,16 +2697,18 @@ async function processDocument(file, { force = false } = {}) {
   }
 
   try {
-    let zip = cachedZip(digest);
-    if (zip) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
+    let zips = cachedZips(digest);
+    if (zips) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
     else {
       console.log(`ItsWiz: uploader til MinerU: ${file.name}`);
       // #250: MinerU afviser data_id over 128 bytes.
       const dataId = Buffer.from(stemName(file.basename)).subarray(0, 128).toString("utf8").replace(/�+$/, "");
-      zip = await mineruConvert(mineruToken(), file.name, dataId, (await pdfable(file, bytes)) ?? bytes);
-      writeCache(digest, zip);
+      zips = await mineruConvert(mineruToken(), file.name, dataId, (await pdfable(file, bytes)) ?? bytes);
+      writeCache(digest, zips);
     }
-    await writeConversion(file, unzip(zip));
+    await writeConversion(file, zips.map(unzip));
+    // En gammel fejlmarkør (fx fra før opdelingen, #211) må ikke stå tilbage, når MD'en findes.
+    if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
     console.log(`ItsWiz: færdig: ${file.name}`);
   } catch (err) {
     if (!(err instanceof MineruError)) {
@@ -2708,6 +2762,886 @@ async function onVaultCreate(file) {
 function scanExisting() {
   const files = plugin.app.vault.getFiles().filter(isConvertible).sort((a, b) => (a.path < b.path ? -1 : 1));
   for (const f of files) queueConversion(f);
+}
+
+// ── Hold Course-synk (E, #242): port af watchfolder/sync_hold_course.py ──
+//
+// 1:1 port, så ItsWiz giver samme data.json som Python-synken (plugin/test/hcsync.test.js afspiller
+// alle Python-selvtjekkets kald). Beslutningerne bag hver regel står i Python-filens kommentarer og
+// i ValdiVault 14-hold-course-synk.md; de gentages ikke her. Ejerskabsreglen håndhæves også af Hold
+// Course selv (hold-course#84: api.update() ruller felter tilbage, synken ikke ejer).
+//
+// I/O er skilt ud: patchPendingMateriale/readPlans/readTasks tager et `vault` ({ list, read, write }),
+// mens syncData/syncTaskCompletion/pruneDeadLinks er synkrone, fordi Hold Course' update() kræver
+// en synkron funktion — fil-opslag gives med som opslagsfunktioner bygget på forhånd.
+
+const HC_KNOWN_DATA_VERSION = 2;
+const HC_COLOR_PALETTE_SIZE = 6;
+const HC_COURSE_URL = "https://via.itslearning.com/Course/Course.aspx?CourseId=";
+const HC_FAG_STYLE = {
+  Musik: { symbol: "♪", colorIndex: 5, itslearningCode: "LSmu-2527" },
+  Religion: { symbol: "♱", colorIndex: 0, itslearningCode: "LSkr-2628" },
+  LivsOplysning: { symbol: "⚖︎", colorIndex: 2, itslearningCode: "LSS24.1livs" },
+};
+const LITTERATUR_PREFIX = "▥";
+const LITTERATUR_FIL_PREFIX = "📎";
+const MATERIALE_FIL_PREFIX = "📎";
+const FORBEREDELSE_PREFIX = "⚒";
+const FORLOEB_HEADER = "> Genereret fil — rediger ikke; ret i Hold Course.";
+const PREP_DAY_RE = /sat\s+af\s+til[^.\n]{0,60}forbere/i;
+
+const nfc = (s) => s.normalize("NFC");
+const dirOf = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+const baseOf = (p) => p.slice(p.lastIndexOf("/") + 1);
+const pathStem = (p) => { const b = baseOf(p); const i = b.lastIndexOf("."); return i > 0 ? b.slice(0, i) : b; };
+
+// Python sammenligner strenge på kodepunkter, JS på UTF-16-enheder; forskellen viser sig kun ved
+// tegn uden for BMP (emoji), men sorteringen skal give samme rækkefølge som Python.
+function cmpStr(a, b) {
+  if (a === b) return 0;
+  const x = [...a], y = [...b];
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    if (x[i] !== y[i]) return x[i].codePointAt(0) - y[i].codePointAt(0);
+  }
+  return x.length - y.length;
+}
+const cmpTuple = (a, b) => { for (let i = 0; i < a.length; i++) { const c = typeof a[i] === "number" ? a[i] - b[i] : cmpStr(a[i], b[i]); if (c) return c; } return 0; };
+// sorted() på pathlib.Path: del for del, ikke hele strengen.
+function cmpParts(a, b) {
+  const x = a.split("/"), y = b.split("/");
+  for (let i = 0; i < Math.min(x.length, y.length); i++) { const c = cmpStr(x[i], y[i]); if (c) return c; }
+  return x.length - y.length;
+}
+
+function parseFrontmatter(text) {
+  if (!text.startsWith("---\n")) return {};
+  const end = text.indexOf("\n---\n", 3);
+  if (end === -1) return {};
+  const fields = {};
+  let key = null, block = [];
+  for (const line of text.slice(4, end).split("\n")) {
+    if (key !== null && (line.startsWith("  ") || !line.trim())) {
+      block.push(line.slice(2));
+      continue;
+    }
+    if (key !== null) {
+      fields[key] = block.join("\n").trim();
+      key = null;
+      block = [];
+    }
+    const m = /^([A-Za-z_][A-Za-z0-9_]*): ?(.*)$/.exec(line);
+    if (!m) continue;
+    if (m[2] === "|") key = m[1];
+    else fields[m[1]] = m[2].trim().replace(/^"+|"+$/g, "");
+  }
+  if (key !== null) fields[key] = block.join("\n").trim();
+  return fields;
+}
+
+function prefixedLines(value, prefix) {
+  if (!value || value === "false") return [];
+  const out = [];
+  for (let line of value.split("\n")) {
+    line = line.trim();
+    if (line.startsWith(prefix)) line = line.slice(prefix.length).trim();
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+// [NOTE]-stubben hvis den findes, ellers selve planen. `exists` er et synkront opslag (se øverst).
+function hcNoteStubPath(planPath, exists) {
+  const m = /^(.*)\/MD\/([^/]+)\/\[PLAN\] (.+)\.md$/.exec(planPath);
+  if (!m) return planPath;
+  const stub = `${m[1]}/NOTER/${m[2]}/[NOTE] ${m[3]}.md`;
+  return exists(stub) ? stub : planPath;
+}
+
+function wikilinkTarget(line) {
+  const m = /^\[\[([^|\]]+)(?:\|.*)?\]\]$/.exec(line);
+  return m ? m[1] : null;
+}
+
+const wikilinkFor = (rel) => `[[${rel}|${baseOf(rel)}]]`;
+
+function appendFileListField(text, key, prefix, newLinks) {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] === `${key}: false`) {
+      return [...lines.slice(0, i), `${key}: |`, ...newLinks.map((l) => `  ${prefix} ${l}`), ...lines.slice(i + 1)].join("\n");
+    }
+    if (lines[i].trim() === `${key}: |`) {
+      let j = i + 1;
+      while (j < lines.length && lines[j].startsWith("  ")) j++;
+      return [...lines.slice(0, j), ...newLinks.map((l) => `  ${prefix} ${l}`), ...lines.slice(j)].join("\n");
+    }
+  }
+  return text;
+}
+
+function ownedTargets(text, fields) {
+  const m = AUTO_MATERIALER_RE.exec(text);
+  const owned = new Set(m ? [...m[1].matchAll(/\[\[([^|\]]+)/g)].map((x) => nfc(x[1])) : []);
+  for (const l of prefixedLines(fields.litteratur_filer ?? "", LITTERATUR_FIL_PREFIX)) {
+    const t = wikilinkTarget(l);
+    if (t) owned.add(nfc(t));
+  }
+  return owned;
+}
+
+function isPrepDay(fields) {
+  const own = fields.forberedelse_tekst;
+  return !(own && own !== "false") && PREP_DAY_RE.test(fields.beskrivelse || "");
+}
+
+function removeFileListLines(text, key, prefix, drop) {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() !== `${key}: |`) continue;
+    let j = i + 1;
+    while (j < lines.length && lines[j].startsWith("  ")) j++;
+    const kept = lines.slice(i + 1, j).filter((l) => !drop.has(nfc(wikilinkTarget(l.trim().slice(prefix.length).trim()) || "")));
+    return [...lines.slice(0, i), ...(kept.length ? [`${key}: |`, ...kept] : [`${key}: false`]), ...lines.slice(j)].join("\n");
+  }
+  return text;
+}
+
+const isMaterialeName = (name) => !name.startsWith("[PLAN] ") && !name.startsWith("[NOTE] ") && !name.startsWith("_");
+const mdIn = (files, dir) => files.filter((f) => f.endsWith(".md") && dirOf(f) === dir).sort(cmpParts);
+const planFiles = (files) => files.filter((f) => baseOf(f).startsWith("[PLAN] ") && f.endsWith(".md")).sort(cmpParts);
+
+// {materiale-sti (NFC): plan_id} for mappens materialer med et `lektion:`-stempel.
+async function declaredOwners(vault, files, dir) {
+  const declared = {};
+  for (const md of mdIn(files, dir)) {
+    if (!isMaterialeName(baseOf(md))) continue;
+    const pid = parseFrontmatter(await vault.read(md)).lektion;
+    if (pid) declared[nfc(md)] = pid;
+  }
+  return declared;
+}
+
+async function patchPendingMateriale(vault, apply) {
+  const files = await vault.list();
+  const folders = new Map();
+  for (const planPath of planFiles(files)) {
+    const text = await vault.read(planPath);
+    const fields = parseFrontmatter(text);
+    if (fields.type !== "lektionsplan") continue;
+    const dir = dirOf(planPath);
+    if (!folders.has(dir)) folders.set(dir, []);
+    folders.get(dir).push({ planPath, text, fields });
+  }
+  const patched = [];
+  for (const [dir, siblings] of folders) {
+    const owned = new Map(siblings.map((s) => [s.planPath, ownedTargets(s.text, s.fields)]));
+    const declared = await declaredOwners(vault, files, dir);
+    for (const s of siblings) {
+      for (const [t, pid] of Object.entries(declared)) if (pid === s.fields.plan_id) owned.get(s.planPath).add(t);
+    }
+    for (const { planPath, text, fields } of siblings) {
+      const mine = owned.get(planPath);
+      const claimedElsewhere = new Set();
+      for (const [p, ts] of owned) if (p !== planPath) for (const t of ts) if (!mine.has(t)) claimedElsewhere.add(t);
+      const linked = new Set();
+      for (const [key, pfx] of [["materiale_filer", MATERIALE_FIL_PREFIX], ["litteratur_filer", LITTERATUR_FIL_PREFIX]]) {
+        for (const l of prefixedLines(fields[key] ?? "", pfx)) {
+          const t = wikilinkTarget(l);
+          if (t) linked.add(nfc(t));
+        }
+      }
+      let orphans = [];
+      for (const md of mdIn(files, dir)) {
+        const name = baseOf(md);
+        if (nfc(name) === nfc(baseOf(planPath)) || !isMaterialeName(name) || name.includes(".sync-conflict-")) continue;
+        if (parseFrontmatter(await vault.read(md)).type === "dublet") continue;
+        orphans.push(nfc(md));
+      }
+      orphans = orphans.filter((o) => !linked.has(o) && !claimedElsewhere.has(o));
+      if (isPrepDay(fields)) orphans = [];
+      const foreign = new Set();
+      for (const l of prefixedLines(fields.materiale_filer ?? "", MATERIALE_FIL_PREFIX)) {
+        const t = nfc(wikilinkTarget(l) || "");
+        if (claimedElsewhere.has(t)) foreign.add(t);
+      }
+      if (!orphans.length && !foreign.size) continue;
+      let updated = orphans.length ? appendFileListField(text, "materiale_filer", MATERIALE_FIL_PREFIX, orphans.map(wikilinkFor)) : text;
+      if (foreign.size) updated = removeFileListLines(updated, "materiale_filer", MATERIALE_FIL_PREFIX, foreign);
+      if (updated === text) continue;
+      patched.push(planPath);
+      if (apply) await vault.write(planPath, updated);
+    }
+  }
+  return patched;
+}
+
+async function readTasks(vault) {
+  const tasks = [];
+  for (const path of (await vault.list()).filter((f) => f.endsWith(".md") && f.includes("OPGAVER")).sort(cmpParts)) {
+    const fields = parseFrontmatter(await vault.read(path));
+    if (fields.type !== "opgave" || !fields.fag || !fields.deadline) continue;
+    const m = /ElementID=(\d+)/.exec(fields.kilde ?? "");
+    if (!m) continue;
+    tasks.push({ ...fields, _element_id: m[1], _path: nfc(path), _title: pathStem(path) });
+  }
+  return tasks;
+}
+
+async function readPlans(vault) {
+  const files = await vault.list();
+  const plans = [], udenPlanId = [];
+  const declaredByFolder = new Map();
+  for (const path of planFiles(files)) {
+    const text = await vault.read(path);
+    const fields = parseFrontmatter(text);
+    if (fields.type !== "lektionsplan" || !fields.fag) continue;
+    if (!fields.plan_id) {
+      udenPlanId.push(path);
+      continue;
+    }
+    fields._path = nfc(path);
+    const dir = dirOf(path);
+    if (!declaredByFolder.has(dir)) declaredByFolder.set(dir, await declaredOwners(vault, files, dir));
+    const declared = declaredByFolder.get(dir);
+    const autoOwned = ownedTargets(text, fields);
+    for (const t of autoOwned) {
+      const pid = declared[t];
+      if (pid && pid !== fields.plan_id) console.log(`Advarsel: ${t} står i ${fields.plan_id}s Materialer, men lektion: siger ${pid}`);
+    }
+    for (const [t, pid] of Object.entries(declared)) if (pid === fields.plan_id) autoOwned.add(t);
+    fields._owned = [...autoOwned].sort(cmpStr);
+    plans.push(fields);
+  }
+  return [plans, udenPlanId];
+}
+
+// ── data.json-hjælpere ──
+
+let hcIdCounter = 0;
+const hcGenerateId = () => `${Date.now().toString(16)}v${(++hcIdCounter).toString(16).padStart(3, "0")}`;
+const findStamped = (items, key, value) => items.find((it) => it[key] === value) ?? null;
+const listOf = (obj, name) => (obj[name] ??= []);
+
+function relocateStamped(data, listName, key, value, targetCls) {
+  const own = listOf(targetCls, listName);
+  const ownMatches = own.filter((it) => it[key] === value);
+  for (const extra of ownMatches.slice(1)) own.splice(own.indexOf(extra), 1);
+  const already = ownMatches[0] ?? null;
+  for (const sem of data.semesters ?? []) {
+    for (const cls of sem.classes ?? []) {
+      if (cls === targetCls) continue;
+      const item = findStamped(cls[listName] ?? [], key, value);
+      if (item) {
+        cls[listName].splice(cls[listName].indexOf(item), 1);
+        if (!already) listOf(targetCls, listName).push(item);
+        return;
+      }
+    }
+  }
+}
+
+const termYearForDate = (date) => [Number(date.slice(5, 7)) >= 7 ? "Fall" : "Spring", Number(date.slice(0, 4))];
+const semesterNameForTermYear = (term, year) => (term === "Fall" ? `Efterår ${year}` : term === "Spring" ? `Forår ${year}` : `${term} ${year}`);
+
+function ensureAllSemesters(data, plans, tasks, newId) {
+  listOf(data, "semesters");
+  const needed = new Map();
+  const need = (d) => { const ty = termYearForDate(d.slice(0, 10)); needed.set(ty.join("|"), ty); };
+  for (const p of plans) if (p.start) need(p.start);
+  for (const t of tasks) if (t.deadline) need(t.deadline);
+  if (!needed.size) { const n = new Date(); const ty = [n.getMonth() + 1 >= 7 ? "Fall" : "Spring", n.getFullYear()]; needed.set(ty.join("|"), ty); }
+  const termYearToSem = new Map();
+  for (const [k, [term, year]] of [...needed].sort((a, b) => cmpTuple(a[1], b[1]))) {
+    let sem = data.semesters.find((s) => s.term === term && s.year === year);
+    if (!sem) {
+      sem = { id: newId(), name: semesterNameForTermYear(term, year), term, year, classes: [], resources: [] };
+      data.semesters.push(sem);
+    }
+    termYearToSem.set(k, sem);
+  }
+  if (!data.currentSemesterId && data.semesters.length) data.currentSemesterId = data.semesters[0].id;
+  return termYearToSem;
+}
+
+const courseUrl = (courseId) => (courseId ? HC_COURSE_URL + courseId : "");
+
+function ensureClass(sem, fag, newId, courseId = "") {
+  const style = HC_FAG_STYLE[fag] ?? {};
+  const symbol = style.symbol ?? fag;
+  const code = style.itslearningCode ? `${symbol} ${style.itslearningCode}` : symbol;
+  const url = courseUrl(courseId);
+  let cls = findStamped(sem.classes, "vswFag", fag);
+  if (cls) {
+    if (url && ["", cls.vswCourseUrl ?? ""].includes(cls.courseUrl ?? "")) {
+      cls.courseUrl = url;
+      cls.vswCourseUrl = url;
+    }
+    cls.code = code;
+    return cls;
+  }
+  cls = {
+    id: newId(), colorIndex: style.colorIndex ?? sem.classes.length % HC_COLOR_PALETTE_SIZE,
+    code, name: fag, courseUrl: url, vswCourseUrl: url, meetingLink: "",
+    professorName: "", professorEmail: "", officeHours: "",
+    taName: "", taEmail: "", taOfficeHours: "",
+    meetingDays: [], location: "", startDate: "", endDate: "",
+    meetingStartTime: "", meetingEndTime: "",
+    lectures: [], assignments: [], exams: [], resources: [],
+    vswFag: fag,
+  };
+  sem.classes.push(cls);
+  return cls;
+}
+
+const hhmm = (datetimeStr) => (datetimeStr.length >= 16 ? datetimeStr.slice(11, 16) : "");
+
+function setDeviationField(lec, field, clsDefault, itslearningValue) {
+  const stamp = `vsw${field[0].toUpperCase()}${field.slice(1)}`;
+  const syncOwned = !(stamp in lec) || (lec[field] ?? "") === (lec[stamp] ?? "");
+  if (!syncOwned) return;
+  const target = itslearningValue && itslearningValue !== clsDefault ? itslearningValue : "";
+  lec[field] = target;
+  lec[stamp] = target;
+}
+
+function ensureLecture(cls, plan, newId, stubFor = (p) => p) {
+  let lec = findStamped(listOf(cls, "lectures"), "vswPlanId", plan.plan_id);
+  if (!lec) {
+    lec = {
+      id: newId(), title: "", date: "", status: "not-started",
+      notes: "", description: "", vaultLink: "", assignments: [],
+      meetingStartTime: "", meetingEndTime: "", location: "", professorName: "",
+      vswPlanId: plan.plan_id,
+    };
+    cls.lectures.push(lec);
+  }
+  lec.title = plan.emne || plan.uge || "Lektion";
+  lec.date = (plan.start || "").slice(0, 10);
+  setDeviationField(lec, "meetingStartTime", cls.meetingStartTime ?? "", hhmm(plan.start ?? ""));
+  setDeviationField(lec, "meetingEndTime", cls.meetingEndTime ?? "", hhmm(plan.stop ?? ""));
+  setDeviationField(lec, "location", cls.location ?? "", plan.lokale ?? "");
+  setDeviationField(lec, "professorName", cls.professorName ?? "", plan.underviser ?? "");
+  const beskrivelse = (plan.beskrivelse ?? "") === "false" ? "" : plan.beskrivelse ?? "";
+  const forbTekst = (plan.forberedelse_tekst ?? "") === "false" ? "" : plan.forberedelse_tekst ?? "";
+  const description = [beskrivelse, forbTekst ? `**Forberedelse**\n\n${forbTekst}` : ""].filter(Boolean).join("\n\n---\n\n");
+  if (description) {
+    lec.description = description;
+    lec.vswDescription = description;
+  }
+  const stub = nfc(stubFor(plan._path));
+  const syncOwned = !("vswVaultLink" in lec) || ["", lec.vswVaultLink].includes(lec.vaultLink);
+  if (syncOwned) {
+    lec.vaultLink = stub;
+    lec.vswVaultLink = stub;
+  }
+  lec.vaultLink = nfc(lec.vaultLink);
+  return lec;
+}
+
+function migrateNotesToDescription(data) {
+  let moved = 0;
+  for (const sem of data.semesters ?? []) for (const cls of sem.classes ?? []) for (const lec of cls.lectures ?? []) {
+    if (!("vswNotes" in lec)) continue;
+    const stamp = lec.vswNotes;
+    delete lec.vswNotes;
+    if ((lec.notes ?? "") === stamp) {
+      lec.description = stamp;
+      lec.vswDescription = stamp;
+      lec.notes = "";
+      moved++;
+    }
+  }
+  return moved;
+}
+
+function stableKey(vaultPath) {
+  const parts = vaultPath.split("/");
+  return parts.length >= 5 ? [...parts.slice(0, 3), ...parts.slice(4)].join("/") : vaultPath;
+}
+
+function ensureResource(sem, cls, vaultPath, newId) {
+  const key = stableKey(vaultPath);
+  let res = findStamped(listOf(sem, "resources"), "vswResKey", key);
+  if (!res) {
+    res = { id: newId(), title: pathStem(vaultPath), author: "", type: "", classIds: [], status: "unread", vaultLink: vaultPath, url: "", notes: "", vswResKey: key };
+    sem.resources.push(res);
+  }
+  res.vaultLink = nfc(vaultPath);
+  if (!listOf(res, "classIds").includes(cls.id)) res.classIds.push(cls.id);
+  return res;
+}
+
+function pruneStaleResourceClasses(data, seen, touchedClasses) {
+  const orphaned = [];
+  for (const sem of data.semesters ?? []) for (const res of sem.resources ?? []) {
+    const still = seen.get(res.id) ?? new Set();
+    res.classIds = (res.classIds ?? []).filter((c) => !touchedClasses.has(c) || still.has(c));
+    if (!res.classIds.length) orphaned.push(`${res.title ?? ""} (${res.vaultLink ?? ""})`);
+  }
+  return orphaned;
+}
+
+function ensureAssignment(owner, key, title, atype, due, linkedBook, newId, linkedNote = "") {
+  let a = findStamped(listOf(owner, "assignments"), "vswKey", key);
+  if (!a) {
+    a = { id: newId(), title: "", type: atype, dueDate: "", status: "not-started", notes: "", grade: "", linkedBook: "", linkedNote: "", vswKey: key };
+    owner.assignments.push(a);
+  }
+  a.title = title;
+  a.type = atype;
+  a.dueDate = due;
+  if (linkedBook) a.linkedBook = linkedBook;
+  if (linkedNote && !a.linkedNote) a.linkedNote = linkedNote;
+  a.linkedNote = nfc(a.linkedNote ?? "");
+  return a;
+}
+
+// `exists(sti)` er et synkront opslag: Python spurgte filsystemet direkte (`.exists()`).
+function pruneDeadLinks(data, exists) {
+  let removedRes = 0, removedAssign = 0;
+  for (const sem of data.semesters ?? []) {
+    const aliveResIds = new Set(), seenByLink = new Map(), idRemap = new Map(), kept = [];
+    for (const res of sem.resources ?? []) {
+      const link = res.vaultLink;
+      if (link && !exists(link)) { removedRes++; continue; }
+      if (link && seenByLink.has(link)) {
+        const first = seenByLink.get(link);
+        idRemap.set(res.id, first.id);
+        for (const cid of res.classIds ?? []) if (!listOf(first, "classIds").includes(cid)) first.classIds.push(cid);
+        removedRes++;
+        continue;
+      }
+      if (link) seenByLink.set(link, res);
+      aliveResIds.add(res.id);
+      kept.push(res);
+    }
+    sem.resources = kept;
+    for (const cls of sem.classes ?? []) {
+      for (const owner of [...(cls.lectures ?? []), cls]) {
+        const keptA = [];
+        for (const a of owner.assignments ?? []) {
+          if (a.linkedNote && !exists(a.linkedNote)) { removedAssign++; continue; }
+          if (idRemap.has(a.linkedBook)) a.linkedBook = idRemap.get(a.linkedBook);
+          if (a.linkedBook && !aliveResIds.has(a.linkedBook)) a.linkedBook = "";
+          keptA.push(a);
+        }
+        owner.assignments = keptA;
+      }
+    }
+  }
+  return [removedRes, removedAssign];
+}
+
+// stubFor(planSti) -> [NOTE]-stubbens sti (hcNoteStubPath med et færdigbygget fil-opslag).
+function syncData(data, plans, newId = null, tasks = null, droppedOut = null, report = null, stubFor = (p) => p) {
+  newId = newId ?? hcGenerateId;
+  listOf(data, "semesters");
+  data.dataVersion ??= HC_KNOWN_DATA_VERSION;
+  tasks = tasks ?? [];
+  migrateNotesToDescription(data);
+  if (!plans.length && !tasks.length) return data;
+
+  const termYearToSem = ensureAllSemesters(data, plans, tasks, newId);
+  const semFor = (date) => termYearToSem.get(termYearForDate(date.slice(0, 10)).join("|")) ?? termYearToSem.values().next().value;
+  const touched = new Map(); // "semId|clsId" -> Set(plan_id)
+  const seenRes = new Map();
+  const fallbackClaimed = new Map();
+  const markSeen = (res, cls) => { if (!seenRes.has(res.id)) seenRes.set(res.id, new Set()); seenRes.get(res.id).add(cls.id); };
+
+  for (const plan of [...plans].sort((a, b) => cmpTuple([a.fag, a.start ?? ""], [b.fag, b.start ?? ""]))) {
+    if (!plan.start) continue;
+    const sem = semFor(plan.start);
+    if (!sem) continue;
+    const cls = ensureClass(sem, plan.fag, newId, plan.plan_id.split(":")[0]);
+    relocateStamped(data, "lectures", "vswPlanId", plan.plan_id, cls);
+    const lec = ensureLecture(cls, plan, newId, stubFor);
+    const tk = `${sem.id}|${cls.id}`;
+    if (!touched.has(tk)) touched.set(tk, new Set());
+    touched.get(tk).add(plan.plan_id);
+    const due = lec.date;
+    const akey = lec.id;
+    const stub = lec.vswVaultLink || lec.vaultLink;
+    const validFileKeys = new Set();
+
+    const targets = prefixedLines(plan.litteratur_filer ?? "", LITTERATUR_FIL_PREFIX).map(wikilinkTarget).filter(Boolean).map(nfc);
+    if (targets.length) {
+      for (const target of targets) {
+        const res = ensureResource(sem, cls, target, newId);
+        markSeen(res, cls);
+        const key = `${akey}|lit|${stableKey(target)}`;
+        ensureAssignment(lec, key, res.title, "Reading", due, res.id, newId, target);
+        validFileKeys.add(key);
+      }
+    } else {
+      const litText = prefixedLines(plan.litteratur ?? "", LITTERATUR_PREFIX);
+      if (litText.length) {
+        const key = `${akey}|lit|`;
+        ensureAssignment(lec, key, [...litText.join(" ")].slice(0, 200).join(""), "Reading", due, "", newId, stub);
+        validFileKeys.add(key);
+      }
+    }
+    for (const titel of prefixedLines(plan.forberedelse ?? "", FORBEREDELSE_PREFIX)) {
+      ensureAssignment(lec, `${akey}|forb|${titel}`, titel, "Preparation", due, "", newId, stub);
+    }
+    for (const line of prefixedLines(plan.materiale_filer ?? "", MATERIALE_FIL_PREFIX)) {
+      const target = nfc(wikilinkTarget(line) || "");
+      if (!target) continue;
+      if ("_owned" in plan && !plan._owned.includes(target)) {
+        const ck = `${cls.id}|${target}`;
+        if (!fallbackClaimed.has(ck)) fallbackClaimed.set(ck, plan.plan_id);
+        if (fallbackClaimed.get(ck) !== plan.plan_id) continue;
+      }
+      const res = ensureResource(sem, cls, target, newId);
+      markSeen(res, cls);
+      const key = `${akey}|mat|${stableKey(target)}`;
+      ensureAssignment(lec, key, res.title, "Reading", due, res.id, newId, target);
+      validFileKeys.add(key);
+    }
+    lec.assignments = lec.assignments.filter((a) => {
+      const k = a.vswKey ?? "";
+      return !(k.startsWith(`${akey}|lit|`) || k.startsWith(`${akey}|mat|`)) || validFileKeys.has(k);
+    });
+  }
+
+  const touchedTasks = new Map();
+  for (const task of [...tasks].sort((a, b) => cmpTuple([a.fag, a.deadline ?? ""], [b.fag, b.deadline ?? ""]))) {
+    if (!task.deadline) continue;
+    const sem = semFor(task.deadline);
+    if (!sem) continue;
+    const cls = ensureClass(sem, task.fag, newId);
+    const key = `opgave|${task._element_id}`;
+    relocateStamped(data, "assignments", "vswKey", key, cls);
+    ensureAssignment(cls, key, task._title, "Writing", task.deadline.slice(0, 10), "", newId, task._path);
+    if (!touchedTasks.has(cls.id)) touchedTasks.set(cls.id, new Set());
+    touchedTasks.get(cls.id).add(key);
+  }
+
+  if (droppedOut) {
+    for (const sem of data.semesters) for (const cls of sem.classes ?? []) {
+      const seen = touched.get(`${sem.id}|${cls.id}`);
+      if (!seen) continue;
+      for (const lec of cls.lectures ?? []) {
+        if (lec.vswPlanId && !seen.has(lec.vswPlanId)) droppedOut.push(`${cls.vswFag || cls.name || ""} ${lec.date ?? ""} ${lec.title ?? ""}`);
+      }
+    }
+  }
+
+  if (report) {
+    const touchedSems = new Set([...touched.keys()].map((k) => k.split("|")[0]));
+    const touchedClasses = new Set([...touched.keys()].map((k) => k.split("|")[1]));
+    const push = (k, line) => listOf(report, k).push(line);
+    for (const sem of data.semesters) {
+      if (!touchedSems.has(sem.id)) continue;
+      for (const cls of sem.classes ?? []) {
+        if (!touchedClasses.has(cls.id)) {
+          push("dropped_classes", `${sem.name ?? ""}: ${cls.vswFag || cls.name || ""}`);
+          continue;
+        }
+        const seenKeys = touchedTasks.get(cls.id);
+        if (!seenKeys) continue;
+        for (const a of cls.assignments ?? []) {
+          const k = a.vswKey ?? "";
+          if (k.startsWith("opgave|") && !seenKeys.has(k)) push("dropped_tasks", `${cls.vswFag || cls.name || ""} ${a.dueDate ?? ""} ${a.title ?? ""}`);
+        }
+      }
+    }
+    const orphaned = pruneStaleResourceClasses(data, seenRes, touchedClasses);
+    if (orphaned.length) listOf(report, "orphaned_resources").push(...orphaned);
+  }
+  return data;
+}
+
+// Vault -> Hold Course: en Forberedelse krydset direkte i [NOTE]-stubben bliver `done`.
+// `readText(sti)` er et synkront opslag (null = findes ikke).
+function syncTaskCompletion(data, readText) {
+  const markedDone = [];
+  for (const sem of data.semesters ?? []) for (const cls of sem.classes ?? []) for (const lec of cls.lectures ?? []) {
+    const stubRel = lec.vswVaultLink || lec.vaultLink;
+    if (!stubRel) continue;
+    const text = readText(stubRel);
+    if (text == null) continue;
+    for (const a of lec.assignments ?? []) {
+      const key = a.vswKey ?? "";
+      if (!key.includes("|forb|") || a.status !== "not-started") continue;
+      const titel = key.slice(key.indexOf("|forb|") + 6);
+      if (text.includes(`- [x] ${FORBEREDELSE_PREFIX} ${titel}`)) {
+        a.status = "done";
+        markedDone.push(`${titel} (${stubRel})`);
+      }
+    }
+  }
+  return markedDone;
+}
+
+// ── _forløb.md: holdbarheds-spejl (#152) ──
+
+function isoWeekOf(date) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec((date ?? "").slice(0, 10));
+  if (!m) return "—";
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  if (d.getUTCMonth() !== +m[2] - 1) return "—";
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = Date.UTC(d.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((d - yearStart) / 864e5 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function enhedFromLink(link) {
+  const parts = (link || "").split("/");
+  const i = parts.indexOf("MD");
+  return i !== -1 && i + 2 < parts.length ? parts[i + 1] : "—";
+}
+
+const cell = (text) => (text || "—").replaceAll("|", "\\|").replaceAll("\n", " ");
+
+function renderForloeb(sem, cls, genereret) {
+  const fag = cls.vswFag || cls.name || "";
+  const out = [
+    "---", `fag: ${fag}`, `semester: ${sem.name ?? ""}`,
+    `genereret: ${genereret}`, "kilde: hold-course-sync", "---", "",
+    FORLOEB_HEADER, "",
+    "| dato | uge | enhed | titel | status | materialer | opgaver + frist |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
+  ];
+  for (const lec of [...(cls.lectures ?? [])].sort((a, b) => cmpTuple([a.date ?? "", a.title ?? ""], [b.date ?? "", b.title ?? ""]))) {
+    const readings = [], opgaver = [];
+    for (const a of lec.assignments ?? []) {
+      if (a.type === "Reading") {
+        const tgt = a.linkedNote || "";
+        if (tgt) readings.push(`[[${tgt}|${pathStem(tgt)}]]`);
+      } else {
+        const due = a.dueDate ?? "";
+        opgaver.push(due ? `${a.title ?? ""} — ${due} (${a.status ?? ""})` : `${a.title ?? ""} (${a.status ?? ""})`);
+      }
+    }
+    const row = [lec.date ?? "", isoWeekOf(lec.date ?? ""), enhedFromLink(lec.vaultLink || lec.vswVaultLink || ""),
+      lec.title ?? "", lec.status ?? "", [...new Set(readings)].join("<br>"), opgaver.join("<br>")];
+    out.push(`| ${row.map(cell).join(" | ")} |`);
+  }
+  if (cls.assignments?.length) {
+    out.push("", "## Afleveringer (uden lektion)", "", "| titel | frist | status | note |", "| --- | --- | --- | --- |");
+    for (const a of [...cls.assignments].sort((x, y) => cmpTuple([x.dueDate ?? "", x.title ?? ""], [y.dueDate ?? "", y.title ?? ""]))) {
+      const note = a.linkedNote || "";
+      out.push(`| ${[a.title ?? "", a.dueDate ?? "", a.status ?? "", note ? `[[${note}|${pathStem(note)}]]` : ""].map(cell).join(" | ")} |`);
+    }
+  }
+  return `${out.join("\n")}\n`;
+}
+
+const stripGenereret = (text) => text.replace(/^genereret: .*$/m, "genereret:");
+
+// `isDir(sti)` er et synkront opslag. null = faget har ingen kendt mappe.
+function forloebPath(sem, cls, multi, isDir) {
+  const fag = cls.vswFag || cls.name || "";
+  const style = HC_FAG_STYLE[fag];
+  if (!style) return null;
+  const fagDir = `${FAG_ROOT}/${style.symbol} ${fag}`;
+  if (!isDir(fagDir)) return null;
+  return multi ? `${fagDir}/_HoldCourse/${nfc(`${sem.name ?? "ukendt"}.md`)}` : `${fagDir}/${nfc("_forløb.md")}`;
+}
+
+// [sti, tekst] for hvert spejl der skal skrives (indhold uændret på nær tidsstemplet = spring over).
+function forloebMirrors(data, genereret, isDir, readText) {
+  const fagCount = {};
+  for (const sem of data.semesters ?? []) for (const cls of sem.classes ?? []) {
+    const fag = cls.vswFag || cls.name || "";
+    fagCount[fag] = (fagCount[fag] ?? 0) + 1;
+  }
+  const writes = [];
+  for (const sem of data.semesters ?? []) for (const cls of sem.classes ?? []) {
+    const path = forloebPath(sem, cls, fagCount[cls.vswFag || cls.name || ""] > 1, isDir);
+    if (!path) continue;
+    const text = renderForloeb(sem, cls, genereret);
+    const old = readText(path);
+    if (old != null && stripGenereret(old) === stripGenereret(text)) continue;
+    writes.push([path, text]);
+  }
+  return writes;
+}
+
+// ── Hold Course-synken i drift (#242): afløser watcherens minut-tick og sync() ──
+
+const HC_API_VERSION = 1;
+const HC_ONYX_DIR = ".obsidian-onyx/plugins/hold-course";
+const HC_ONYX_DATA = `${HC_ONYX_DIR}/data.json`;
+const BOOX_TICK_MS = 60e3;
+
+const holdCourse = () => plugin.app.plugins.plugins["hold-course"];
+
+function holdCourseApi() {
+  const api = holdCourse()?.api;
+  if (api?.version >= HC_API_VERSION) return api;
+  if (!plugin.hcApiWarned) {
+    plugin.hcApiWarned = true;
+    new Notice(`ItsWiz: Hold Course-synken kræver Hold Course med API version ${HC_API_VERSION} (hold-course#84). Opdatér Hold Course.`, 0);
+  }
+  return null;
+}
+
+const obsidianVault = () => ({
+  list: async () => plugin.app.vault.getFiles().map((f) => f.path),
+  read: (p) => plugin.app.vault.adapter.read(normalizePath(p)),
+  write: (p, text) => writeVaultFile(p, text),
+});
+
+// Læser filerne på forhånd, så syncData/syncTaskCompletion kan slå dem op synkront inde i update().
+async function readAll(paths) {
+  const texts = new Map();
+  for (const p of new Set(paths)) {
+    const text = await readFromVault(p);
+    if (text != null) texts.set(nfc(p), text);
+  }
+  return (p) => texts.get(nfc(p)) ?? null;
+}
+
+const localTimestamp = () => {
+  const d = new Date(), z = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+};
+
+function logLines(heading, lines) {
+  if (lines?.length) console.log(`ItsWiz: ${lines.length} ${heading}:\n  ${lines.join("\n  ")}`);
+}
+
+async function runHoldCourseSync() {
+  const api = holdCourseApi();
+  if (!api) return;
+  const vault = obsidianVault();
+  logLines("lektionsplan-note(r) fik materiale_filer opdateret (#141/#183)", await patchPendingMateriale(vault, true));
+  const [plans, udenPlanId] = await readPlans(vault);
+  const tasks = await readTasks(vault);
+
+  const files = plugin.app.vault.getAllLoadedFiles();
+  const paths = new Set(files.map((f) => nfc(f.path)));
+  const dirs = new Set(files.filter((f) => f instanceof TFolder).map((f) => nfc(f.path)));
+  const exists = (p) => paths.has(nfc(p));
+  const stubFor = (p) => hcNoteStubPath(p, exists);
+  const lectureLinks = (holdCourse().data.semesters ?? []).flatMap((s) => (s.classes ?? []).flatMap((c) => (c.lectures ?? []).map((l) => l.vswVaultLink || l.vaultLink)));
+  const readText = await readAll([...lectureLinks, ...plans.map((p) => stubFor(p._path))].filter((p) => p && exists(p)));
+
+  const { result: r, restored } = await api.update((data) => {
+    const dropped = [], report = {};
+    syncData(data, plans, null, tasks, dropped, report, stubFor);
+    const marked = syncTaskCompletion(data, readText);
+    const [removedRes, removedAssign] = pruneDeadLinks(data, exists);
+    return { dropped, report, marked, removedRes, removedAssign };
+  });
+
+  logLines("lektionsplan-note(r) uden plan_id springes over (ret dem i vaulten)", udenPlanId);
+  logLines("lektion(er) i Hold Course er ikke længere i itslearning (#173)", r.dropped);
+  logLines("fag fik ingen lektioner i et ellers aktivt semester", r.report.dropped_classes);
+  logLines("afleveringsopgave(r) er ikke længere i itslearning", r.report.dropped_tasks);
+  logLines("materiale(r) i Library bruges ikke længere af nogen klasse", r.report.orphaned_resources);
+  logLines("Forberedelse-opgave(r) krydset af i vaulten, markeret Done", r.marked);
+  if (r.removedRes || r.removedAssign) console.log(`ItsWiz: ryddet op: ${r.removedRes} død(e) Library-post(er), ${r.removedAssign} død(e) opgave(r).`);
+  logLines("felt(er) rullet tilbage af Hold Course (synken ejer dem ikke)", restored);
+
+  const mirrorPaths = [...paths].filter((p) => p.startsWith(`${FAG_ROOT}/`) && (p.endsWith("/_forløb.md") || p.includes("/_HoldCourse/")));
+  const mirrorText = await readAll(mirrorPaths);
+  const writes = forloebMirrors(holdCourse().data, localTimestamp(), (p) => dirs.has(nfc(p)), mirrorText);
+  for (const [p, text] of writes) await writeVaultFile(p, text);
+  if (writes.length) console.log(`ItsWiz: skrev ${writes.length} _forløb.md (holdbarheds-spejl, #152).`);
+
+  await syncBoox();
+}
+
+// Én kørsel ad gangen; hændelser under en kørsel giver én kørsel mere bagefter, ikke en pr. hændelse.
+let hcSyncTimer = null, hcSyncRunning = null, hcSyncAgain = false;
+function scheduleHoldCourseSync(delayMs = 5000) {
+  clearTimeout(hcSyncTimer);
+  hcSyncTimer = setTimeout(async () => {
+    if (!(await getSettings()).enableHoldCourseSync) return;
+    if (hcSyncRunning) return void (hcSyncAgain = true);
+    hcSyncRunning = runHoldCourseSync()
+      .catch((err) => {
+        console.error("ItsWiz: Hold Course-synk fejlede:", err);
+        new Notice(`ItsWiz: Hold Course-synk fejlede\n${err.message}`);
+      })
+      .finally(() => {
+        hcSyncRunning = null;
+        if (hcSyncAgain) (hcSyncAgain = false), scheduleHoldCourseSync();
+      });
+  }, delayMs);
+}
+
+const touchesHoldCourseInput = (path) => path.endsWith(".md") && (path.startsWith(`${FAG_ROOT}/`) || path.includes("OPGAVER"));
+
+// ── Boox (.obsidian-onyx): Boox' Hold Course har sin egen data.json (#146, hold-course#10) ──
+//
+// Python-reconcilen overskrev Boox' kopi hvert minut, så noget krydset af på Boox gik tabt, og
+// Mac og Boox skrev den samme fil (5 Syncthing-konflikter 1/9–1/10). Nu en tre-vejs-fletning mod
+// den kopi ItsWiz sidst skrev (`base`): hvad Boox har ændret siden (status, karakter, noter, nye
+// egne opgaver), hentes ind på Mac'en først, og kopien skrives kun når indholdet er anderledes.
+// ponytail: noget slettet på Boox kommer igen fra Mac'en; fletning af sletninger når det savnes.
+
+const BOOX_USER_FIELDS = ["status", "grade", "notes"];
+
+function eachItem(obj, fn) {
+  for (const [list, v] of Object.entries(obj)) {
+    if (!Array.isArray(v)) continue;
+    for (const item of v) if (item && typeof item === "object" && item.id) fn(item, obj, list), eachItem(item, fn);
+  }
+}
+
+// Fletter Boox' ændringer siden `base` ind i `mac` (muterer). Returnerer hvad der blev flettet.
+function mergeBooxEdits(mac, boox, base) {
+  const macById = new Map(), baseById = new Map();
+  eachItem(mac, (item) => macById.set(item.id, item));
+  eachItem(base, (item) => baseById.set(item.id, item));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const merged = [], added = new Set();
+  eachItem(boox, (item, parent, list) => {
+    const own = macById.get(item.id), old = baseById.get(item.id);
+    if (own && old) {
+      for (const f of BOOX_USER_FIELDS) {
+        if (!same(item[f], old[f]) && !same(item[f], own[f])) {
+          own[f] = structuredClone(item[f]);
+          merged.push(`${item.title ?? item.id}: ${f}`);
+        }
+      }
+      return;
+    }
+    // Oprettet på Boox: ikke i base (så ikke slettet på Mac), intet vsw-stempel (brugerens eget).
+    if (own || old || added.has(parent.id) || Object.keys(item).some((k) => k.startsWith("vsw"))) return;
+    const macParent = parent === boox ? mac : macById.get(parent.id);
+    if (!macParent) return;
+    (macParent[list] ??= []).push(structuredClone(item));
+    added.add(item.id);
+    merged.push(`ny: ${item.title ?? item.id}`);
+  });
+  return merged;
+}
+
+const booxContent = (data) => `${JSON.stringify(Object.fromEntries(Object.entries(data).filter(([k]) => k !== "settings")), null, 2)}\n`;
+const onyxBasePath = () => `${plugin.manifest.dir}/onyx-base.json`;
+
+async function syncBoox() {
+  const api = holdCourseApi();
+  const { adapter } = plugin.app.vault;
+  if (!api || !(await adapter.exists(HC_ONYX_DATA))) return;
+
+  const conflicts = (await adapter.list(HC_ONYX_DIR)).files.filter((f) => f.includes(".sync-conflict-"));
+  const known = (plugin.data.knownOnyxConflicts ??= []);
+  const fresh = conflicts.filter((f) => !known.includes(f));
+  if (fresh.length) {
+    new Notice(`ItsWiz: ${fresh.length} Syncthing-konflikt(er) i Boox' Hold Course-data:\n${fresh.map((f) => f.split("/").pop()).join("\n")}`, 0);
+    known.push(...fresh);
+    await plugin.saveData(plugin.data);
+  }
+
+  const text = await adapter.read(HC_ONYX_DATA);
+  // Uden base (første kørsel) flettes intet: Python-reconcilen har netop overskrevet Boox' kopi
+  // med Mac'ens, så Boox har intet eget at give.
+  const base = (await adapter.exists(onyxBasePath())) ? await adapter.read(onyxBasePath()) : null;
+  if (base && text !== base) {
+    const boox = JSON.parse(text);
+    const { result } = await api.update((data) => mergeBooxEdits(data, boox, JSON.parse(base)), { userEdits: true });
+    logLines("ændring(er) fra Boox hentet ind i Hold Course", result);
+  }
+  const desired = booxContent(holdCourse().data);
+  if (desired !== text) await adapter.write(HC_ONYX_DATA, desired);
+  if (desired !== base) await adapter.write(onyxBasePath(), desired);
 }
 
 // ── Obsidian-delen ──
@@ -2773,6 +3707,11 @@ class ItsWizSettingTab extends PluginSettingTab {
       .setName("Konvertér RAW-filer")
       .setDesc("Sender nye PDF- og Office-filer under RAW/ til MinerU og skriver MD-noten. Valgfrit: slået fra linker lektionsplanerne til originalfilen. Slå først til, når watch_viastudywiz.py er stoppet, ellers konverteres hver fil to gange.")
       .addToggle((t) => t.setValue(s.enableConversion ?? false).onChange((v) => ((s.enableConversion = v), save(), v && scanExisting())));
+    containerEl.createEl("h3", { text: "Hold Course" });
+    new Setting(containerEl)
+      .setName("Synk til Hold Course")
+      .setDesc("Lektionsplaner, materialer og opgaver skrives ind i Hold Course, og Boox' kopi holdes ajour. Slå først til, når watch_viastudywiz.py er stoppet, ellers skriver begge.")
+      .addToggle((t) => t.setValue(s.enableHoldCourseSync ?? false).onChange((v) => ((s.enableHoldCourseSync = v), save(), v && scheduleHoldCourseSync(0))));
     const tokenDesc = createFragment((f) => {
       f.appendText("Hentes på ");
       f.createEl("a", { text: "mineru.net", href: MINERU_TOKEN_URL });
@@ -2820,10 +3759,19 @@ class ItsWizPlugin extends Plugin {
       // Efter layout-ready: før det fyrer Obsidian "create" for hver eksisterende fil.
       this.registerEvent(this.app.vault.on("create", (f) => onVaultCreate(f)));
       getSettings().then((st) => st.enableConversion && scanExisting());
+      for (const ev of ["create", "modify", "delete"]) {
+        this.registerEvent(this.app.vault.on(ev, (f) => touchesHoldCourseInput(f.path) && scheduleHoldCourseSync()));
+      }
+      this.registerEvent(this.app.vault.on("rename", (f, old) => (touchesHoldCourseInput(f.path) || touchesHoldCourseInput(old)) && scheduleHoldCourseSync()));
+      scheduleHoldCourseSync();
       runCollectAndDownload({ auto: true });
     });
     this.convert = (path, opts) => processDocument(this.app.vault.getAbstractFileByPath(path), opts);
+    this.syncHoldCourse = () => runHoldCourseSync();
     this.registerInterval(window.setInterval(() => tick(), KEEPALIVE_MINUTES * 60e3));
+    this.registerInterval(window.setInterval(async () => {
+      if ((await getSettings()).enableHoldCourseSync && !hcSyncRunning) syncBoox().catch((err) => console.error("ItsWiz: Boox-synk fejlede:", err));
+    }, BOOX_TICK_MS));
   }
 
   onunload() {
@@ -2866,6 +3814,9 @@ Object.assign(module.exports, {
   insertPageMarkers,
   runningHeader,
   conversionBody,
+  joinedBody,
+  pageRanges,
+  pdfPageCount,
   unzip,
   noteStubPath,
   planLiteratureText,
@@ -2878,4 +3829,25 @@ Object.assign(module.exports, {
   stripHtml,
   extractAssignmentFile,
   taskId,
+  parseFrontmatter,
+  prefixedLines,
+  wikilinkTarget,
+  isPrepDay,
+  removeFileListLines,
+  patchPendingMateriale,
+  readPlans,
+  readTasks,
+  hhmm,
+  ensureLecture,
+  migrateNotesToDescription,
+  stableKey,
+  syncData,
+  syncTaskCompletion,
+  pruneDeadLinks,
+  isoWeekOf,
+  enhedFromLink,
+  renderForloeb,
+  stripGenereret,
+  forloebMirrors,
+  mergeBooxEdits,
 });
