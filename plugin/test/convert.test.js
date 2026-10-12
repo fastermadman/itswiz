@@ -1,0 +1,35 @@
+'use strict';
+
+// #241: konverterings-porten skal give samme output som watch_viastudywiz.py. Forventningerne er
+// genereret af Python-watcheren på samme input (opslag der splittes, fodnote, billede, ISO-uge 53,
+// lektion:/used_in:). Paritet på rigtige MinerU-zips blev målt separat: 20/20 ens (PR-beskrivelsen).
+
+const test = require('node:test');
+const assert = require('node:assert');
+const plugin = require('./_bootstrap.js');
+
+const zip = Buffer.from('UEsDBBQAAAAAAAAAIQAAAAAAAAAAAAAAAAAHAAAAaW1hZ2VzL1BLAwQUAAAACADIHkxdVMRg+GkAAACAAAAABwAAAGZ1bGwubWRTVnA7vKOouCRVoTgzJVUhKTW9Mi8ltUghA4hzU1MU8vLTU0sUSlKzi0u4uHJTi1K5uMJS84pLilIVMhJzylJScxQS0xTyC4pzEoEKubg8Du/IwiWnGB2rkZkLZBfrJyYl62UVpGtyAQBQSwMEFAAAAAgAyB5MXdKNyKDpAAAAMgMAABUAAABhYmNfY29udGVudF9saXN0Lmpzb26lkk0LwjAMhv9K2Fmk82N+3BXBu5cp0tFsU2c71igT8b/bqUNXpDI8NE0KefLypuHVo0uO3hQ8wpK8zus29Xx9YiweF5oQ9E4gRJhcpMACUnOOKECqBAkID/rRmPMEtztRmmZmyihSVRr6pngeE3psc+vAe+ijJ1aKpCL8nO7DTEKsRP3ugE9YTZ/43/DydIywaMB7DuSwAlUhqJLAIqbIRRO25HkXxj801gqHTZrt+QqlpgIh5dlZYAY8BpXrzHBth/1WDn+xoO8Aui2wRS+eH2XfWnfAXsJHbYQPXMS38n+2Z5v7sb3NHVBLAwQUAAAAAADIHkxd8gFoKmUAAABlAAAACwAAAGxheW91dC5qc29ueyJwZGZfaW5mbyI6IFt7InBhZ2VfaWR4IjogMCwgInBhZ2Vfc2l6ZSI6IFs2MDAsIDEwMDBdfSwgeyJwYWdlX2lkeCI6IDEsICJwYWdlX3NpemUiOiBbMTIwMCwgMTAwMF19XX1QSwMEFAAAAAAAyB5MXdkqtScGAAAABgAAAA4AAABpbWFnZXMvYWJjLmpwZ//YanBlZ1BLAQIUAxQAAAAAAAAAIQAAAAAAAAAAAAAAAAAHAAAAAAAAAAAAAACAAQAAAABpbWFnZXMvUEsBAhQDFAAAAAgAyB5MXVTEYPhpAAAAgAAAAAcAAAAAAAAAAAAAAIABJQAAAGZ1bGwubWRQSwECFAMUAAAACADIHkxd0o3IoOkAAAAyAwAAFQAAAAAAAAAAAAAAgAGzAAAAYWJjX2NvbnRlbnRfbGlzdC5qc29uUEsBAhQDFAAAAAAAyB5MXfIBaCplAAAAZQAAAAsAAAAAAAAAAAAAAIABzwEAAGxheW91dC5qc29uUEsBAhQDFAAAAAAAyB5MXdkqtScGAAAABgAAAA4AAAAAAAAAAAAAAIABXQIAAGltYWdlcy9hYmMuanBnUEsFBgAAAAAFAAUAIgEAAI8CAAAAAA==', 'base64');
+const marked = "# Første side begynder her med noget tekst\n\nmere\n\n\n\n---\n1 En fodnote\n\n*— side 12 —*\n\n---\n\nVenstre halvdel af opslaget\n\n\n\n*— side 13 —*\n\n---\n\nHøjre halvdel af opslaget\n\n![[abc.jpg]]\n\n*— side 14 —*\n";
+
+test('zip → MD-brødtekst som watcheren', () => {
+  const entries = plugin.unzip(zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.length));
+  assert.deepStrictEqual([...entries.keys()].sort(), ['abc_content_list.json', 'full.md', 'images/abc.jpg', 'layout.json']);
+  assert.deepStrictEqual(plugin.conversionBody(entries), { body: marked, sektion: "Kap. 8" });
+});
+
+test('frontmatter-felter som watcheren', () => {
+  assert.deepStrictEqual(plugin.timeFieldsFromStart('2027-01-01 08:15:00'), {"uge": "2026-W53", "ugedag": "fredag", "dato": "2027-01-01"});
+  const note = "---\nfag: Musik\nlektion: \"36016:1\"\nused_in:\n  - \"36016:2\"\n---\n\nbrødtekst\n";
+  assert.strictEqual(plugin.carriedFields(note), "lektion: \"36016:1\"\nused_in:\n  - \"36016:2\"\n");
+  assert.strictEqual(plugin.appendUsedIn(note, '36016:3'), "---\nfag: Musik\nlektion: \"36016:1\"\nused_in:\n  - \"36016:3\"\n  - \"36016:2\"\n---\n\nbrødtekst\n");
+  assert.strictEqual(plugin.appendUsedIn(note, '36016:1'), null);
+  assert.deepStrictEqual(plugin.mdTargets('§ FAG/♪ Musik/RAW/Enhed/korte..pdf').md, '§ FAG/♪ Musik/MD/Enhed/korte..md');
+  assert.strictEqual(plugin.errorMarkerPath('Litteratur/RAW/Bog.pdf'), 'Litteratur/RAW/.Bog.mineru-error.txt');
+});
+
+test('ejer-lektion findes også via RAW-link og NFD-navn (#241)', () => {
+  const plan = (id, link) => ({ name: `[PLAN] ${id}.md`, text: `---\nplan_id: "${id}"\n---\n<!-- AUTO:START -->\n## Materialer\n- ${link}\n<!-- AUTO:END -->\n` });
+  const notes = [plan('1', '[[§ FAG/M/MD/E/Andet.md|Andet.md]]'), plan('2', '[[§ FAG/M/RAW/E/Musikforståelse.pdf|Musikforståelse.pdf]]')];
+  assert.strictEqual(plugin.provenPlanId(notes, 'Musikforståelse.md'.normalize('NFD')), '2');
+  assert.strictEqual(plugin.provenPlanId(notes, 'Ukendt.md'), null);
+});
