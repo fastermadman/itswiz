@@ -30,6 +30,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import zipfile
 from datetime import datetime
 from functools import lru_cache
@@ -152,6 +153,14 @@ def enrich_from_plan_note(week_dir: Path, md_name: str = "") -> dict[str, str]:
 # kan nå frem før background.js har skrevet planen — hele grunden til at #141 findes), falder vi
 # tilbage til den første note, som før. Kun uge/ugedag/dato/start/stop rammes af valget; `emne`
 # er enhedens navn og dermed ens for alle søskende.
+# #241: AUTO-blokken kan linke til RAW-originalen (X.pdf) i stedet for MD-noten (X.md), når MD
+# endnu ikke fandtes ved høsten — og diskens stier kan være NFD (#131), mens linkene er NFC.
+# Sammenlign derfor stem i NFC.
+def _names_material(link: str, md_name: str) -> bool:
+    nfc = lambda name: unicodedata.normalize("NFC", Path(name).stem)
+    return nfc(link.rsplit("/", 1)[-1]) == nfc(md_name)
+
+
 def _plan_note_for(notes: list[Path], md_name: str) -> Path:
     if md_name and len(notes) > 1:
         for note in notes:
@@ -159,7 +168,7 @@ def _plan_note_for(notes: list[Path], md_name: str) -> Path:
             # Samme regex som sync_hold_course._owned_targets — formatet er background.js'
             # AUTO-blok, og to kopier ville kunne drifte fra hinanden.
             block = sync_hold_course.AUTO_MATERIALER_RE.search(body)
-            if block and any(link.rsplit("/", 1)[-1] == md_name
+            if block and any(_names_material(link, md_name)
                              for link in re.findall(r"\[\[([^|\]]+)", block.group(1))):
                 return note
     return notes[0]
@@ -278,7 +287,7 @@ def proven_plan_id(doc_path: Path) -> str | None:
     for note in sorted(p for p in md_dir.glob("*.md") if p.name.startswith("[PLAN] ")):
         text = note.read_text(encoding="utf-8")
         block = sync_hold_course.AUTO_MATERIALER_RE.search(text)
-        if block and any(link.rsplit("/", 1)[-1] == md_name
+        if block and any(_names_material(link, md_name)
                          for link in re.findall(r"\[\[([^|\]]+)", block.group(1))):
             return read_frontmatter_field(text, "plan_id")
     return None
