@@ -1524,6 +1524,7 @@ const DEFAULT_SETTINGS = {
   enableFileDownloads: true,
   enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
+  enableConversion: false,
 };
 
 async function getSettings() {
@@ -2127,6 +2128,549 @@ async function importExtensionData() {
   );
 }
 
+// ── Konvertering: RAW → MinerU → MD (D, #241) ──
+//
+// Porteret fra watchfolder/watch_viastudywiz.py; kommentarerne dér forklarer hvorfor (#42, #99, #101,
+// #103, #142, #148, #186, #232). Her står kun det der er anderledes i pluginet. MinerU er et tilvalg:
+// uden token og uden "Konvertér RAW-filer" slået til sker intet, og [PLAN]-noterne linker til RAW (#241).
+
+const MINERU_API = "https://mineru.net/api/v4";
+const MINERU_TOKEN_URL = "https://mineru.net/apiManage/token";
+const CONVERT_SUFFIXES = [".pdf", ...OFFICE_EXTENSIONS];
+const POLL_INTERVAL_MS = 8e3;
+const POLL_TIMEOUT_MS = 20 * 60e3;
+const UPLOAD_TIMEOUT_MS = 20 * 60e3;
+const UPLOAD_RETRIES = 3;
+const UPLOAD_RETRY_BACKOFF_MS = 30e3;
+const CACHE_TTL_MS = 7 * 24 * 60 * 60e3;
+const ANCHOR_LENGTH = 40;
+const AUTO_MATERIALER_RE = /^## Materialer\n([\s\S]*?)(?=\n## |\n<!-- AUTO:END|$(?![\s\S]))/m;
+const HIGHLIGHT_RE = /==[^=\n]+==/;
+const DAYS_DA_MON = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"];
+
+// Nøglen ligger i Obsidians localStorage pr. enhed, ikke i data.json: plugin-data i ViaVault er
+// git-tracket og pushes til GitHub, og synkes til Boox'en.
+const MINERU_TOKEN_KEY = "itswiz-mineru-token";
+const mineruToken = () => plugin.app.loadLocalStorage(MINERU_TOKEN_KEY) ?? "";
+
+// MinerU har sagt nej (fx over 200 sider): markeres som fejlet. Alt andet (netværk, timeout) er
+// forbigående og prøves igen ved næste start (#250).
+class MineruError extends Error {}
+
+// watcherens sanitize(): som sanitizeFilename, men UDEN at fjerne afsluttende punktum — MD-noter
+// hedder allerede "…korte..md", og navnene skal blive ved med at matche.
+function stemName(stem) {
+  return stem.replace(/[\\/:*?"<>|]/g, "_").trim();
+}
+
+// Path.stem: alt før sidste ".", undtagen et punktum forrest.
+function stemOf(name) {
+  const k = name.lastIndexOf(".");
+  return k > 0 ? name.slice(0, k) : name;
+}
+
+function mdTargets(rawFilePath) {
+  const parts = rawFilePath.split("/");
+  const i = parts.lastIndexOf("RAW", parts.length - 2);
+  const mdDir = [...parts.slice(0, i), "MD", ...parts.slice(i + 1, -1)].join("/");
+  const title = stemName(stemOf(parts[parts.length - 1]));
+  return { mdDir, md: `${mdDir}/${title}.md`, images: `${mdDir}/_attachments/${title}`, rawRoot: parts.slice(0, i + 1).join("/"), fagFolder: parts[i - 1] ?? "" };
+}
+
+function inRawBranch(path) {
+  return path.split("/").slice(0, -1).includes("RAW");
+}
+
+function errorMarkerPath(rawFilePath) {
+  const dir = rawFilePath.slice(0, rawFilePath.lastIndexOf("/"));
+  return `${dir}/.${stemName(stemOf(rawFilePath.slice(rawFilePath.lastIndexOf("/") + 1)))}.mineru-error.txt`;
+}
+
+function toWikilinks(markdown) {
+  return markdown.replace(/!\[[^\]]*\]\(images\/([^)]+)\)/g, "![[$1]]");
+}
+
+function readFrontmatterField(text, key) {
+  const m = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s*"?([^"\\n]*?)"?\\s*$`, "m").exec(text);
+  return m && m[1] ? m[1] : null;
+}
+
+// Stems i NFC, så både MD-link (X.md) og RAW-link (X.pdf, #241) tæller som at nævne materialet.
+function materialerLinks(text) {
+  const block = AUTO_MATERIALER_RE.exec(text);
+  return block ? [...block[1].matchAll(/\[\[([^|\]]+)/g)].map((m) => stemOf(m[1].split("/").pop()).normalize("NFC")) : null;
+}
+
+// notes: [{ name, text }] for ugemappens [PLAN]-noter, sorteret efter navn.
+function planNoteFor(notes, mdName) {
+  if (mdName && notes.length > 1) {
+    const owner = notes.find((n) => materialerLinks(n.text)?.includes(stemOf(mdName).normalize("NFC")));
+    if (owner) return owner;
+  }
+  return notes[0];
+}
+
+function provenPlanId(notes, mdName) {
+  const owner = notes.find((n) => materialerLinks(n.text)?.includes(stemOf(mdName).normalize("NFC")));
+  return owner ? readFrontmatterField(owner.text, "plan_id") : null;
+}
+
+function owningPlanId(notes, mdName) {
+  return notes.length ? readFrontmatterField(planNoteFor(notes, mdName).text, "plan_id") : null;
+}
+
+function timeFieldsFromStart(start) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/.exec(start.trim());
+  if (!m) return {};
+  const day = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  const wd = (day.getUTCDay() + 6) % 7;
+  const thursday = new Date(day.getTime() + (3 - wd) * 864e5);
+  const week = Math.floor((thursday - Date.UTC(thursday.getUTCFullYear(), 0, 1)) / 864e5 / 7) + 1;
+  return { uge: `${thursday.getUTCFullYear()}-W${String(week).padStart(2, "0")}`, ugedag: DAYS_DA_MON[wd], dato: `${m[1]}-${m[2]}-${m[3]}` };
+}
+
+function plainFag(folderName) {
+  for (const [name, symbol] of Object.entries(FOLDER_SYMBOLS)) if (folderName === `${symbol} ${name}`) return name;
+  return folderName;
+}
+
+// Ren del af watcherens frontmatter(): planNotes er MD-ugemappens [PLAN]-noter, hentet = formatNow().
+function materialeFrontmatter(rawFilePath, planNotes, hentet, extra = "") {
+  const t = mdTargets(rawFilePath);
+  const parts = rawFilePath.split("/");
+  const folder = parts[parts.length - 2] ?? "";
+  const folderEmne = folder.includes(" - ") ? folder.slice(folder.indexOf(" - ") + 3) : "";
+  const fields = {};
+  if (planNotes.length) {
+    const text = planNoteFor(planNotes, `${stemName(stemOf(parts[parts.length - 1]))}.md`).text;
+    for (const key of ["emne", "uge", "ugedag", "dato", "start", "stop"]) {
+      const value = readFrontmatterField(text, key);
+      if (value) fields[key] = value;
+    }
+  }
+  const noFolderMeta = folder === "RAW" || /^(\d{4}-\d{2}-\d{2}|W\d{1,2}[a-zæøå]+)$/i.test(folder);
+  const emne = fields.emne || folderEmne || (noFolderMeta ? "" : folder);
+  let timeFields = Object.fromEntries(["uge", "ugedag", "dato"].filter((k) => k in fields).map((k) => [k, fields[k]]));
+  if (!Object.keys(timeFields).length && fields.start) timeFields = timeFieldsFromStart(fields.start);
+
+  const lines = [`fag: ${plainFag(t.fagFolder)}\n`];
+  for (const k of ["uge", "ugedag", "dato"]) if (k in timeFields) lines.push(`${k}: ${timeFields[k]}\n`);
+  lines.push("type: materiale\n", `kilde: "[[${rawFilePath}]]"\n`, `hentet: "${hentet}"\n`);
+  if (emne) lines.push(`emne: "${emne}"\n`);
+  for (const key of ["start", "stop"]) if (key in fields) lines.push(`${key}: "${fields[key]}"\n`);
+  return "---\n" + lines.join("") + extra + "---\n\n";
+}
+
+// Bevar `lektion:` og `used_in:` ved genkonvertering (#186, #148).
+function carriedFields(previousText) {
+  if (previousText == null) return "";
+  const fm = previousText.startsWith("---") ? previousText.split("---")[1] ?? "" : "";
+  let out = "";
+  const lektion = readFrontmatterField(fm, "lektion");
+  if (lektion) out += `lektion: "${lektion}"\n`;
+  const usedIn = /^used_in:[ \t]*\n(?:[ \t]+-[^\n]*\n?)+/m.exec(fm);
+  if (usedIn) out += usedIn[0].endsWith("\n") ? usedIn[0] : usedIn[0] + "\n";
+  return out;
+}
+
+// Returnerer den nye tekst, eller null når plan_id allerede står der / er notens egen lektion.
+function appendUsedIn(text, planId) {
+  const m = /^(---\n[\s\S]*?\n)(---\n)([\s\S]*)$/.exec(text);
+  if (!m) return null;
+  let [, fm, close, body] = m;
+  const entry = `  - "${planId}"\n`;
+  if (fm.includes(entry) || readFrontmatterField(fm, "lektion") === planId) return null;
+  fm = /^used_in:[ \t]*$/m.test(fm) ? fm.replace(/^(used_in:[ \t]*\n)/m, `$1${entry}`) : fm + `used_in:\n${entry}`;
+  return fm + close + body;
+}
+
+// ── Sidemarkører, fodnoter og løbende sidehoved fra content_list.json (#98, #101, #103, #142) ──
+
+const isDigits = (s) => /^[0-9]+$/.test(s);
+const blockText = (b) => (b.text ?? "").trim();
+
+function groupBlocksByPage(blocks) {
+  const pages = new Map();
+  for (const b of blocks) {
+    if (b.page_idx == null) continue;
+    if (!pages.has(b.page_idx)) pages.set(b.page_idx, []);
+    pages.get(b.page_idx).push(b);
+  }
+  return pages;
+}
+
+function printedPageNumber(pageBlocks) {
+  const numbers = [];
+  const other = [];
+  for (const b of pageBlocks) {
+    if (b.type !== "page_number") continue;
+    const text = blockText(b);
+    if (!text) continue;
+    if (isDigits(text)) numbers.push(Number(text));
+    else other.push(text);
+  }
+  if (numbers.length) {
+    const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+    return sorted.length > 1 ? `${sorted[0]}–${sorted[sorted.length - 1]}` : String(sorted[0]);
+  }
+  return other[0] ?? null;
+}
+
+function pageFootnotes(pageBlocks) {
+  return pageBlocks.filter((b) => b.type === "page_footnote" && blockText(b)).map(blockText);
+}
+
+function bisectBlocks(pageBlocks, coordIndex, mid) {
+  const halves = [[], []];
+  for (const b of pageBlocks) halves[(b.bbox ? b.bbox[coordIndex] : 0) < mid ? 0 : 1].push(b);
+  return halves;
+}
+
+// ponytail: kan formentlig slettes når PDFable splitter opslag før upload — måles i #241 trin 4.
+function splitDoublePage(pageBlocks, pageSize) {
+  const pageNums = (blocks) => new Set(blocks.filter((b) => b.type === "page_number" && isDigits(blockText(b))).map((b) => Number(blockText(b))));
+  if (pageNums(pageBlocks).size !== 2) return null;
+  for (const [coordIndex, dimension] of [[0, pageSize[0]], [1, pageSize[1]]]) {
+    const halves = bisectBlocks(pageBlocks, coordIndex, dimension / 2);
+    if (!halves[0].length || !halves[1].length) continue;
+    const [a, b] = halves.map(pageNums);
+    if (a.size && b.size && ![...a].some((n) => b.has(n))) return halves;
+  }
+  return null;
+}
+
+function pageSizes(layout) {
+  const sizes = new Map();
+  for (const page of layout?.pdf_info ?? []) if ("page_size" in page) sizes.set(page.page_idx, page.page_size);
+  return sizes;
+}
+
+function runningHeader(blocks) {
+  const texts = blocks.filter((b) => (b.type === "header" || b.type === "footer") && blockText(b)).map(blockText);
+  if (!texts.length) return null;
+  const counts = new Map();
+  for (const t of texts) counts.set(t, (counts.get(t) ?? 0) + 1);
+  let best = null;
+  for (const [t, n] of counts) if (best == null || n > counts.get(best)) best = t;
+  return counts.get(best) >= texts.length / 2 ? best : null;
+}
+
+function firstAnchorText(pageBlocks) {
+  const skip = new Set(["page_number", "header", "footer", "aside_text"]);
+  for (const b of pageBlocks) {
+    if (skip.has(b.type)) continue;
+    const text = blockText(b);
+    if (text) return [...text].slice(0, ANCHOR_LENGTH).join("");
+  }
+  return null;
+}
+
+function formatPageMarker(label, footnotes, trailingRule = true) {
+  const trailer = trailingRule ? "\n\n---\n\n" : "\n";
+  return footnotes.length
+    ? `\n\n---\n${footnotes.join("\n\n")}\n\n*— side ${label} —*${trailer}`
+    : `\n\n*— side ${label} —*${trailer}`;
+}
+
+function insertPageMarkers(fullMd, blocks, layout) {
+  const sizes = pageSizes(layout);
+  const pages = groupBlocksByPage(blocks);
+  let result = fullMd;
+  let searchPos = 0;
+  let pendingLabel = null;
+  let pendingFootnotes = [];
+  for (const pageIdx of [...pages.keys()].sort((a, b) => a - b)) {
+    const pageBlocks = pages.get(pageIdx);
+    const size = sizes.get(pageIdx);
+    const groups = (size ? splitDoublePage(pageBlocks, size) : null) ?? [pageBlocks];
+    for (const group of groups) {
+      const anchor = firstAnchorText(group);
+      if (!anchor) continue;
+      let idx = result.indexOf(anchor, searchPos);
+      if (idx === -1) continue;
+      const lineStart = result.lastIndexOf("\n", idx - 1) + 1;
+      if (pendingLabel != null) {
+        const marker = formatPageMarker(pendingLabel, pendingFootnotes);
+        result = result.slice(0, lineStart) + marker + result.slice(lineStart);
+        idx += marker.length;
+      }
+      pendingLabel = printedPageNumber(group) ?? String(pageIdx + 1);
+      pendingFootnotes = pageFootnotes(group);
+      searchPos = idx + anchor.length;
+    }
+  }
+  if (pendingLabel != null) result = result.replace(/\n+$/, "") + formatPageMarker(pendingLabel, pendingFootnotes, false);
+  return result;
+}
+
+// Zip-indhold → { body, sektion }: det watcherens write_conversion() skriver under frontmatteren.
+function conversionBody(entries) {
+  if (!entries.has("full.md")) throw new MineruError("MinerU-zippen mangler full.md");
+  let md = entries.get("full.md").toString("utf8");
+  let sektion = null;
+  const contentListName = [...entries.keys()].find((n) => !n.includes("/") && n.endsWith("_content_list.json"));
+  if (contentListName) {
+    let blocks = null;
+    try { blocks = JSON.parse(entries.get(contentListName).toString("utf8")); } catch {}
+    if (blocks) {
+      let layout = null;
+      try { layout = entries.has("layout.json") ? JSON.parse(entries.get("layout.json").toString("utf8")) : null; } catch {}
+      md = insertPageMarkers(md, blocks, layout);
+      sektion = runningHeader(blocks);
+    }
+  }
+  return { body: toWikilinks(md), sektion };
+}
+
+// MinerU-zips bruger kun stored/deflate (målt på cachen 2026-10-12), så Nodes zlib rækker.
+// ponytail: ingen zip64; tilføjes hvis en zip nogensinde passerer 4 GB.
+function unzip(arrayBuffer) {
+  const zlib = require("zlib");
+  const buf = Buffer.from(arrayBuffer);
+  let eocd = buf.length - 22;
+  while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  if (eocd < 0) throw new Error("ugyldig zip (ingen end-of-central-directory)");
+  const entries = new Map();
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let i = buf.readUInt16LE(eocd + 10); i > 0; i--) {
+    const method = buf.readUInt16LE(p + 10);
+    const size = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const name = buf.toString("utf8", p + 46, p + 46 + nameLen);
+    const local = buf.readUInt32LE(p + 42);
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(start, start + size);
+    if (!name.endsWith("/")) {
+      if (method === 0) entries.set(name, data);
+      else if (method === 8) entries.set(name, zlib.inflateRawSync(data));
+      else throw new Error(`zip-metode ${method} understøttes ikke (${name})`);
+    }
+    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return entries;
+}
+
+// ── MinerU-API og cache ──
+
+function withTimeout(promise, ms, what) {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => (timer = setTimeout(() => reject(new Error(`timeout efter ${ms / 1000}s: ${what}`)), ms)))])
+    .finally(() => clearTimeout(timer));
+}
+
+async function mineruRequest(token, method, path, body) {
+  const res = await withTimeout(
+    requestUrl({ url: `${MINERU_API}${path}`, method, headers: { Authorization: `Bearer ${token}` }, contentType: "application/json", body: body && JSON.stringify(body), throw: false }),
+    30e3, path
+  );
+  if (res.status >= 400) throw new Error(`MinerU HTTP ${res.status} på ${path}`);
+  return res.json;
+}
+
+// 200 = gyldig nøgle (svaret er "task not found"), 401 = ugyldig. Målt 2026-10-12.
+async function testMineruToken(token) {
+  const res = await requestUrl({ url: `${MINERU_API}/extract-results/batch/00000000-0000-0000-0000-000000000000`, headers: { Authorization: `Bearer ${token}` }, throw: false });
+  return res.status === 200;
+}
+
+async function mineruConvert(token, fileName, dataId, bytes) {
+  const resp = await mineruRequest(token, "POST", "/file-urls/batch", { files: [{ name: fileName, data_id: dataId }], model_version: "vlm" });
+  if (resp.code !== 0) throw new MineruError(`file-urls/batch fejlede: ${JSON.stringify(resp)}`);
+  const { batch_id: batchId, file_urls: [uploadUrl] } = resp.data;
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const put = await withTimeout(requestUrl({ url: uploadUrl, method: "PUT", body: bytes, throw: false }), UPLOAD_TIMEOUT_MS, "upload");
+      if (put.status >= 400) throw new Error(`upload HTTP ${put.status}`);
+      break;
+    } catch (err) {
+      if (attempt === UPLOAD_RETRIES) throw err;
+      console.warn(`ItsWiz: upload-forsøg ${attempt}/${UPLOAD_RETRIES} for ${fileName} fejlede (${err.message}) — prøver igen om ${UPLOAD_RETRY_BACKOFF_MS / 1000}s`);
+      await sleep(UPLOAD_RETRY_BACKOFF_MS);
+    }
+  }
+
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const result = (await mineruRequest(token, "GET", `/extract-results/batch/${batchId}`)).data.extract_result[0];
+    if (result.state === "done") {
+      const zip = await withTimeout(requestUrl({ url: result.full_zip_url, throw: false }), 120e3, "zip-download");
+      if (zip.status >= 400) throw new Error(`zip-download HTTP ${zip.status}`);
+      return zip.arrayBuffer;
+    }
+    if (result.state === "failed") throw new MineruError(`MinerU-fejl: ${result.err_msg}`);
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new Error(`timeout efter ${POLL_TIMEOUT_MS / 1000}s`);
+}
+
+// Samme mappe som watcheren, så dens zips genbruges (#99). Fejer forældede filer ved skrivning.
+function cacheDir() {
+  return require("path").join(require("os").homedir(), ".viastudywiz-cache");
+}
+
+function cachedZip(digest) {
+  const fs = require("fs");
+  const file = require("path").join(cacheDir(), `${digest}.zip`);
+  try {
+    if (Date.now() - fs.statSync(file).mtimeMs > CACHE_TTL_MS) return fs.unlinkSync(file), null;
+    const b = fs.readFileSync(file);
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(digest, arrayBuffer) {
+  const fs = require("fs");
+  const path = require("path");
+  const dir = cacheDir();
+  fs.mkdirSync(dir, { recursive: true });
+  for (const name of fs.readdirSync(dir)) {
+    const f = path.join(dir, name);
+    if (name.endsWith(".zip") && Date.now() - fs.statSync(f).mtimeMs > CACHE_TTL_MS) fs.unlinkSync(f);
+  }
+  fs.writeFileSync(path.join(dir, `${digest}.zip`), Buffer.from(arrayBuffer));
+}
+
+const sha256 = (arrayBuffer) => require("crypto").createHash("sha256").update(Buffer.from(arrayBuffer)).digest("hex");
+
+// ── Vault-siden ──
+
+async function planNotesIn(mdDir) {
+  const folder = plugin.app.vault.getAbstractFileByPath(normalizePath(mdDir));
+  if (!(folder instanceof TFolder)) return [];
+  const files = folder.children.filter((f) => f instanceof TFile && f.extension === "md" && f.name.startsWith("[PLAN] "));
+  files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return Promise.all(files.map(async (f) => ({ name: f.name, text: await plugin.app.vault.read(f) })));
+}
+
+// Byte-dublet i samme RAW-gren, hvis MD-note er en ægte `type: materiale` (#136/#148).
+async function existingConversion(file, bytes, digest) {
+  const { rawRoot } = mdTargets(file.path);
+  const suffix = file.name.slice(file.name.lastIndexOf("."));
+  const others = plugin.app.vault.getFiles()
+    .filter((f) => f.path.startsWith(`${rawRoot}/`) && f.name.endsWith(suffix) && f.path !== file.path && f.stat.size === bytes.byteLength)
+    .sort((a, b) => (a.path < b.path ? -1 : 1));
+  for (const other of others) {
+    if (sha256(await plugin.app.vault.readBinary(other)) !== digest) continue;
+    const otherMd = mdTargets(other.path).md;
+    const text = await readFromVault(otherMd);
+    if (text != null && readFrontmatterField(text, "type") === "materiale") return otherMd;
+  }
+  return null;
+}
+
+async function writeConversion(file, entries) {
+  const t = mdTargets(file.path);
+  const { body, sektion } = conversionBody(entries);
+  const previous = await readFromVault(t.md);
+  // #42: skriv ved siden af, hvis den eksisterende note har highlights.
+  const protect = previous != null && HIGHLIGHT_RE.test(previous);
+  const destMd = protect ? t.md.replace(/\.md$/, ".ny.md") : t.md;
+  const destImages = protect ? `${t.images}.ny` : t.images;
+
+  const planNotes = await planNotesIn(t.mdDir);
+  const mdName = t.md.slice(t.md.lastIndexOf("/") + 1);
+  let carried = carriedFields(previous);
+  const owner = carried.includes("lektion:") ? null : provenPlanId(planNotes, mdName);
+  if (owner) carried = `lektion: "${owner}"\n` + carried;
+  const extra = (sektion ? `sektion: "${sektion}"\n` : "") + carried;
+  await writeVaultFile(destMd, materialeFrontmatter(file.path, planNotes, formatNow(), extra) + body);
+
+  const images = [...entries].filter(([n]) => n.startsWith("images/"));
+  if (images.length) {
+    const { adapter } = plugin.app.vault;
+    if (await adapter.exists(normalizePath(destImages))) await adapter.rmdir(normalizePath(destImages), true);
+    for (const [n, data] of images) await writeVaultFile(`${destImages}/${n.slice("images/".length)}`, data.buffer.slice(data.byteOffset, data.byteOffset + data.length));
+  }
+  if (protect) console.log(`ItsWiz: highlights i ${mdName} — ny konvertering skrevet til ${destMd.slice(destMd.lastIndexOf("/") + 1)} (#42)`);
+}
+
+async function processDocument(file, { force = false } = {}) {
+  const t = mdTargets(file.path);
+  const marker = errorMarkerPath(file.path);
+  if (!force && ((await existsInVault(t.md)) || (await plugin.app.vault.adapter.exists(normalizePath(marker))))) return;
+  const bytes = await plugin.app.vault.readBinary(file);
+  const digest = sha256(bytes);
+
+  if (!force) {
+    const originalMd = await existingConversion(file, bytes, digest);
+    if (originalMd) {
+      const planId = owningPlanId(await planNotesIn(t.mdDir), t.md.slice(t.md.lastIndexOf("/") + 1));
+      const updated = planId && appendUsedIn(await readFromVault(originalMd), planId);
+      if (updated) await writeVaultFile(originalMd, updated);
+      console.log(`ItsWiz: dublet af ${originalMd} — ${updated ? `${planId} tilføjet dens used_in:` : "ingen ny used_in:"}`);
+      return;
+    }
+  }
+
+  try {
+    let zip = cachedZip(digest);
+    if (zip) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
+    else {
+      console.log(`ItsWiz: uploader til MinerU: ${file.name}`);
+      // #250: MinerU afviser data_id over 128 bytes.
+      const dataId = Buffer.from(stemName(file.basename)).subarray(0, 128).toString("utf8").replace(/�+$/, "");
+      zip = await mineruConvert(mineruToken(), file.name, dataId, bytes);
+      writeCache(digest, zip);
+    }
+    await writeConversion(file, unzip(zip));
+    console.log(`ItsWiz: færdig: ${file.name}`);
+  } catch (err) {
+    if (!(err instanceof MineruError)) {
+      console.warn(`ItsWiz: forbigående fejl ved ${file.name} (prøves igen ved næste start): ${err.message}`);
+      return;
+    }
+    console.error(`ItsWiz: fejl ved ${file.name}: ${err.message}`);
+    await plugin.app.vault.adapter.write(normalizePath(marker), err.message);
+  }
+}
+
+// Én fil ad gangen, som watcheren: MinerU-kø og upload-båndbredde deles alligevel.
+let conversionQueue = Promise.resolve();
+const queuedConversions = new Set();
+
+function isConvertible(file) {
+  return file instanceof TFile && inRawBranch(file.path) && CONVERT_SUFFIXES.includes(`.${file.extension.toLowerCase()}`);
+}
+
+async function queueConversion(file) {
+  const { enableConversion } = await getSettings();
+  if (!enableConversion || !mineruToken() || !isConvertible(file) || queuedConversions.has(file.path)) return;
+  queuedConversions.add(file.path);
+  conversionQueue = conversionQueue
+    .then(() => processDocument(file))
+    .catch((err) => console.error(`ItsWiz: konvertering af ${file.path} fejlede:`, err))
+    .finally(() => queuedConversions.delete(file.path));
+}
+
+// Syncthing-konflikter blev løst af watcheren, den eneste proces der så hele vaulten. Scriptet
+// ligger i vaulten selv og findes kun hos Valdemar; mangler det, sker intet.
+function resolveSyncConflict(file) {
+  const path = require("path");
+  const base = plugin.app.vault.adapter.getBasePath();
+  const script = path.join(base, ".scripts", "resolve_sync_conflict.py");
+  if (!require("fs").existsSync(script)) return;
+  require("child_process").execFile("python3", [script, path.join(base, file.path)], (err, stdout, stderr) => {
+    if (stdout) console.log(stdout.trim());
+    if (err || stderr) console.error(`ItsWiz: resolve_sync_conflict.py fejlede: ${stderr || err.message}`);
+  });
+}
+
+async function onVaultCreate(file) {
+  if (!(file instanceof TFile) || !(await getSettings()).enableConversion) return;
+  // Lad Syncthing/downloadet skrive færdigt, som watcheren (2 s).
+  await sleep(2000);
+  if (file.name.includes("sync-conflict-")) return resolveSyncConflict(file);
+  queueConversion(file);
+}
+
+function scanExisting() {
+  const files = plugin.app.vault.getFiles().filter(isConvertible).sort((a, b) => (a.path < b.path ? -1 : 1));
+  for (const f of files) queueConversion(f);
+}
+
 // ── Obsidian-delen ──
 
 class ItsWizView extends ItemView {
@@ -2184,6 +2728,30 @@ class ItsWizSettingTab extends PluginSettingTab {
         t.setValue(s[key] ?? DEFAULT_SETTINGS[key]).onChange((v) => ((s[key] = v), save()))
       );
     }
+
+    containerEl.createEl("h3", { text: "Konvertering til markdown (MinerU)" });
+    new Setting(containerEl)
+      .setName("Konvertér RAW-filer")
+      .setDesc("Sender nye PDF- og Office-filer under RAW/ til MinerU og skriver MD-noten. Valgfrit: slået fra linker lektionsplanerne til originalfilen. Slå først til, når watch_viastudywiz.py er stoppet, ellers konverteres hver fil to gange.")
+      .addToggle((t) => t.setValue(s.enableConversion ?? false).onChange((v) => ((s.enableConversion = v), save(), v && scanExisting())));
+    const tokenDesc = createFragment((f) => {
+      f.appendText("Hentes på ");
+      f.createEl("a", { text: "mineru.net", href: MINERU_TOKEN_URL });
+      f.appendText(" (log ind → API → token).");
+    });
+    new Setting(containerEl)
+      .setName("MinerU-nøgle")
+      .setDesc(tokenDesc)
+      .addText((t) => {
+        t.inputEl.type = "password";
+        t.setValue(mineruToken()).onChange((v) => this.app.saveLocalStorage(MINERU_TOKEN_KEY, v.trim() || null));
+      })
+      .addButton((b) =>
+        b.setButtonText("Test nøgle").onClick(async () => {
+          const ok = mineruToken() && (await testMineruToken(mineruToken()).catch(() => false));
+          new Notice(ok ? "ItsWiz: MinerU-nøglen virker." : "ItsWiz: MinerU afviste nøglen.");
+        })
+      );
   }
 }
 
@@ -2205,7 +2773,13 @@ class ItsWizPlugin extends Plugin {
     this.statusEl.addClass("mod-clickable");
     this.statusEl.onClickEvent(() => showRunErrors());
     updateStatusBar();
-    this.app.workspace.onLayoutReady(() => runCollectAndDownload({ auto: true }));
+    this.app.workspace.onLayoutReady(() => {
+      // Efter layout-ready: før det fyrer Obsidian "create" for hver eksisterende fil.
+      this.registerEvent(this.app.vault.on("create", (f) => onVaultCreate(f)));
+      getSettings().then((st) => st.enableConversion && scanExisting());
+      runCollectAndDownload({ auto: true });
+    });
+    this.convert = (path, opts) => processDocument(this.app.vault.getAbstractFileByPath(path), opts);
     this.registerInterval(window.setInterval(() => tick(), KEEPALIVE_MINUTES * 60e3));
   }
 
@@ -2239,6 +2813,17 @@ Object.assign(module.exports, {
   rawPath,
   mdPath,
   fileLink,
+  mdTargets,
+  errorMarkerPath,
+  timeFieldsFromStart,
+  materialeFrontmatter,
+  carriedFields,
+  appendUsedIn,
+  provenPlanId,
+  insertPageMarkers,
+  runningHeader,
+  conversionBody,
+  unzip,
   noteStubPath,
   planLiteratureText,
   matchLiteratureElements,
