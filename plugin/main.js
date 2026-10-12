@@ -2535,6 +2535,45 @@ function writeCache(digest, arrayBuffer) {
 
 const sha256 = (arrayBuffer) => require("crypto").createHash("sha256").update(Buffer.from(arrayBuffer)).digest("hex");
 
+// ── PDFable før MinerU (#241 trin 3; kontrakten ligger i FasterMadman/bitonalPDF#111) ──
+//
+// Retter skæve, liggende og dobbeltside-scans, som MinerU ellers læser i forkert rækkefølge (#211).
+// Valgfrit som MinerU: uden programsti uploades originalen. Stien er pr. enhed (localStorage).
+
+const PDFABLE_PATH_KEY = "itswiz-pdfable-path";
+const PDFABLE_FLAGS = ["--rotate", "--crop", "--split", "auto", "--deskew"];
+const PDFABLE_TIMEOUT_MS = 5 * 60e3;
+const pdfablePath = () => plugin.app.loadLocalStorage(PDFABLE_PATH_KEY) ?? "";
+
+// Den forbehandlede PDF, eller null (ingen sti, ikke en PDF, ingen fil skrevet, fejl), hvorefter
+// originalen uploades. Originalen i RAW røres aldrig; kopien lever kun i en temp-mappe.
+async function pdfable(file, bytes) {
+  const bin = pdfablePath();
+  if (!bin || file.extension.toLowerCase() !== "pdf") return null;
+  const fs = require("fs");
+  const path = require("path");
+  const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "itswiz-pdfable-"));
+  const input = path.join(dir, "in.pdf");
+  const output = path.join(dir, "out.pdf");
+  try {
+    fs.writeFileSync(input, Buffer.from(bytes));
+    const { code, stderr } = await new Promise((resolve) =>
+      require("child_process").execFile(bin, [...PDFABLE_FLAGS, input, output], { timeout: PDFABLE_TIMEOUT_MS },
+        (err, _stdout, stderr) => resolve({ code: err ? err.code ?? -1 : 0, stderr: String(stderr).trim() })));
+    // Exit 2: PDF'en er skrevet, men nogle opslag blev ikke splittet. Uploades alligevel.
+    if (code === 2) console.warn(`ItsWiz: PDFable usikker på sider i ${file.name}: ${stderr.split("\n").pop()}`);
+    else if (code !== 0) {
+      console.warn(`ItsWiz: PDFable fejlede på ${file.name} (exit ${code}), uploader originalen: ${stderr}`);
+      return null;
+    }
+    if (!fs.existsSync(output)) return null;
+    const b = fs.readFileSync(output);
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ── Vault-siden ──
 
 async function planNotesIn(mdDir) {
@@ -2612,7 +2651,7 @@ async function processDocument(file, { force = false } = {}) {
       console.log(`ItsWiz: uploader til MinerU: ${file.name}`);
       // #250: MinerU afviser data_id over 128 bytes.
       const dataId = Buffer.from(stemName(file.basename)).subarray(0, 128).toString("utf8").replace(/�+$/, "");
-      zip = await mineruConvert(mineruToken(), file.name, dataId, bytes);
+      zip = await mineruConvert(mineruToken(), file.name, dataId, (await pdfable(file, bytes)) ?? bytes);
       writeCache(digest, zip);
     }
     await writeConversion(file, unzip(zip));
@@ -2752,6 +2791,10 @@ class ItsWizSettingTab extends PluginSettingTab {
           new Notice(ok ? "ItsWiz: MinerU-nøglen virker." : "ItsWiz: MinerU afviste nøglen.");
         })
       );
+    new Setting(containerEl)
+      .setName("PDFable-program")
+      .setDesc("Valgfrit. Sti til PDFable (bitonalpdf), som retter skæve, liggende og dobbeltside-scans før MinerU. Tom: originalen uploades.")
+      .addText((t) => t.setPlaceholder("/sti/til/bitonalpdf").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
   }
 }
 
