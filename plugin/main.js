@@ -223,6 +223,7 @@ async function collectRangeInPage(startUnix, endUnix) {
   // fejl (kursus lukket, midlertidigt utilgængeligt) må ikke vælte resten af kørslen, samme
   // mønster som fetchTasks ovenfor.
   const orphanPlans = {};
+  const okCourseIds = []; // fag hvis planliste blev hentet uden fejl: kun dér kan en manglende plan betyde "aflyst" (#243)
   for (const courseId of courseIds) {
     try {
       const candidateIds = await fetchOrphanPlanCandidateIds(courseId);
@@ -231,6 +232,7 @@ async function collectRangeInPage(startUnix, endUnix) {
         if (planKeys.has(key)) continue; // allerede dækket via et kalender-event
         orphanPlans[key] = await fetchPlan(courseId, planId);
       }
+      okCourseIds.push(String(courseId));
     } catch (err) {
       console.warn(`VIAstudyWiz: kunne ikke hente forældreløse planer for kursus ${courseId}:`, err);
     }
@@ -255,6 +257,7 @@ async function collectRangeInPage(startUnix, endUnix) {
     events: events.map((e) => ({ ...e, parsedDescription: parseDescription(e.apiDescriptionPlainText ?? "") })),
     plans,
     orphanPlans,
+    okCourseIds,
     tasks,
   };
 }
@@ -1526,10 +1529,94 @@ const DEFAULT_SETTINGS = {
   alarmIntervalHours: 24,
   enableConversion: false,
   enableHoldCourseSync: false,
+  enableCalendarSync: false,
 };
 
 async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...plugin.data.settings };
+}
+
+// ── Kalender: personlige itslearning-events (#243) ──
+// Ét event pr. lektion og pr. afleveringsfrist i itslearnings egen kalender (location "0" = personlig),
+// som Outlook og telefonen abonnerer på via iCal-feedet. plan_id -> eventId ligger i data.json
+// (calendarEventMap). ItsWiz rører kun event-id'er fra det kort, aldrig noget den ikke selv har oprettet.
+
+// Kun kalenderen: vaultmapperne (FOLDER_SYMBOLS) ændres ikke.
+const CALENDAR_SYMBOLS = { ...FOLDER_SYMBOLS, Dansk: "Æ", PædPsyk: "Ψ", PædAd: "⚘", Praktik: "⌂", Teknologiforståelse: "⌘" };
+const TASK_EVENT_MINUTES = 30;
+const CANCELLED_PREFIX = "AFLYST · ";
+
+// itslearning koder "ingen specifik tid" som 00:01–23:59 (samme regel som background.js).
+function planHasSpecificTime(plan) {
+  if (!plan?.start || !plan?.stop) return false;
+  return (new Date(plan.stop) - new Date(plan.start)) / 3600000 < 23;
+}
+
+const escapeHtml = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const itslLink = (url, text) => (url ? `<a href="${escapeHtml(url.startsWith("/") ? BASE + url : url)}">${escapeHtml(text)}</a>` : escapeHtml(text));
+
+function calendarTitle(courseName, ...parts) {
+  const fag = courseDisplayName(courseName ?? "ukendt-fag");
+  const sym = CALENDAR_SYMBOLS[fag];
+  return `${sym ? sym + " " : ""}${fag}: ${parts.filter(Boolean).join(" — ")}`;
+}
+
+// itslearning gemmer vægur-tid uden zone, så plan.start.slice(0, 19) er det rigtige format.
+function lessonEvent(key, plan) {
+  const topic = plan.topic?.name?.trim();
+  const title = (plan.title ?? "").replace(/^Uge\s*\d+\s+\S+\s*[-–:]?\s*/i, "").trim();
+  const parts = [`<p>${plan.description ?? ""}</p>`];
+  const lit = plan.fields?.find((f) => f.headingText?.toLowerCase().includes("litteratur"))?.text;
+  if (lit) parts.push(`<p><b>▥ Tilhørende litteratur</b></p>${lit}`);
+  for (const el of forberedelseElements(plan)) {
+    parts.push(`<p><b>⚒ Forberedelse — ${escapeHtml(el.titel)}</b>${el.url ? " " + itslLink(el.url, "(åbn)") : ""}</p>${el.body ?? ""}`);
+  }
+  const mats = (plan.elements ?? []).filter((el) => el.typeName !== "Arbejdsopgave");
+  if (mats.length) parts.push(`<p><b>Materialer</b></p><ul>${mats.map((el) => `<li>${itslLink(el.url, el.title)}</li>`).join("")}</ul>`);
+  return { key, title: calendarTitle(plan.courseName, topic, title), description: parts.join(""), start: plan.start.slice(0, 19), end: plan.stop.slice(0, 19) };
+}
+
+function taskEvent(task) {
+  const end = task.Deadline.slice(0, 19);
+  const start = new Date(new Date(end + "Z").getTime() - TASK_EVENT_MINUTES * 60000).toISOString().slice(0, 19);
+  const title = `⚑ ${courseDisplayName(task.CourseTitle ?? "ukendt-fag")}: aflevering: ${task.TaskTitle}`;
+  return { key: taskId(task), title, description: `<p>${itslLink(task.TaskUrl, "Åbn opgaven i itslearning")}</p>`, start, end };
+}
+
+// Alle events der skal findes, fra en høst. Planer uden tid og planer før i går springes over.
+function calendarItems(result, nowIso) {
+  const from = new Date(new Date(nowIso).getTime() - 86400e3).toISOString().slice(0, 19);
+  const items = [];
+  for (const [key, plan] of Object.entries({ ...result.plans, ...result.orphanPlans })) {
+    if (plan && planHasSpecificTime(plan) && plan.start.slice(0, 19) >= from) items.push(lessonEvent(key, plan));
+  }
+  for (const task of result.tasks ?? []) if (task.Deadline.slice(0, 19) >= from) items.push(taskEvent(task));
+  for (const it of items) it.hash = simpleHash(`${it.title}\n${it.description}`);
+  return items;
+}
+
+// Ren beslutning: hvad skal der ske med hvert event. map = calendarEventMap, existing = Map eventId ->
+// {title, description} for de personlige events der findes nu, seenKeys = alle plan-nøgler høsten
+// så (også uden for vinduet/uden tid), okCourseIds = fag hvis planliste blev hentet uden fejl.
+// Flyttet (start/end ændret): opret nyt FØR det gamle slettes, så en fejl ikke efterlader et hul.
+// Aflyst: planen er væk fra et fag der blev hentet uden fejl, og lektionen ligger fremme i tiden.
+function calendarActions(items, map, existing, seenKeys, okCourseIds, nowIso) {
+  const actions = [];
+  const itemKeys = new Set();
+  for (const it of items) {
+    itemKeys.add(it.key);
+    const e = map[it.key];
+    if (!e || !existing.has(e.eventId)) actions.push({ type: "create", item: it }); // også når du selv har slettet den
+    else if (e.start !== it.start || e.end !== it.end) actions.push({ type: "move", item: it, oldEventId: e.eventId });
+    else if (e.hash !== it.hash || e.cancelled) actions.push({ type: "edit", item: it, eventId: e.eventId });
+  }
+  const nowLocal = nowIso.slice(0, 19);
+  for (const [key, e] of Object.entries(map)) {
+    if (itemKeys.has(key) || seenKeys.has(key) || e.cancelled || key.startsWith("opgave:")) continue;
+    if (!okCourseIds.has(key.split(":")[0]) || e.start < nowLocal || !existing.has(e.eventId)) continue;
+    actions.push({ type: "cancel", key, eventId: e.eventId });
+  }
+  return actions;
 }
 
 // ── Fejl og opsummering (C, #240, gør det til statusbar + notifikationer) ──
@@ -1926,6 +2013,14 @@ async function collectAndDownload(startUnix, endUnix) {
       await writePlanNotes(plans, null, settings.enableTaskCompletionSync);
       await writeTaskNotes(result.tasks ?? []);
     }
+    if (settings.enableCalendarSync) {
+      try {
+        await syncCalendar(result);
+      } catch (err) {
+        console.error("ItsWiz kalender-fejl:", err);
+        recordError(`Kalender: ${err.message}`);
+      }
+    }
     notifyRunSummary();
     console.log("VIAstudyWiz: kørsel færdig");
     return result;
@@ -1977,6 +2072,141 @@ async function runCollectAndDownload({ auto = false } = {}) {
     plugin.lastRun = { ...plugin.lastRun, finishedAt: new Date().toISOString(), files: runFilesDownloaded, errors: runErrorMessages, changed: runChangedNotes };
     isRunning = false;
     updateStatusBar();
+  }
+}
+
+// ── Kalender-kald (#243) ──
+
+// Kører i itslearning-siden (samme cookies). Kun sletning kræver anti-forgery-token, som står i
+// Schedule.aspx; siden hentes som tekst, uden at navigere (forsiden må aldrig indlæses).
+async function calendarCallInPage(method, path, body, withToken) {
+  const headers = { "x-requested-with": "XMLHttpRequest", "content-type": "application/json; charset=UTF-8" };
+  if (withToken) {
+    const html = await (await fetch("/Calendar/Schedule.aspx", { credentials: "include" })).text();
+    // Målt 2026-10-12: antiForgeryHeaderSettings = {"headerName":"__ITSL_ANTIFORGERY_TOKEN__","headerValue":"…"}.
+    const raw = html.match(/antiForgeryHeaderSettings\s*=\s*(\{[^}]*\})/)?.[1];
+    const { headerName, headerValue } = raw ? JSON.parse(raw) : {};
+    if (!headerName || !headerValue) throw new Error("fandt ikke anti-forgery-token i Schedule.aspx");
+    headers[headerName] = headerValue;
+  }
+  const res = await fetch(path, { method, credentials: "include", headers, body: body == null ? undefined : JSON.stringify(body) });
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json };
+}
+
+async function calendarCall(method, path, body, withToken = false) {
+  const { status, json } = await inPage(calendarCallInPage, method, path, body, withToken);
+  if (status >= 300) throw new Error(`${method} ${path.split("?")[0]} svarede ${status}`);
+  return json;
+}
+
+const calendarCreate = async (it) =>
+  Number((await calendarCall("POST", "/RestApi/calendar/createEventWithLocation", {
+    location: "0", groupId: 0, start: it.start, end: it.end, title: it.title, description: it.description,
+    extraDescription: "", elementIds: "[]", nextEventId: 0, EventIdToCopy: 0,
+  })).createdEvent.id);
+
+async function calendarEdit(eventId, title, description) {
+  await calendarCall("PUT", "/RestApi/calendar/editEventTitle", { EventId: eventId, Text: title, HasResources: false });
+  await calendarCall("PUT", "/RestApi/calendar/editEventDescription", { EventId: eventId, Text: description, HasResources: false });
+}
+
+// Sletning er idempotent (204 også ved gentagelse). Kun id'er ItsWiz selv har oprettet kommer hertil.
+const calendarDelete = (eventId) =>
+  calendarCall("DELETE", `/RestApi/calendarevents/deleteevent/events/${eventId}/v1?deleteRecurringSeries=false`, null, true); // null, ikke undefined: inPage kan ikke serialisere undefined
+
+// eventId -> {title, description} for personlige events i [fromIso, toIso].
+async function calendarListPersonal(fromIso, toIso) {
+  const filter = JSON.stringify({ courseIds: [], projectIds: [], personal: true, hierarchyIds: [] });
+  const unix = (iso) => Math.floor(Date.parse(iso + "Z") / 1000);
+  const r = await calendarCall("POST", "/RestApi/calendar/myEvents", { filter, start: unix(fromIso) - 86400, end: unix(toIso) + 86400 });
+  // Målt 2026-10-12: en array af {id (streng), EventTitle, start, end, description, …}. `title` er kategorien ("Personlig").
+  return new Map((r ?? []).map((e) => [Number(e.id), { title: e.EventTitle, description: e.description ?? "" }]));
+}
+
+const saveCalendar = () => plugin.saveData(plugin.data);
+
+// Slet det der står i køen (flyttede events og "fjern alle"). Det der fejler, bliver i køen til næste gang.
+async function drainCalendarDeleteQueue() {
+  const queue = plugin.data.calendarDeleteQueue;
+  for (const id of [...queue]) {
+    try {
+      await calendarDelete(id);
+      queue.splice(queue.indexOf(id), 1);
+      await saveCalendar();
+    } catch (err) {
+      recordError(`Kalender: kunne ikke slette ${id}: ${err.message}`);
+    }
+  }
+}
+
+async function syncCalendar(result) {
+  const map = plugin.data.calendarEventMap;
+  const nowIso = new Date().toISOString();
+  const items = calendarItems(result, nowIso);
+  plugin.lastCalendar = { items: items.length, plans: Object.keys({ ...result.plans, ...result.orphanPlans }).length, tasks: (result.tasks ?? []).length }; // aflæses udefra (obsidian eval)
+  const starts = [...items, ...Object.values(map)];
+  if (starts.length === 0) return;
+  const existing = await calendarListPersonal(
+    starts.map((i) => i.start).sort()[0],
+    starts.map((i) => i.end).sort().at(-1)
+  );
+  const seenKeys = new Set(Object.keys({ ...result.plans, ...result.orphanPlans }));
+  const actions = calendarActions(items, map, existing, seenKeys, new Set(result.okCourseIds ?? []), nowIso);
+  const counts = { create: 0, edit: 0, move: 0, cancel: 0 };
+  for (const a of actions) {
+    try {
+      if (a.type === "create" || a.type === "move") {
+        // Opret FØR det gamle slettes: en fejl midt i efterlader aldrig et hul.
+        const eventId = await calendarCreate(a.item);
+        map[a.item.key] = { eventId, start: a.item.start, end: a.item.end, hash: a.item.hash, cancelled: false };
+        if (a.oldEventId) plugin.data.calendarDeleteQueue.push(a.oldEventId);
+        await saveCalendar(); // efter HVER oprettelse, så et nedbrud ikke giver dubletter
+      } else if (a.type === "edit") {
+        await calendarEdit(a.eventId, a.item.title, a.item.description);
+        Object.assign(map[a.item.key], { hash: a.item.hash, cancelled: false });
+        await saveCalendar();
+      } else {
+        const cur = existing.get(a.eventId);
+        await calendarEdit(
+          a.eventId,
+          CANCELLED_PREFIX + cur.title,
+          `<p>Lektionen findes ikke længere i itslearning, set ${nowIso.slice(0, 10)}.</p>${cur.description}`
+        );
+        map[a.key].cancelled = true;
+        await saveCalendar();
+      }
+      counts[a.type]++;
+    } catch (err) {
+      recordError(`Kalender (${a.type} ${a.item?.title ?? a.key}): ${err.message}`);
+    }
+  }
+  await drainCalendarDeleteQueue();
+  Object.assign(plugin.lastCalendar, { counts, existing: existing.size });
+  console.log(`ItsWiz: kalender ${JSON.stringify(counts)}, ${items.length} events i vinduet`);
+}
+
+// Vejen tilbage: sletter alt ItsWiz har oprettet, aldrig andet.
+async function removeAllCalendarEvents() {
+  if (isRunning) return new Notice("ItsWiz: en kørsel er allerede i gang.");
+  isRunning = true;
+  try {
+    await openHarvestWindow();
+    const map = plugin.data.calendarEventMap;
+    plugin.data.calendarDeleteQueue.push(...Object.values(map).map((e) => e.eventId));
+    plugin.data.calendarEventMap = {};
+    await saveCalendar();
+    runErrorMessages = [];
+    await drainCalendarDeleteQueue();
+    const left = plugin.data.calendarDeleteQueue.length;
+    new Notice(left ? `ItsWiz: ${left} kalenderevents kunne ikke slettes, prøv igen.` : "ItsWiz: alle ItsWiz-kalenderevents er slettet.");
+  } catch (err) {
+    new Notice(`ItsWiz: fjernelse fejlede\n${err.message ?? err}`, 0);
+  } finally {
+    closeHarvestWindow();
+    isRunning = false;
   }
 }
 
@@ -3707,6 +3937,11 @@ class ItsWizSettingTab extends PluginSettingTab {
       .setName("Konvertér RAW-filer")
       .setDesc("Sender nye PDF- og Office-filer under RAW/ til MinerU og skriver MD-noten. Valgfrit: slået fra linker lektionsplanerne til originalfilen. Slå først til, når watch_viastudywiz.py er stoppet, ellers konverteres hver fil to gange.")
       .addToggle((t) => t.setValue(s.enableConversion ?? false).onChange((v) => ((s.enableConversion = v), save(), v && scanExisting())));
+    containerEl.createEl("h3", { text: "Kalender" });
+    new Setting(containerEl)
+      .setName("Personlige kalenderevents i itslearning")
+      .setDesc("Ét event pr. lektion og afleveringsfrist, med fuld lektionsplan. ItsWiz rører kun events den selv har oprettet. Kommandoen \"Fjern alle ItsWiz-kalenderevents\" sletter dem igen.")
+      .addToggle((t) => t.setValue(s.enableCalendarSync ?? false).onChange((v) => ((s.enableCalendarSync = v), save())));
     containerEl.createEl("h3", { text: "Hold Course" });
     new Setting(containerEl)
       .setName("Synk til Hold Course")
@@ -3741,7 +3976,7 @@ class ItsWizPlugin extends Plugin {
   async onload() {
     plugin = this;
     this.data = Object.assign(
-      { downloadedElementIds: [], planNoteContentHashes: {}, syncedFrontmatterVersion: null, settings: {} },
+      { downloadedElementIds: [], planNoteContentHashes: {}, syncedFrontmatterVersion: null, settings: {}, calendarEventMap: {}, calendarDeleteQueue: [] },
       await this.loadData()
     );
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
@@ -3749,6 +3984,7 @@ class ItsWizPlugin extends Plugin {
     this.addCommand({ id: "open", name: "Åbn itslearning", callback: () => this.openView() });
     this.addCommand({ id: "harvest", name: "Høst nu", callback: () => runCollectAndDownload() });
     this.addCommand({ id: "path-test", name: "Sti-test (én fil pr. download-vej til ItsWiz-test/)", callback: () => runPathTest() });
+    this.addCommand({ id: "remove-calendar", name: "Fjern alle ItsWiz-kalenderevents", callback: () => removeAllCalendarEvents() });
     this.addCommand({ id: "import", name: "Importér VIAstudyWiz-data fra udklipsholderen", callback: () => importExtensionData() });
     this.addSettingTab(new ItsWizSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
@@ -3829,6 +4065,8 @@ Object.assign(module.exports, {
   stripHtml,
   extractAssignmentFile,
   taskId,
+  calendarItems,
+  calendarActions,
   parseFrontmatter,
   prefixedLines,
   wikilinkTarget,
