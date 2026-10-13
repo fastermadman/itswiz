@@ -13,9 +13,28 @@ which was deleted in #244.
    (log in → API → token), paste it into ItsWiz' settings and turn *Convert RAW files* on.
 5. *Calendar*: itslearning only shows events from courses you have **starred**. Star the courses you want
    in itslearning, then turn on *Personal calendar events in itslearning*.
-6. What ItsWiz writes to the vault: everything under `§ FAG/` (lesson plans in `MD/`, downloaded files in `RAW/`,
-   empty lecture notes in `NOTER/`) and assignments in `✎ NOTER/OPGAVER/`. Nothing outside those two folders, and
-   `ItsWiz-test/` only for the path test. The generated notes and folder names are Danish.
+6. What ItsWiz writes to the vault: everything under the courses folder (lesson plans in `MD/`, downloaded files in
+   `RAW/`, empty lecture notes in `NOTER/`) and assignments under the assignments folder (both are settings, see below).
+   Nothing outside those two folders, and `ItsWiz-test/` only for the path test. The generated notes and folder names
+   are Danish. Only `RAW/` folders under those two folders are converted.
+
+## Recommended setup
+
+Defaults in a new vault (*Courses folder* = `Fag`, *Assignments folder* = `Noter/Opgaver`):
+
+```
+Fag/
+  LivsOplysning/
+    RAW/<unit>/…      originals (for e-ink readers)
+    MD/<unit>/…       [PLAN] notes and converted materials
+    NOTER/<unit>/…    [NOTE] stubs, your own notes
+    _forløb.md        (only with Hold Course)
+Noter/
+  Opgaver/<assignment>/
+```
+
+Changing either folder in the settings moves the old folder if it exists (links follow). Names with symbols
+(`§`, `✎`) work, but are harder to type in a terminal.
 
 ## Usage (development: symlink from the repo)
 
@@ -27,7 +46,7 @@ which was deleted in #244.
    clipboard**, #239). The extension is gone (#244), so in a new vault with old VIAstudyWiz notes
    ItsWiz refuses to harvest, because the first run would rewrite all lesson plans.
 5. **Harvest now** (button in the tab or command). **Path test** fetches one file per download route into
-   `ItsWiz-test/` and does not touch `§ FAG` or `✎ NOTER`.
+   `ItsWiz-test/` and does not touch the courses or assignments folder.
 
 6. After that the harvest runs by itself at Obsidian start and at the interval in the settings (default 24 hours).
    The status bar shows the last run and the number of errors; click it for the error list. An expired itslearning

@@ -4,16 +4,19 @@
 
 const { Plugin, ItemView, Modal, PluginSettingTab, Setting, Notice, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
 
-// Vaultens to rodmapper hedder faktisk "🎓 FAG" og "📝 NOTER" (omdøbt manuelt i Finder for at
-// gøre dem nemmere at få øje på), men var tidligere hardcodet som literal "FAG"/"NOTER" i hver
-// enkelt sti-byggende funktion. getDirectoryHandle(navn, {create:true}) opretter en NY mappe hvis
-// navnet ikke matcher præcis — uden disse konstanter ville næste kørsel altså have oprettet tomme
-// "FAG"/"NOTER"-mapper ved siden af de rigtige, og fremtidigt indhold ville splittes over to
-// steder (issue #63). Ret navnene her, ét sted, hvis rødderne nogensinde omdøbes igen.
-const FAG_ROOT = "§ FAG";
-const NOTER_ROOT = "✎ NOTER";
+// Vaultens to rodmapper er indstillinger (#269, plan i #266): fagmappen og den fulde sti til
+// opgaverne. De er modulvariabler, sat af applyRoots() ved start og når indstillingen ændres, så
+// alle sti-byggende funktioner bruger samme navn (issue #63: ellers opstår tomme dublet-mapper).
+let FAG_ROOT = "Fag";
+let OPGAVER_ROOT = "Noter/Opgaver";
+const normRoot = (v, fallback) => (String(v ?? "").trim().replace(/^\/+|\/+$/g, "") || fallback);
+function applyRoots(settings) {
+  FAG_ROOT = normRoot(settings?.fagRoot, "Fag");
+  OPGAVER_ROOT = normRoot(settings?.opgaverRoot, "Noter/Opgaver");
+}
+const underRoot = (path, root) => path.startsWith(`${root}/`);
 
-// #202: Hold Course-pluginets egen data.json, ikke en vaultsti under FAG_ROOT/NOTER_ROOT — læst
+// #202: Hold Course-pluginets egen data.json, ikke en vaultsti under FAG_ROOT/OPGAVER_ROOT — læst
 // (aldrig skrevet) for at se om Valdemar har trykket Done DER, uden om et kryds i [NOTE]-stubben.
 const HOLD_COURSE_DATA_PATH = ".obsidian/plugins/hold-course/data.json";
 
@@ -1179,7 +1182,7 @@ async function writeTaskNotes(tasks) {
       "",
     ].join("\n");
 
-    const path = `${NOTER_ROOT}/OPGAVER/${folder}/${folder}.md`;
+    const path = `${OPGAVER_ROOT}/${folder}/${folder}.md`;
     try {
       await writeToVault(path, `data:text/markdown;charset=utf-8,${encodeURIComponent(note)}`);
       await markDownloaded(noteId);
@@ -1530,6 +1533,8 @@ const DEFAULT_SETTINGS = {
   enableConversion: false,
   enableHoldCourseSync: false,
   enableCalendarSync: false,
+  fagRoot: "Fag",
+  opgaverRoot: "Noter/Opgaver",
 };
 
 async function getSettings() {
@@ -1851,7 +1856,7 @@ function waitForAssignmentToSettle(webContentsId, timeoutMs, quietMs = 1500) {
   });
 }
 
-async function downloadTaskAttachment(task, root = NOTER_ROOT) {
+async function downloadTaskAttachment(task, root = OPGAVER_ROOT) {
   if (!task.TaskUrl) return null;
 
   const win = hiddenWindow(task.TaskUrl);
@@ -1871,9 +1876,9 @@ async function downloadTaskAttachment(task, root = NOTER_ROOT) {
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
     const rawName = sanitizeFilename(file.name);
     const stem = rawName.replace(/\.[^./]+$/, "");
-    await writeToVault(`${root}/OPGAVER/${folder}/RAW/${rawName}`, `data:application/octet-stream;base64,${base64}`);
+    await writeToVault(`${root}/${folder}/RAW/${rawName}`, `data:application/octet-stream;base64,${base64}`);
     runFilesDownloaded++;
-    return `${root}/OPGAVER/${folder}/MD/${stem}.md`;
+    return `${root}/${folder}/MD/${stem}.md`;
   } catch (err) {
     console.warn(`VIAstudyWiz: ingen vedhæftning fundet for opgaven "${task.TaskTitle}":`, err);
     return null;
@@ -2234,7 +2239,7 @@ function showRunErrors() {
   modal.open();
 }
 
-// ── Sti-test: én fil pr. download-vej til ItsWiz-test/, rører ikke § FAG eller ✎ NOTER ──
+// ── Sti-test: én fil pr. download-vej til ItsWiz-test/, rører ikke fag- eller opgavemappen ──
 
 function officeChain(url) {
   if (/filecache\.itslearning\.com/.test(url)) return "itslearnings filecache";
@@ -2408,7 +2413,8 @@ function mdTargets(rawFilePath) {
 }
 
 function inRawBranch(path) {
-  return path.split("/").slice(0, -1).includes("RAW");
+  // Kun de to rødder: en tilfældig RAW/-mappe andre steder i en fremmed vault sendes ikke til MinerU (#269).
+  return (underRoot(path, FAG_ROOT) || underRoot(path, OPGAVER_ROOT)) && path.split("/").slice(0, -1).includes("RAW");
 }
 
 function errorMarkerPath(rawFilePath) {
@@ -3206,7 +3212,7 @@ async function patchPendingMateriale(vault, apply) {
 
 async function readTasks(vault) {
   const tasks = [];
-  for (const path of (await vault.list()).filter((f) => f.endsWith(".md") && f.includes("OPGAVER")).sort(cmpParts)) {
+  for (const path of (await vault.list()).filter((f) => f.endsWith(".md") && underRoot(f, OPGAVER_ROOT)).sort(cmpParts)) {
     const fields = parseFrontmatter(await vault.read(path));
     if (fields.type !== "opgave" || !fields.fag || !fields.deadline) continue;
     const m = /ElementID=(\d+)/.exec(fields.kilde ?? "");
@@ -3794,7 +3800,7 @@ function scheduleHoldCourseSync(delayMs = 5000) {
   }, delayMs);
 }
 
-const touchesHoldCourseInput = (path) => path.endsWith(".md") && (path.startsWith(`${FAG_ROOT}/`) || path.includes("OPGAVER"));
+const touchesHoldCourseInput = (path) => path.endsWith(".md") && (underRoot(path, FAG_ROOT) || underRoot(path, OPGAVER_ROOT));
 
 // ── Boox (.obsidian-onyx): Boox' Hold Course har sin egen data.json (#146, hold-course#10) ──
 //
@@ -3905,6 +3911,28 @@ class ItsWizView extends ItemView {
   }
 }
 
+// Ny rod: gem, og flyt den gamle mappe hvis den findes og den nye ikke gør (renameFile, så wikilinks følger med).
+async function changeRoot(key, value) {
+  const s = plugin.data.settings;
+  const old = key === "fagRoot" ? FAG_ROOT : OPGAVER_ROOT;
+  const next = normRoot(value, DEFAULT_SETTINGS[key]);
+  if (next === old) return;
+  const { vault, fileManager } = plugin.app;
+  const oldDir = vault.getAbstractFileByPath(normalizePath(old));
+  if (oldDir instanceof TFolder && !vault.getAbstractFileByPath(normalizePath(next))) {
+    try {
+      if (next.includes("/")) await ensureFolder(next.slice(0, next.lastIndexOf("/")));
+      await fileManager.renameFile(oldDir, normalizePath(next));
+    } catch (err) {
+      return new Notice(`ItsWiz: could not move ${old} to ${next}: ${err.message}`, 0);
+    }
+  }
+  s[key] = next;
+  await plugin.saveData(plugin.data);
+  applyRoots(s);
+  scheduleHoldCourseSync();
+}
+
 class ItsWizSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
@@ -3928,6 +3956,20 @@ class ItsWizSettingTab extends PluginSettingTab {
     ]) {
       new Setting(containerEl).setName(name).setDesc(desc).addToggle((t) =>
         t.setValue(s[key] ?? DEFAULT_SETTINGS[key]).onChange((v) => ((s[key] = v), save()))
+      );
+    }
+
+    containerEl.createEl("h3", { text: "Folders" });
+    for (const [key, name, desc] of [
+      ["fagRoot", "Courses folder", "Holds one folder per course (RAW, MD, NOTER). Default: Fag. If you change it and the old folder exists, it is moved (links follow)."],
+      ["opgaverRoot", "Assignments folder", "The full path to the assignments, e.g. Noter/Opgaver. If you change it and the old folder exists, it is moved (links follow)."],
+    ]) {
+      new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
+        t.setPlaceholder(DEFAULT_SETTINGS[key]).setValue(s[key] ?? DEFAULT_SETTINGS[key]).onChange((v) => {
+          clearTimeout(this.rootTimer);
+          // Vent til der er holdt op med at skrive, ellers flyttes mappen for hvert tastetryk.
+          this.rootTimer = setTimeout(() => changeRoot(key, v), 1500);
+        })
       );
     }
 
@@ -3978,6 +4020,7 @@ class ItsWizPlugin extends Plugin {
       { downloadedElementIds: [], planNoteContentHashes: {}, syncedFrontmatterVersion: null, settings: {}, calendarEventMap: {}, calendarDeleteQueue: [] },
       await this.loadData()
     );
+    applyRoots(this.data.settings);
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
     this.addRibbonIcon("graduation-cap", "ItsWiz", () => this.openView());
     this.addCommand({ id: "open", name: "Open itslearning", callback: () => this.openView() });
@@ -4040,6 +4083,9 @@ Object.assign(module.exports, {
   mdPath,
   fileLink,
   mdTargets,
+  inRawBranch,
+  applyRoots,
+  touchesHoldCourseInput,
   errorMarkerPath,
   timeFieldsFromStart,
   materialeFrontmatter,
