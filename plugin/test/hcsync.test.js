@@ -10,6 +10,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const m = require('./_bootstrap.js');
 
+// Fagnavnene er en indstilling (#270); fixturerne forudsætter de tre, som Valdemars vault har.
+m.applyCourseNames({ courseNames: { 'LSmu-2527': 'Musik', 'LSkr-2628': 'Religion', 'LSS24.1livs': 'LivsOplysning' } });
+
 const CASES = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'hcsync-cases.json'), 'utf8'));
 
 function memVault(snapshot) {

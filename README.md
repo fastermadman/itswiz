@@ -31,11 +31,10 @@ locked, see issue #29). Three branches per subject: `RAW/` is bytes for devices
 `NOTER/` is a fourth, **manually owned** branch (see below). New machine-written
 content always falls into `RAW/`/`MD/` so the structure never has to be reorganised again.
 
-The subject folder has a subject symbol in front of the friendly name from `COURSE_DISPLAY_NAMES`
-(`courseFolderName()`, e.g. `♪ Musik`). The symbols are only in the folder path,
-never in the `fag:` frontmatter field, which `Seminarium.base` filters on exactly
-(`fag == "Musik"`). The symbol dictionary lives in `⚙ META/Symbol-konvention.md` in the vault
-itself, not here: change both places if a symbol changes.
+The subject folder is named after the subject: the name chosen per itslearning course code in the
+`courseNames` setting (`courseFolderName()`, e.g. `Musik`), or the raw code when none is set. No symbols
+in folder names (#270): icons and colours belong to Hold Course. The same name is the `fag:` frontmatter
+field, which `Seminarium.base` filters on exactly (`fag == "Musik"`).
 
 The week folder is named `W<week><day> - <topic>` (e.g. `W34tors - Skolens formål`) when the plan
 has a `topic.name`: structured data from itslearning, confirmed live, not free-text parsing.
@@ -43,7 +42,7 @@ Only added going forward: older folders in the vault are still just `W34tors` wi
 not migrated retroactively.
 
 ```
-ViaVault/§ FAG/<symbol> <subject>/
+ViaVault/§ FAG/<subject>/
   RAW/<week> - <topic>/<title>.pdf                       ← ItsWiz' harvest only writes here
   MD/<week> - <topic>/<week> - <topic> lektionsplan.md   ← lesson plan + links to the week's materials
   MD/<week> - <topic>/<title>.md                         ← MinerU output (ItsWiz' conversion)
