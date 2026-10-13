@@ -2815,7 +2815,7 @@ function writeCache(digest, zips) {
 
 const sha256 = (arrayBuffer) => require("crypto").createHash("sha256").update(Buffer.from(arrayBuffer)).digest("hex");
 
-// ── PDFable før MinerU (#241 trin 3; kontrakten ligger i FasterMadman/bitonalPDF#111) ──
+// ── PDFable før MinerU (#241 trin 3; kontrakten ligger i FasterMadman/PDFable#111) ──
 //
 // Retter skæve, liggende og dobbeltside-scans, som MinerU ellers læser i forkert rækkefølge (#211).
 // Valgfrit som MinerU: uden programsti uploades originalen. Stien er pr. enhed (localStorage).

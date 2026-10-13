@@ -1,9 +1,17 @@
-# VIAstudyWiz — ItsWiz
+# ItsWiz
 
 ItsWiz er et Obsidian-plugin (`plugin/`) der henter lektionsplaner, undervisningsmaterialer og
 afleveringsopgaver fra via.itslearning.com (VIA University College) ind i `~/ViaVault`, konverterer
 dokumenter med MinerU, synker til Hold Course og lægger personlige events i itslearning-kalenderen.
 Opsætning og brug: [`plugin/README.md`](plugin/README.md).
+
+## Installér (BRAT)
+
+1. Installér pluginet **Obsidian42 - BRAT** fra Community plugins.
+2. BRAT → *Add beta plugin* → indsæt `https://github.com/FasterMadman/itswiz` → *Add plugin*.
+3. Indstillinger → Community plugins → slå **ItsWiz** til. Opdateringer henter BRAT selv fra nye releases.
+
+Resten (login, MinerU-nøgle, kalender, hvad der skrives i vaulten) står i [`plugin/README.md`](plugin/README.md).
 
 Chrome-extensionen og Python/launchd-laget (`watchfolder/`) som ItsWiz afløste, blev fjernet i #244;
 de findes kun i git-historikken.

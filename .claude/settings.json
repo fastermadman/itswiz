@@ -16,7 +16,7 @@
     "viastudywiz-mods": {
       "source": {
         "source": "github",
-        "repo": "fastermadman/viastudywiz-extension"
+        "repo": "fastermadman/itswiz"
       }
     }
   },
