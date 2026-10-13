@@ -38,7 +38,7 @@ async function collectRangeInPage(startUnix, endUnix) {
     const res = await fetch(url, options);
     const contentType = res.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
-      throw new Error(`Ikke-JSON svar fra ${url} (status ${res.status}, content-type "${contentType}")`);
+      throw new Error(`Non-JSON response from ${url} (status ${res.status}, content-type "${contentType}")`);
     }
     return res.json();
   }
@@ -308,7 +308,7 @@ async function extractExtensionFromWopi(wopiContentsUrl) {
   try {
     // ItsWiz: requestUrl i stedet for fetch, fordi renderer-fetch mod WOPI-værten rammer CORS.
     const res = await requestUrl({ url: checkFileInfoUrl, throw: false });
-    if (res.status >= 400) throw new Error(`CheckFileInfo svarede ${res.status}`);
+    if (res.status >= 400) throw new Error(`CheckFileInfo responded ${res.status}`);
     const { BaseFileName } = res.json;
     const match = (BaseFileName ?? "").match(/\.[a-z0-9]{2,5}$/i);
     console.log(`VIAstudyWiz: WOPI CheckFileInfo → BaseFileName "${BaseFileName}", endelse "${match?.[0] ?? "(ingen)"}"`);
@@ -693,7 +693,7 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
   } catch (err) {
     console.error(`VIAstudyWiz forelæsningsnote-stub-fejl (${path}):`, err);
     if (err.code === "VAULT_PERMISSION") return false;
-    recordError(`Forelæsningsnote (${weekFolder}): ${err.message}`);
+    recordError(`Lecture note (${weekFolder}): ${err.message}`);
     return true;
   }
 }
@@ -907,8 +907,8 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
           // Materialet bliver liggende under det gamle emne, hvor søskende-lektionerne stadig
           // bruger det. Ikke en fejl der kan rettes automatisk: en delt fil har ingen enkelt
           // ejer at flytte med (samme grundproblem som #183), så det er Valdemars beslutning.
-          recordError(`Lektion flyttet (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): `
-            + `materialet blev IKKE flyttet — mappen deles med andre lektioner i samme enhed. Flyt manuelt i Obsidian hvis det skal følge med.`);
+          recordError(`Lesson moved (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): `
+            + `materials were NOT moved: the folder is shared with other lessons in the same unit. Move it manually in Obsidian if it should follow.`);
         } else {
           await moveDirInVault(`${FAG_ROOT}/${fag}/RAW/${prevRecord.weekFolder}`, `${FAG_ROOT}/${fag}/RAW/${weekFolder}`);
           runChangedNotes.push(`${prevRecord.weekFolder} → ${weekFolder} (${fagField}): lektion flyttet, vault-materialer fulgte med`);
@@ -917,7 +917,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
         prevRecord = { hash: prevRecord.hash, weekFolder };
       } catch (err) {
         console.error(`VIAstudyWiz vault-flytning fejlede (${prevRecord.weekFolder} → ${weekFolder}):`, err);
-        recordError(`Lektion flyttet (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): vault-materialer kunne ikke flyttes automatisk — ${err.message}`);
+        recordError(`Lesson moved (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): vault materials could not be moved automatically: ${err.message}`);
       }
     }
     // Links til MD-noten (navigations-graf) er hovedlinket, men et ekstra RAW-link er tilføjet ved
@@ -1094,7 +1094,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     } catch (err) {
       console.error(`VIAstudyWiz lektionsplan-fejl (${path}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
-      recordError(`Lektionsplan (${weekFolder}): ${err.message}`);
+      recordError(`Lesson plan (${weekFolder}): ${err.message}`);
     }
   }
   return true;
@@ -1157,7 +1157,7 @@ async function writeTaskNotes(tasks) {
     } catch (err) {
       console.error(`VIAstudyWiz opgave-vedhæftning-fejl (${folder}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
-      recordError(`Opgave-vedhæftning (${folder}): ${err.message}`);
+      recordError(`Assignment attachment (${folder}): ${err.message}`);
     }
 
     const note = [
@@ -1186,7 +1186,7 @@ async function writeTaskNotes(tasks) {
     } catch (err) {
       console.error(`VIAstudyWiz opgave-note-fejl (${path}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
-      recordError(`Opgave (${folder}): ${err.message}`);
+      recordError(`Assignment (${folder}): ${err.message}`);
     }
   }
   return true;
@@ -1312,7 +1312,7 @@ async function downloadFileElements(plans, tabId) {
           (downloadUrl.includes("/contents?access_token=") ? await extractExtensionFromWopi(downloadUrl) : "");
         if (!extension) {
           console.warn(`VIAstudyWiz: kunne ikke udlede filendelse for "${element.title}" (${downloadUrl}), springer over`);
-          recordError(`${element.title}: kunne ikke udlede filendelse`);
+          recordError(`${element.title}: could not determine file extension`);
           continue;
         }
         filename = rawPath(courseName, weekFolder, element.title + extension);
@@ -1468,7 +1468,7 @@ async function writeToVault(path, url) {
     return writeVaultFile(path, decodeURIComponent(payload));
   }
   const res = await requestUrl({ url, throw: false });
-  if (res.status >= 400) throw new Error(`HTTP ${res.status} ved hentning af ${url}`);
+  if (res.status >= 400) throw new Error(`HTTP ${res.status} fetching ${url}`);
   return writeVaultFile(path, res.arrayBuffer);
 }
 
@@ -1638,10 +1638,10 @@ function capped(lines, more) {
 }
 
 function notifyRunSummary() {
-  if (runErrorCount > 0) new Notice(`ItsWiz: ${runErrorCount} element(er) fejlede\n${capped(runErrorMessages, "mere")}`, 0);
+  if (runErrorCount > 0) new Notice(`ItsWiz: ${runErrorCount} element(s) failed\n${capped(runErrorMessages, "more")}`, 0);
   if (runFilesDownloaded === 0 && runChangedNotes.length === 0) return;
-  const changed = runChangedNotes.length ? `\n\nÆndret:\n${capped(runChangedNotes, "note(r) mere")}` : "";
-  new Notice(`ItsWiz: ${runFilesDownloaded} fil(er) hentet.${changed}`, 15000);
+  const changed = runChangedNotes.length ? `\n\nChanged:\n${capped(runChangedNotes, "more note(s)")}` : "";
+  new Notice(`ItsWiz: ${runFilesDownloaded} file(s) downloaded.${changed}`, 15000);
 }
 
 // ── Skjulte vinduer og netværksopsnapning (afløser Chromes tabs/webRequest/downloads) ──
@@ -1767,10 +1767,10 @@ async function resolveOfficeDownloadUrl(elementUrl, timeoutMs = 20000) {
     const viewUrl = await fileView;
     const lo = param(viewUrl, "LearningObjectId");
     const loi = param(viewUrl, "LearningObjectInstanceId");
-    if (!lo || !loi) throw new Error(`Mangler LearningObjectId/LearningObjectInstanceId i ${viewUrl}`);
+    if (!lo || !loi) throw new Error(`Missing LearningObjectId/LearningObjectInstanceId in ${viewUrl}`);
     const cache = net.wait("before", (d) => (/filecache\.itslearning\.com/.test(d.url) ? d.url : null), timeoutMs, "intet filecache-kald");
     const refused = net.wait("completed", (d) => {
-      if (/DownloadRedirect\.ashx/.test(d.url) && d.statusCode >= 400) throw new Error(`DownloadRedirect.ashx afvist af itslearning (status ${d.statusCode})`);
+      if (/DownloadRedirect\.ashx/.test(d.url) && d.statusCode >= 400) throw new Error(`DownloadRedirect.ashx rejected by itslearning (status ${d.statusCode})`);
       return null;
     }, timeoutMs, "ingen afvisning");
     win.loadURL(`https://resource.itslearning.com/Proxy/DownloadRedirect.ashx?LearningObjectId=${lo}&LearningObjectInstanceId=${loi}`, { userAgent: UA }).catch(() => {});
@@ -1822,7 +1822,7 @@ async function completeTasks(forberedelse, tabId) {
       await inPage(toggleTaskCompletedInPage, el.url);
     } catch (err) {
       console.error(`VIAstudyWiz TaskCompletedToggle-fejl ("${el.titel}"):`, err);
-      recordError(`Kunne ikke markere "${el.titel}" som fuldført i itslearning: ${err.message}`);
+      recordError(`Could not mark "${el.titel}" as completed in itslearning: ${err.message}`);
     }
   }
 }
@@ -1858,7 +1858,7 @@ async function downloadTaskAttachment(task, root = NOTER_ROOT) {
   try {
     await waitForAssignmentToSettle(win.webContents.id, 20000);
     const frame = win.webContents.mainFrame.framesInSubtree.find((f) => f.url.includes(ASSIGNMENT_TOOL_HOST));
-    if (!frame) throw new Error(`ingen ${ASSIGNMENT_TOOL_HOST}-frame i opgavesiden`);
+    if (!frame) throw new Error(`no ${ASSIGNMENT_TOOL_HOST} frame in the assignment page`);
     const file = extractAssignmentFile(await frame.executeJavaScript("document.documentElement.outerHTML"));
     if (!file) {
       console.warn(`VIAstudyWiz: siden landede for opgaven "${task.TaskTitle}", men fileListControl-data blev ikke fundet i HTML'en`);
@@ -1905,7 +1905,7 @@ function closeHarvestWindow() {
   harvestWin = null;
 }
 
-const LOGIN_ERROR = "Ikke logget ind på itslearning. Log ind i ItsWiz-fanen og prøv igen.";
+const LOGIN_ERROR = "Not logged in to itslearning. Log in in the ItsWiz tab and try again.";
 const KEEPALIVE_MINUTES = 10;
 
 // REST-kald direkte fra partitionens session: samme cookies som fanen, intet vindue.
@@ -1984,7 +1984,7 @@ async function collect(startUnix, endUnix) {
     return await inPage(collectRangeInPage, startUnix, endUnix);
   } catch (err) {
     // #134: et ikke-JSON-svar betyder næsten altid udløbet login.
-    if (/Ikke-JSON/.test(err.message)) throw new Error(LOGIN_ERROR);
+    if (/Non-JSON/.test(err.message)) throw new Error(LOGIN_ERROR);
     throw err;
   }
 }
@@ -2018,7 +2018,7 @@ async function collectAndDownload(startUnix, endUnix) {
         await syncCalendar(result);
       } catch (err) {
         console.error("ItsWiz kalender-fejl:", err);
-        recordError(`Kalender: ${err.message}`);
+        recordError(`Calendar: ${err.message}`);
       }
     }
     notifyRunSummary();
@@ -2032,7 +2032,7 @@ async function collectAndDownload(startUnix, endUnix) {
 // auto: startet af opstart/interval, ikke et klik. Så ingen "høster…"-besked og højst én login-besked.
 async function runCollectAndDownload({ auto = false } = {}) {
   if (isRunning) {
-    if (!auto) new Notice("ItsWiz: en kørsel er allerede i gang.");
+    if (!auto) new Notice("ItsWiz: a run is already in progress.");
     return;
   }
   // Låsen sættes før første await, ellers kan to triggere begge nå forbi tjekket.
@@ -2043,9 +2043,9 @@ async function runCollectAndDownload({ auto = false } = {}) {
   try {
     // Uden importen ville første kørsel backfille 400 dage og skrive alle lektionsplaner om (#239).
     if (plugin.data.syncedFrontmatterVersion == null && (await existsInVault(FAG_ROOT))) {
-      throw new Error("Vaulten har allerede VIAstudyWiz-noter. Kør \"Importér VIAstudyWiz-data fra udklipsholderen\" før første høst.");
+      throw new Error("The vault already has VIAstudyWiz notes. Run \"Import VIAstudyWiz data from the clipboard\" before the first harvest.");
     }
-    if (!auto) new Notice("ItsWiz: høster…");
+    if (!auto) new Notice("ItsWiz: harvesting…");
     const syncedVersion = plugin.data[FRONTMATTER_VERSION_KEY];
     const isBackfill = syncedVersion !== FRONTMATTER_VERSION;
 
@@ -2065,7 +2065,7 @@ async function runCollectAndDownload({ auto = false } = {}) {
   } catch (err) {
     console.error("VIAstudyWiz fejl:", err);
     if (err.message === LOGIN_ERROR) notifyLoginNeeded(auto);
-    else new Notice(`ItsWiz: kørsel fejlede\n${err.message ?? err}`, 0);
+    else new Notice(`ItsWiz: run failed\n${err.message ?? err}`, 0);
     plugin.lastRun = { failure: err.message };
   } finally {
     // Seneste kørsel, til C (#240, statusbar) og til at aflæse en kørsel udefra (obsidian eval).
@@ -2086,7 +2086,7 @@ async function calendarCallInPage(method, path, body, withToken) {
     // Målt 2026-10-12: antiForgeryHeaderSettings = {"headerName":"__ITSL_ANTIFORGERY_TOKEN__","headerValue":"…"}.
     const raw = html.match(/antiForgeryHeaderSettings\s*=\s*(\{[^}]*\})/)?.[1];
     const { headerName, headerValue } = raw ? JSON.parse(raw) : {};
-    if (!headerName || !headerValue) throw new Error("fandt ikke anti-forgery-token i Schedule.aspx");
+    if (!headerName || !headerValue) throw new Error("anti-forgery token not found in Schedule.aspx");
     headers[headerName] = headerValue;
   }
   const res = await fetch(path, { method, credentials: "include", headers, body: body == null ? undefined : JSON.stringify(body) });
@@ -2098,7 +2098,7 @@ async function calendarCallInPage(method, path, body, withToken) {
 
 async function calendarCall(method, path, body, withToken = false) {
   const { status, json } = await inPage(calendarCallInPage, method, path, body, withToken);
-  if (status >= 300) throw new Error(`${method} ${path.split("?")[0]} svarede ${status}`);
+  if (status >= 300) throw new Error(`${method} ${path.split("?")[0]} responded ${status}`);
   return json;
 }
 
@@ -2137,7 +2137,7 @@ async function drainCalendarDeleteQueue() {
       queue.splice(queue.indexOf(id), 1);
       await saveCalendar();
     } catch (err) {
-      recordError(`Kalender: kunne ikke slette ${id}: ${err.message}`);
+      recordError(`Calendar: could not delete ${id}: ${err.message}`);
     }
   }
 }
@@ -2180,7 +2180,7 @@ async function syncCalendar(result) {
       }
       counts[a.type]++;
     } catch (err) {
-      recordError(`Kalender (${a.type} ${a.item?.title ?? a.key}): ${err.message}`);
+      recordError(`Calendar (${a.type} ${a.item?.title ?? a.key}): ${err.message}`);
     }
   }
   await drainCalendarDeleteQueue();
@@ -2190,7 +2190,7 @@ async function syncCalendar(result) {
 
 // Vejen tilbage: sletter alt ItsWiz har oprettet, aldrig andet.
 async function removeAllCalendarEvents() {
-  if (isRunning) return new Notice("ItsWiz: en kørsel er allerede i gang.");
+  if (isRunning) return new Notice("ItsWiz: a run is already in progress.");
   isRunning = true;
   try {
     await openHarvestWindow();
@@ -2201,9 +2201,9 @@ async function removeAllCalendarEvents() {
     runErrorMessages = [];
     await drainCalendarDeleteQueue();
     const left = plugin.data.calendarDeleteQueue.length;
-    new Notice(left ? `ItsWiz: ${left} kalenderevents kunne ikke slettes, prøv igen.` : "ItsWiz: alle ItsWiz-kalenderevents er slettet.");
+    new Notice(left ? `ItsWiz: ${left} calendar events could not be deleted, try again.` : "ItsWiz: all ItsWiz calendar events deleted.");
   } catch (err) {
-    new Notice(`ItsWiz: fjernelse fejlede\n${err.message ?? err}`, 0);
+    new Notice(`ItsWiz: removal failed\n${err.message ?? err}`, 0);
   } finally {
     closeHarvestWindow();
     isRunning = false;
@@ -2216,21 +2216,21 @@ function updateStatusBar() {
   const el = plugin.statusEl;
   if (!el) return;
   const r = plugin.lastRun;
-  if (isRunning) return el.setText("ItsWiz: høster…");
-  if (!r) return el.setText("ItsWiz: ikke kørt");
+  if (isRunning) return el.setText("ItsWiz: harvesting…");
+  if (!r) return el.setText("ItsWiz: not run");
   const time = new Date(r.finishedAt).toLocaleTimeString("da-DK", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit" });
   const errors = (r.errors?.length ?? 0) + (r.failure ? 1 : 0);
-  el.setText(`ItsWiz ${time}${r.failure ? " · fejlede" : errors ? ` · ${errors} fejl` : ""}`);
+  el.setText(`ItsWiz ${time}${r.failure ? " · failed" : errors ? ` · ${errors} error(s)` : ""}`);
 }
 
 function showRunErrors() {
   const r = plugin.lastRun;
-  const lines = [...(r?.failure ? [`Kørslen fejlede: ${r.failure}`] : []), ...(r?.errors ?? [])];
+  const lines = [...(r?.failure ? [`Run failed: ${r.failure}`] : []), ...(r?.errors ?? [])];
   const modal = new Modal(plugin.app);
-  modal.titleEl.setText(r ? `ItsWiz: kørsel ${new Date(r.finishedAt).toLocaleString("da-DK", { timeZone: TIME_ZONE })}` : "ItsWiz: ikke kørt endnu");
-  if (r) modal.contentEl.createEl("p", { text: `${r.files ?? 0} fil(er) hentet, ${r.changed?.length ?? 0} note(r) ændret.` });
+  modal.titleEl.setText(r ? `ItsWiz: run ${new Date(r.finishedAt).toLocaleString("da-DK", { timeZone: TIME_ZONE })}` : "ItsWiz: not run yet");
+  if (r) modal.contentEl.createEl("p", { text: `${r.files ?? 0} file(s) downloaded, ${r.changed?.length ?? 0} note(s) changed.` });
   if (lines.length) modal.contentEl.createEl("pre", { text: lines.join("\n"), attr: { style: "white-space:pre-wrap" } });
-  else if (r) modal.contentEl.createEl("p", { text: "Ingen fejl." });
+  else if (r) modal.contentEl.createEl("p", { text: "No errors." });
   modal.open();
 }
 
@@ -2243,9 +2243,9 @@ function officeChain(url) {
 }
 
 async function runPathTest(daysBack = 135, daysForward = 30) {
-  if (isRunning) return new Notice("ItsWiz: en kørsel er allerede i gang.");
+  if (isRunning) return new Notice("ItsWiz: a run is already in progress.");
   isRunning = true;
-  new Notice("ItsWiz: sti-test kører…");
+  new Notice("ItsWiz: path test running…");
   runErrorCount = 0;
   runErrorMessages = [];
   runFilesDownloaded = 0;
@@ -2326,23 +2326,23 @@ async function runPathTest(daysBack = 135, daysForward = 30) {
   }
   const report = `${TEST_ROOT}/sti-test.md`;
   await writeVaultFile(report, log.join("\n") + "\n");
-  new Notice(`ItsWiz: sti-test færdig, se ${report}`);
+  new Notice(`ItsWiz: path test done, see ${report}`);
   plugin.app.workspace.openLinkText(report, "", "split");
 }
 
 // ── Engangs-import fra extensionen ──
 // Brugt én gang ved skiftet (#239): et JSON-dump af extensionens storage.local i udklipsholderen,
-// og så kommandoen "Importér VIAstudyWiz-data fra udklipsholderen" her. calendarEventMap hører
+// og så kommandoen "Import VIAstudyWiz data from the clipboard" her. calendarEventMap hører
 // til F (#243) og tages ikke med.
 async function importExtensionData() {
   let src;
   try {
     src = JSON.parse(await navigator.clipboard.readText());
   } catch {
-    return new Notice("ItsWiz: udklipsholderen indeholder ikke JSON fra extensionen. Kør snippet'et først.", 0);
+    return new Notice("ItsWiz: the clipboard does not contain JSON from the extension. Run the snippet first.", 0);
   }
   if (!Array.isArray(src.downloadedElementIds) && !src.planNoteContentHashes) {
-    return new Notice("ItsWiz: JSON'en ligner ikke VIAstudyWiz-data (mangler downloadedElementIds/planNoteContentHashes).", 0);
+    return new Notice("ItsWiz: the JSON does not look like VIAstudyWiz data (missing downloadedElementIds/planNoteContentHashes).", 0);
   }
   const d = plugin.data;
   const ids = new Set([...d.downloadedElementIds, ...(src.downloadedElementIds ?? [])]);
@@ -2353,7 +2353,7 @@ async function importExtensionData() {
   for (const key of Object.keys(DEFAULT_SETTINGS)) if (s[key] != null && d.settings[key] == null) d.settings[key] = s[key];
   await plugin.saveData(d);
   new Notice(
-    `ItsWiz: importeret ${ids.size} hentede id'er, ${Object.keys(d.planNoteContentHashes).length} plan-hashes, frontmatter-version ${d.syncedFrontmatterVersion ?? "(ingen)"}.`,
+    `ItsWiz: imported ${ids.size} downloaded ids, ${Object.keys(d.planNoteContentHashes).length} plan hashes, frontmatter version ${d.syncedFrontmatterVersion ?? "(none)"}.`,
     0
   );
 }
@@ -2362,7 +2362,7 @@ async function importExtensionData() {
 //
 // Porteret fra watchfolder/watch_viastudywiz.py; kommentarerne dér forklarer hvorfor (#42, #99, #101,
 // #103, #142, #148, #186, #232). Her står kun det der er anderledes i pluginet. MinerU er et tilvalg:
-// uden token og uden "Konvertér RAW-filer" slået til sker intet, og [PLAN]-noterne linker til RAW (#241).
+// uden token og uden "Convert RAW files" slået til sker intet, og [PLAN]-noterne linker til RAW (#241).
 
 const MINERU_API = "https://mineru.net/api/v4";
 const MINERU_TOKEN_URL = "https://mineru.net/apiManage/token";
@@ -2636,7 +2636,7 @@ function insertPageMarkers(fullMd, blocks, layout, pageOffset = 0) {
 
 // Zip-indhold → { body, sektion }: det watcherens write_conversion() skriver under frontmatteren.
 function conversionBody(entries, pageOffset = 0) {
-  if (!entries.has("full.md")) throw new MineruError("MinerU-zippen mangler full.md");
+  if (!entries.has("full.md")) throw new MineruError("The MinerU zip is missing full.md");
   let md = entries.get("full.md").toString("utf8");
   let sektion = null;
   const contentListName = [...entries.keys()].find((n) => !n.includes("/") && n.endsWith("_content_list.json"));
@@ -2667,7 +2667,7 @@ function unzip(arrayBuffer) {
   const buf = Buffer.from(arrayBuffer);
   let eocd = buf.length - 22;
   while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
-  if (eocd < 0) throw new Error("ugyldig zip (ingen end-of-central-directory)");
+  if (eocd < 0) throw new Error("invalid zip (no end-of-central-directory)");
   const entries = new Map();
   let p = buf.readUInt32LE(eocd + 16);
   for (let i = buf.readUInt16LE(eocd + 10); i > 0; i--) {
@@ -2681,7 +2681,7 @@ function unzip(arrayBuffer) {
     if (!name.endsWith("/")) {
       if (method === 0) entries.set(name, data);
       else if (method === 8) entries.set(name, zlib.inflateRawSync(data));
-      else throw new Error(`zip-metode ${method} understøttes ikke (${name})`);
+      else throw new Error(`zip method ${method} is not supported (${name})`);
     }
     p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
   }
@@ -2692,7 +2692,7 @@ function unzip(arrayBuffer) {
 
 function withTimeout(promise, ms, what) {
   let timer;
-  return Promise.race([promise, new Promise((_, reject) => (timer = setTimeout(() => reject(new Error(`timeout efter ${ms / 1000}s: ${what}`)), ms)))])
+  return Promise.race([promise, new Promise((_, reject) => (timer = setTimeout(() => reject(new Error(`timeout after ${ms / 1000}s: ${what}`)), ms)))])
     .finally(() => clearTimeout(timer));
 }
 
@@ -2701,7 +2701,7 @@ async function mineruRequest(token, method, path, body) {
     requestUrl({ url: `${MINERU_API}${path}`, method, headers: { Authorization: `Bearer ${token}` }, contentType: "application/json", body: body && JSON.stringify(body), throw: false }),
     30e3, path
   );
-  if (res.status >= 400) throw new Error(`MinerU HTTP ${res.status} på ${path}`);
+  if (res.status >= 400) throw new Error(`MinerU HTTP ${res.status} on ${path}`);
   return res.json;
 }
 
@@ -2737,7 +2737,7 @@ async function mineruConvert(token, fileName, dataId, bytes) {
     : [{ name: fileName, data_id: dataId }];
   if (ranges) console.log(`ItsWiz: ${fileName} sendes i ${ranges.length} bidder (${ranges.join(", ")})`);
   const resp = await mineruRequest(token, "POST", "/file-urls/batch", { files, model_version: "vlm" });
-  if (resp.code !== 0) throw new MineruError(`file-urls/batch fejlede: ${JSON.stringify(resp)}`);
+  if (resp.code !== 0) throw new MineruError(`file-urls/batch failed: ${JSON.stringify(resp)}`);
   const { batch_id: batchId, file_urls: uploadUrls } = resp.data;
 
   for (const uploadUrl of uploadUrls) {
@@ -2758,7 +2758,7 @@ async function mineruConvert(token, fileName, dataId, bytes) {
   while (Date.now() < deadline) {
     const results = (await mineruRequest(token, "GET", `/extract-results/batch/${batchId}`)).data.extract_result;
     const failed = results.find((r) => r.state === "failed");
-    if (failed) throw new MineruError(`MinerU-fejl: ${failed.err_msg}`);
+    if (failed) throw new MineruError(`MinerU error: ${failed.err_msg}`);
     if (results.length === files.length && results.every((r) => r.state === "done")) {
       const byId = new Map(results.map((r) => [r.data_id, r]));
       const zips = [];
@@ -2771,7 +2771,7 @@ async function mineruConvert(token, fileName, dataId, bytes) {
     }
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`timeout efter ${(POLL_TIMEOUT_MS * files.length) / 1000}s`);
+  throw new Error(`timeout after ${(POLL_TIMEOUT_MS * files.length) / 1000}s`);
 }
 
 // Samme mappe som watcheren, så dens zips genbruges (#99). Fejer forældede filer ved skrivning.
@@ -3703,7 +3703,7 @@ function holdCourseApi() {
   if (api?.version >= HC_API_VERSION) return api;
   if (!plugin.hcApiWarned) {
     plugin.hcApiWarned = true;
-    new Notice(`ItsWiz: Hold Course-synken kræver Hold Course med API version ${HC_API_VERSION} (hold-course#84). Opdatér Hold Course.`, 0);
+    new Notice(`ItsWiz: Hold Course sync needs Hold Course with API version ${HC_API_VERSION} (hold-course#84). Update Hold Course.`, 0);
   }
   return null;
 }
@@ -3785,7 +3785,7 @@ function scheduleHoldCourseSync(delayMs = 5000) {
     hcSyncRunning = runHoldCourseSync()
       .catch((err) => {
         console.error("ItsWiz: Hold Course-synk fejlede:", err);
-        new Notice(`ItsWiz: Hold Course-synk fejlede\n${err.message}`);
+        new Notice(`ItsWiz: Hold Course sync failed\n${err.message}`);
       })
       .finally(() => {
         hcSyncRunning = null;
@@ -3854,7 +3854,7 @@ async function syncBoox() {
   const known = (plugin.data.knownOnyxConflicts ??= []);
   const fresh = conflicts.filter((f) => !known.includes(f));
   if (fresh.length) {
-    new Notice(`ItsWiz: ${fresh.length} Syncthing-konflikt(er) i Boox' Hold Course-data:\n${fresh.map((f) => f.split("/").pop()).join("\n")}`, 0);
+    new Notice(`ItsWiz: ${fresh.length} Syncthing conflict(s) in the Boox Hold Course data:\n${fresh.map((f) => f.split("/").pop()).join("\n")}`, 0);
     known.push(...fresh);
     await plugin.saveData(plugin.data);
   }
@@ -3891,8 +3891,8 @@ class ItsWizView extends ItemView {
     const bar = root.createDiv({ attr: { style: "display:flex;gap:6px;align-items:center;padding:6px" } });
     bar.createEl("button", { text: "←" }).onclick = () => this.webview.canGoBack() && this.webview.goBack();
     bar.createEl("button", { text: "⟳" }).onclick = () => this.webview.reload();
-    bar.createEl("button", { text: "Høst nu", cls: "mod-cta" }).onclick = () => runCollectAndDownload();
-    bar.createEl("button", { text: "Sti-test" }).onclick = () => runPathTest();
+    bar.createEl("button", { text: "Harvest now", cls: "mod-cta" }).onclick = () => runCollectAndDownload();
+    bar.createEl("button", { text: "Path test" }).onclick = () => runPathTest();
     this.urlEl = bar.createSpan({ attr: { style: "opacity:.6;font-size:12px;overflow:hidden;white-space:nowrap" } });
     this.webview = document.createElement("webview");
     this.webview.setAttribute("partition", PARTITION);
@@ -3912,9 +3912,9 @@ class ItsWizSettingTab extends PluginSettingTab {
     const save = () => this.plugin.saveData(this.plugin.data);
     containerEl.empty();
     for (const [key, name, desc] of [
-      ["daysBack", "Dage tilbage", "Hvor langt tilbage hver kørsel kigger."],
-      ["daysForward", "Dage frem", "Hvor langt frem hver kørsel kigger."],
-      ["alarmIntervalHours", "Interval (timer)", "Automatisk kørsel ved Obsidian-start og derefter med dette interval."],
+      ["daysBack", "Days back", "How far back each run looks."],
+      ["daysForward", "Days ahead", "How far ahead each run looks."],
+      ["alarmIntervalHours", "Interval (hours)", "Runs automatically at Obsidian start and then at this interval."],
     ]) {
       new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
         t.setValue(String(s[key] ?? DEFAULT_SETTINGS[key])).onChange((v) => {
@@ -3923,51 +3923,51 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     }
     for (const [key, name, desc] of [
-      ["enableFileDownloads", "Hent materialer og skriv noter", "Slået fra: kørslen henter kun data fra itslearning."],
-      ["enableTaskCompletionSync", "Markér Forberedelse som fuldført i itslearning", "Afkrydset i [NOTE]-stubben eller Done i Hold Course (#70, #202)."],
+      ["enableFileDownloads", "Download materials and write notes", "Off: a run only fetches data from itslearning."],
+      ["enableTaskCompletionSync", "Mark Forberedelse (preparation) as completed in itslearning", "Ticked in the NOTER stub note or Done in Hold Course (#70, #202)."],
     ]) {
       new Setting(containerEl).setName(name).setDesc(desc).addToggle((t) =>
         t.setValue(s[key] ?? DEFAULT_SETTINGS[key]).onChange((v) => ((s[key] = v), save()))
       );
     }
 
-    containerEl.createEl("h3", { text: "Konvertering til markdown (MinerU)" });
+    containerEl.createEl("h3", { text: "Conversion to markdown (MinerU)" });
     new Setting(containerEl)
-      .setName("Konvertér RAW-filer")
-      .setDesc("Sender nye PDF- og Office-filer under RAW/ til MinerU og skriver MD-noten. Valgfrit: slået fra linker lektionsplanerne til originalfilen. Slå først til, når watch_viastudywiz.py er stoppet, ellers konverteres hver fil to gange.")
+      .setName("Convert RAW files")
+      .setDesc("Sends new PDF and Office files under RAW/ to MinerU and writes the MD note. Optional: when off, the lesson plans link to the original file.")
       .addToggle((t) => t.setValue(s.enableConversion ?? false).onChange((v) => ((s.enableConversion = v), save(), v && scanExisting())));
-    containerEl.createEl("h3", { text: "Kalender" });
+    containerEl.createEl("h3", { text: "Calendar" });
     new Setting(containerEl)
-      .setName("Personlige kalenderevents i itslearning")
-      .setDesc("Ét event pr. lektion og afleveringsfrist, med fuld lektionsplan. ItsWiz rører kun events den selv har oprettet. Kommandoen \"Fjern alle ItsWiz-kalenderevents\" sletter dem igen.")
+      .setName("Personal calendar events in itslearning")
+      .setDesc("One event per lesson and assignment deadline, with the full lesson plan. ItsWiz only touches events it created itself. The command \"Remove all ItsWiz calendar events\" deletes them again. Only shows events from courses you have starred in itslearning.")
       .addToggle((t) => t.setValue(s.enableCalendarSync ?? false).onChange((v) => ((s.enableCalendarSync = v), save())));
     containerEl.createEl("h3", { text: "Hold Course" });
     new Setting(containerEl)
-      .setName("Synk til Hold Course")
-      .setDesc("Lektionsplaner, materialer og opgaver skrives ind i Hold Course, og Boox' kopi holdes ajour. Slå først til, når watch_viastudywiz.py er stoppet, ellers skriver begge.")
+      .setName("Sync to Hold Course")
+      .setDesc("Lesson plans, materials and assignments are written into Hold Course, and the Boox copy is kept up to date.")
       .addToggle((t) => t.setValue(s.enableHoldCourseSync ?? false).onChange((v) => ((s.enableHoldCourseSync = v), save(), v && scheduleHoldCourseSync(0))));
     const tokenDesc = createFragment((f) => {
-      f.appendText("Hentes på ");
+      f.appendText("Get one at ");
       f.createEl("a", { text: "mineru.net", href: MINERU_TOKEN_URL });
-      f.appendText(" (log ind → API → token).");
+      f.appendText(" (log in → API → token).");
     });
     new Setting(containerEl)
-      .setName("MinerU-nøgle")
+      .setName("MinerU key")
       .setDesc(tokenDesc)
       .addText((t) => {
         t.inputEl.type = "password";
         t.setValue(mineruToken()).onChange((v) => this.app.saveLocalStorage(MINERU_TOKEN_KEY, v.trim() || null));
       })
       .addButton((b) =>
-        b.setButtonText("Test nøgle").onClick(async () => {
+        b.setButtonText("Test key").onClick(async () => {
           const ok = mineruToken() && (await testMineruToken(mineruToken()).catch(() => false));
-          new Notice(ok ? "ItsWiz: MinerU-nøglen virker." : "ItsWiz: MinerU afviste nøglen.");
+          new Notice(ok ? "ItsWiz: the MinerU key works." : "ItsWiz: MinerU rejected the key.");
         })
       );
     new Setting(containerEl)
       .setName("PDFable-program")
-      .setDesc("Valgfrit. Sti til PDFable-programmet (filen pdfable), som retter skæve, liggende og dobbeltside-scans før MinerU. Tom: originalen uploades.")
-      .addText((t) => t.setPlaceholder("/sti/til/pdfable").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
+      .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU. Empty: the original is uploaded.")
+      .addText((t) => t.setPlaceholder("/path/to/pdfable").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
   }
 }
 
@@ -3980,11 +3980,11 @@ class ItsWizPlugin extends Plugin {
     );
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
     this.addRibbonIcon("graduation-cap", "ItsWiz", () => this.openView());
-    this.addCommand({ id: "open", name: "Åbn itslearning", callback: () => this.openView() });
-    this.addCommand({ id: "harvest", name: "Høst nu", callback: () => runCollectAndDownload() });
-    this.addCommand({ id: "path-test", name: "Sti-test (én fil pr. download-vej til ItsWiz-test/)", callback: () => runPathTest() });
-    this.addCommand({ id: "remove-calendar", name: "Fjern alle ItsWiz-kalenderevents", callback: () => removeAllCalendarEvents() });
-    this.addCommand({ id: "import", name: "Importér VIAstudyWiz-data fra udklipsholderen", callback: () => importExtensionData() });
+    this.addCommand({ id: "open", name: "Open itslearning", callback: () => this.openView() });
+    this.addCommand({ id: "harvest", name: "Harvest now", callback: () => runCollectAndDownload() });
+    this.addCommand({ id: "path-test", name: "Path test (one file per download route into ItsWiz-test/)", callback: () => runPathTest() });
+    this.addCommand({ id: "remove-calendar", name: "Remove all ItsWiz calendar events", callback: () => removeAllCalendarEvents() });
+    this.addCommand({ id: "import", name: "Import VIAstudyWiz data from the clipboard", callback: () => importExtensionData() });
     this.addSettingTab(new ItsWizSettingTab(this.app, this));
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("mod-clickable");
@@ -4005,7 +4005,7 @@ class ItsWizPlugin extends Plugin {
     this.syncHoldCourse = () => runHoldCourseSync();
     this.registerInterval(window.setInterval(() => tick(), KEEPALIVE_MINUTES * 60e3));
     this.registerInterval(window.setInterval(async () => {
-      if ((await getSettings()).enableHoldCourseSync && !hcSyncRunning) syncBoox().catch((err) => console.error("ItsWiz: Boox-synk fejlede:", err));
+      if ((await getSettings()).enableHoldCourseSync && !hcSyncRunning) syncBoox().catch((err) => console.error("ItsWiz: Boox sync failed:", err));
     }, BOOX_TICK_MS));
   }
 

@@ -1,158 +1,154 @@
 # ItsWiz
 
-ItsWiz er et Obsidian-plugin (`plugin/`) der henter lektionsplaner, undervisningsmaterialer og
-afleveringsopgaver fra via.itslearning.com (VIA University College) ind i `~/ViaVault`, konverterer
-dokumenter med MinerU, synker til Hold Course og lægger personlige events i itslearning-kalenderen.
-Opsætning og brug: [`plugin/README.md`](plugin/README.md).
+ItsWiz is an Obsidian plugin (`plugin/`) that harvests lesson plans, teaching materials and assignments from
+via.itslearning.com (VIA University College) into your vault, converts documents with MinerU, syncs to
+Hold Course and puts personal events in the itslearning calendar.
+Setup and usage: [`plugin/README.md`](plugin/README.md).
 
-## Installér (BRAT)
+## Install (BRAT)
 
-1. Installér pluginet **Obsidian42 - BRAT** fra Community plugins.
-2. BRAT → *Add beta plugin* → indsæt `https://github.com/FasterMadman/itswiz` → *Add plugin*.
-3. Indstillinger → Community plugins → slå **ItsWiz** til. Opdateringer henter BRAT selv fra nye releases.
+1. Install the **Obsidian42 - BRAT** plugin from Community plugins.
+2. BRAT → *Add beta plugin* → paste `https://github.com/FasterMadman/itswiz` → *Add plugin*.
+3. Settings → Community plugins → enable **ItsWiz**. BRAT picks up updates from new releases by itself.
 
-Resten (login, MinerU-nøgle, kalender, hvad der skrives i vaulten) står i [`plugin/README.md`](plugin/README.md).
+The rest (login, MinerU key, calendar, what gets written to the vault) is in [`plugin/README.md`](plugin/README.md).
 
-Chrome-extensionen og Python/launchd-laget (`watchfolder/`) som ItsWiz afløste, blev fjernet i #244;
-de findes kun i git-historikken.
+The Chrome extension and the Python/launchd layer (`watchfolder/`) that ItsWiz replaced were removed in #244;
+they only exist in git history.
 
-Kontekst, research og arkitekturbeslutninger ligger i ValdiVault:
-`10_Projects/VIAstudyWiz/06-start-her.md` (ren pointer-samling, start her)
-`10_Projects/VIAstudyWiz/05-api-reference.md` (aktuel teknisk reference)
+Context, research and architecture decisions live in ValdiVault (Danish, the maintainer's own vault):
+`10_Projects/VIAstudyWiz/06-start-her.md` (pure pointer collection, start here)
+`10_Projects/VIAstudyWiz/05-api-reference.md` (current technical reference)
 
-## Vault-struktur
+## Vault structure
 
-Alt maskinskrevet indhold ligger under `§ FAG/` (`FAG_ROOT` i `plugin/main.js`,
-låst — se issue #29). Tre grene pr. fag: `RAW/` er bytes til enheder
-(Boox/NeoReader browser bare filsystemet), `MD/` er noter til Obsidian, og
-`NOTER/` er en fjerde, **manuelt ejet** gren (se nedenfor). Alt nyt maskinelt
-indhold falder i `RAW/`/`MD/`, så strukturen ikke skal lægges om igen.
+The generated notes and folder names are in Danish (e.g. `§ FAG`, `NOTER`, `W34tors`): they are tied to
+existing vaults and `.base` files and are not translated (see #266 for the folder architecture).
 
-Fag-mappen har et fag-symbol foran det venlige navn fra `COURSE_DISPLAY_NAMES`
-(`courseFolderName()`, fx `♪ Musik`) — symbolerne er kun i selve mappestien
-aldrig i `fag:`-frontmatter-feltet, som
-`Seminarium.base` filtrerer eksakt på (`fag == "Musik"`). Symbol-ordbogen
-holdes i `⚙ META/Symbol-konvention.md` i selve vaulten, ikke her — ret begge
-steder hvis et symbol ændres.
+All machine-written content lives under `§ FAG/` (`FAG_ROOT` in `plugin/main.js`,
+locked, see issue #29). Three branches per subject: `RAW/` is bytes for devices
+(Boox/NeoReader browse the bare filesystem), `MD/` is notes for Obsidian, and
+`NOTER/` is a fourth, **manually owned** branch (see below). New machine-written
+content always falls into `RAW/`/`MD/` so the structure never has to be reorganised again.
 
-Ugemappen hedder `W<uge><dag> - <emne>` (fx `W34tors - Skolens formål`) når
-planen har et `topic.name` — strukturerede data fra itslearning, bekræftet
-live, ikke fritekst-parsing. Kun tilføjet fremadrettet: ældre mapper i
-vaulten hedder stadig bare `W34tors` uden emne, ikke migreret retroaktivt.
+The subject folder has a subject symbol in front of the friendly name from `COURSE_DISPLAY_NAMES`
+(`courseFolderName()`, e.g. `♪ Musik`). The symbols are only in the folder path,
+never in the `fag:` frontmatter field, which `Seminarium.base` filters on exactly
+(`fag == "Musik"`). The symbol dictionary lives in `⚙ META/Symbol-konvention.md` in the vault
+itself, not here: change both places if a symbol changes.
+
+The week folder is named `W<week><day> - <topic>` (e.g. `W34tors - Skolens formål`) when the plan
+has a `topic.name`: structured data from itslearning, confirmed live, not free-text parsing.
+Only added going forward: older folders in the vault are still just `W34tors` without a topic,
+not migrated retroactively.
 
 ```
-ViaVault/§ FAG/<symbol> <fag>/
-  RAW/<uge> - <emne>/<titel>.pdf                       ← ItsWiz' høst skriver kun her
-  MD/<uge> - <emne>/<uge> - <emne> lektionsplan.md     ← lektionsplan + links til ugens materialer
-  MD/<uge> - <emne>/<titel>.md                         ← MinerU-output (konverteringen i ItsWiz)
-  MD/<uge> - <emne>/_attachments/<titel>/<sha>.jpg     ← udtrukne billeder
-  NOTER/<uge> - <emne>/<uge> - <emne> note.md          ← forelæsningsnote-STUB, se nedenfor
+ViaVault/§ FAG/<symbol> <subject>/
+  RAW/<week> - <topic>/<title>.pdf                       ← ItsWiz' harvest only writes here
+  MD/<week> - <topic>/<week> - <topic> lektionsplan.md   ← lesson plan + links to the week's materials
+  MD/<week> - <topic>/<title>.md                         ← MinerU output (ItsWiz' conversion)
+  MD/<week> - <topic>/_attachments/<title>/<sha>.jpg     ← extracted images
+  NOTER/<week> - <topic>/<week> - <topic> note.md        ← lecture-note STUB, see below
 ```
 
-Noterne får frontmatter (`fag`, `uge`, `type`, `kilde`, og `emne`/`start`/`stop`
-når planen har dem), så `Seminarium.base` kan bygge overblik på tværs af uger
-og emner uden at strukturen skal kode alting. `uge` er den rene ugekode
-(`W34tors`), `emne` er sit eget felt — ikke gemt inde i mappenavnets streng.
-Billed-embeds er wikilinks (`![[<sha>.jpg]]`), ikke relative stier — de
-knækker på titler med parentes. Begrundelse og alternativer i ValdiVault:
+The notes get frontmatter (`fag`, `uge`, `type`, `kilde`, and `emne`/`start`/`stop`
+when the plan has them), so `Seminarium.base` can build overviews across weeks
+and topics without the structure encoding everything. `uge` is the plain week code
+(`W34tors`), `emne` is its own field, not buried in the folder name string.
+Image embeds are wikilinks (`![[<sha>.jpg]]`), not relative paths: those
+break on titles with parentheses. Rationale and alternatives in ValdiVault:
 `10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
 
-### `NOTER/` — forelæsningsnote-stub (issue #68)
+### `NOTER/` — lecture-note stub (issue #68)
 
-`writePlanNotes` skriver, i samme kørsel som lektionsplanen, en tom
-forelæsningsnote-stub i `§ FAG/<fag>/NOTER/<uge>/` med `fag`/`uge`/`emne`/
-`kilde:` allerede udfyldt fra itslearning-data — ingen manuel oprettelse,
-intet frontmatter i hånden. **Create-if-not-exists** via et rigtigt fil-tjek
-(`readFromVault`), kørt uafhængigt af lektionsplan-hashet: stubben skrives
-selv når lektionsplanen ikke ændrer sig, og findes den allerede, røres den
-aldrig igen — det er brugerens skriveflade.
+`writePlanNotes` writes, in the same run as the lesson plan, an empty
+lecture-note stub in `§ FAG/<subject>/NOTER/<week>/` with `fag`/`uge`/`emne`/
+`kilde:` already filled in from itslearning data: no manual creation,
+no hand-written frontmatter. **Create-if-not-exists** via a real file check
+(`readFromVault`), run independently of the lesson-plan hash: the stub is written
+even when the lesson plan doesn't change, and if it already exists it is
+never touched again. It is the user's writing surface.
 
-`NOTER/` er søskende til `RAW/`+`MD/`, ikke en separat top-rod — se
-`12-notestruktur-egne-noter.md` §11 i ValdiVault for hvorfor (kort version:
-ét sted pr. fag i stedet for flere rødder at huske, besluttet efter
-ADHD-hensyn i issue #65).
+`NOTER/` is a sibling of `RAW/`+`MD/`, not a separate top root. See
+`12-notestruktur-egne-noter.md` §11 in ValdiVault for why (short version:
+one place per subject instead of several roots to remember, decided with
+ADHD in mind in issue #65).
 
-### ⚒ Forberedelse — læs-noget vs. gør-noget (issue #59)
+### ⚒ Forberedelse (preparation): read-something vs. do-something (issue #59)
 
-itslearnings `Arbejdsopgave`-elementer (typisk titlen "Forberedelse") bærer
-intet indhold i `plan.elements` — kun en URL til
-`/CustomActivity/CustomActivityOverview.aspx`. Den side er almindelig
-server-renderet HTML, så `collectRangeInPage` henter beskrivelsen med en ren
-`fetch` (ingen SSO-handshake, ingen skjult fane) og læser den ud af sidens ene
-`.h-userinput`-element. Indlejrede dokumenter (Google Docs m.fl.) ligger som
-iframes bag itslearnings oembed-viser og pakkes ud til rigtige links, ellers
-ville `stripHtml` fjerne dem helt.
+itslearning's `Arbejdsopgave` elements (typically titled "Forberedelse") carry
+no content in `plan.elements`, only a URL to
+`/CustomActivity/CustomActivityOverview.aspx`. That page is plain
+server-rendered HTML, so `collectRangeInPage` fetches the description with a plain
+`fetch` (no SSO handshake, no hidden tab) and reads it out of the page's single
+`.h-userinput` element. Embedded documents (Google Docs etc.) are iframes behind
+itslearning's oembed viewer and are unpacked into real links, otherwise
+`stripHtml` would remove them entirely.
 
-Resultatet lander **to steder med hver sit job**:
+The result lands **in two places with a job each**:
 
-- **Lektionsplan-noten** (`MD/`): `forberedelse:` i frontmatter (`false` når
-  der ikke er noget) driver `Seminarium.base`s ⚒-kolonne, og en
-  `## ⚒ Forberedelse`-sektion i AUTO-blokken har det fulde indhold med
-  klikbare markdown-links. Maskin-ejet, så underviserens rettelser følger med.
-- **Forelæsningsnote-stubben** (`NOTER/`): `- [ ] ⚒ <titel>` pr. element.
-  Skrives ved oprettelsen, og nye elementer **appendes** senere hvis
-  underviseren tilføjer noget — eksisterende linjer, og dermed dine
-  afkrydsninger, røres aldrig.
+- **The lesson-plan note** (`MD/`): `forberedelse:` in frontmatter (`false` when
+  there is nothing) drives `Seminarium.base`'s ⚒ column, and a
+  `## ⚒ Forberedelse` section in the AUTO block has the full content with
+  clickable markdown links. Machine-owned, so the teacher's corrections follow along.
+- **The lecture-note stub** (`NOTER/`): `- [ ] ⚒ <title>` per element.
+  Written at creation, and new elements are **appended** later if the
+  teacher adds something. Existing lines, and thereby your ticks, are never touched.
 
-Skellet læs/gør ligger i *bæreren*, ikke i indholdet: itslearning har ét
-fritekstfelt, så et "Forberedelse"-element kan sagtens indeholde ren
-litteratur. Derfor står `litteratur:` (fra planens eget felt) og
-`forberedelse:` (fra elementerne) som to uafhængige felter, med hver sit
-symbol og sin kolonne — koden gætter aldrig på hvad teksten "egentlig" er.
+The read/do split lives in the *carrier*, not in the content: itslearning has one
+free-text field, so a "Forberedelse" element can easily contain pure
+literature. That is why `litteratur:` (from the plan's own field) and
+`forberedelse:` (from the elements) are two independent fields, each with its own
+symbol and column. The code never guesses what the text "really" is.
 
-Snitfladen til afleveringsopgaver (nedenfor) er skarp: **deadline → egen note
-i `✎ NOTER/OPGAVER/`, ingen deadline → linje i lektionens noter.** De to kan
-ikke overlappe, fordi opgave-noterne allerede filtrerer sentinel-deadlinen
-`9999-12-31` fra.
+### Own notes, the Obsidian side
 
-### Egne noter, Obsidian-siden
-
-`VIDEN/` (permanente noter + EMR-genererede literature-noter),
-`✎ NOTER/OPGAVER/` (opgaver) og `Egne noter.base` er ren vault-struktur uden
-kode-afhængighed — rørt af Obsidian/QuickAdd, ikke af ItsWiz. Se
-`⚙ META/Guides/` i selve vaulten (`00 - Kom i gang.md`,
+`VIDEN/` (permanent notes + EMR-generated literature notes),
+`✎ NOTER/OPGAVER/` (assignments) and `Egne noter.base` are pure vault structure with no
+code dependency, touched by Obsidian/QuickAdd, not by ItsWiz. See
+`⚙ META/Guides/` in the vault itself (`00 - Kom i gang.md`,
 `01 - QuickAdd-genveje.md`, `02 - Symboler og struktur.md`) for
-brugsvejledning, og `12-notestruktur-egne-noter.md` i ValdiVault for
-arkitekturbegrundelsen.
+usage, and `12-notestruktur-egne-noter.md` in ValdiVault for
+the architectural rationale.
 
-Engangsmigreringer af vaulten (kørt, bevaret som dokumentation): `watchfolder/engangsscripts/`.
+One-off vault migrations (run, kept as documentation): `watchfolder/engangsscripts/`.
 
-## Afleveringsopgaver
+## Assignments
 
-Afleveringsopgaver med en reel deadline (fra
-`restapi/personal/tasklistdailyworkflow/{courseId}/v1`, ét kald pr. kursus)
-bliver til en note i `✎ NOTER/OPGAVER/<opgave>/<opgave>.md` med `type: opgave`
-plus et personligt itslearning-kalenderevent på selve deadline-tidspunktet (når
-kalendersynken er slået til), adskilt fra lektionsplan-events. Opgaver uden deadline (sentinel `9999-12-31`) springes
-over — det er de samme "Forberedelse"-elementer der allerede står i
-lektionsplanerne. Noten skrives kun én gang (opgavemappen er dit eget
-skriveområde), mens kalendereventet opdateres hvis deadline flyttes.
+Assignments with a real deadline (from
+`restapi/personal/tasklistdailyworkflow/{courseId}/v1`, one call per course)
+become a note in `✎ NOTER/OPGAVER/<assignment>/<assignment>.md` with `type: opgave`
+plus a personal itslearning calendar event at the deadline time (when
+calendar sync is on), separate from lesson-plan events. Assignments without a deadline (sentinel `9999-12-31`) are
+skipped: they are the same "Forberedelse" elements that already appear in the
+lesson plans. The note is written only once (the assignment folder is your own
+writing area), while the calendar event is updated if the deadline moves.
 
-Opgavens vedhæftede opgavebeskrivelse (fx en PDF) forsøges også hentet.
-Filen ligger hverken i plan.elements eller i Ressourcer, kun i selve
-Afleveringsopgave-værktøjet (`assignment.itslearning.com`), som kræver sin
-egen SSO-handshake (session-cookie scopet til det domæne — en direkte
-download-URL uden handshaket giver 403). Et skjult vindue gennemfører derfor
-handshaket rigtigt (samme teknik som Office/WOPI-kæden), og filens rigtige
-download-URL læses ud af sidens `fileListControl.initialize(...)`-data
-bagefter. Lander i `✎ NOTER/OPGAVER/<opgave>/RAW/`, samme RAW/MD-mønster som
-`§ FAG/` — konverteringen laver den til `.../MD/<filnavn>.md`, og noten
-linker dertil (ikke til RAW-filen, samme regel som issue #26). Fejler blødt:
-ingen vedhæftning fundet er ikke en fejl, kun kilde-linket er så det eneste.
-Kører kun én gang pr. opgave (samme dedup som selve noten), ikke ved hver
-kørsel.
+The assignment's attached description (e.g. a PDF) is also fetched when possible.
+The file is neither in plan.elements nor in Ressourcer, only in the
+Afleveringsopgave tool itself (`assignment.itslearning.com`), which requires its
+own SSO handshake (session cookie scoped to that domain: a direct
+download URL without the handshake gives 403). A hidden window therefore completes the
+handshake properly (same technique as the Office/WOPI chain), and the file's real
+download URL is read out of the page's `fileListControl.initialize(...)` data
+afterwards. It lands in `✎ NOTER/OPGAVER/<assignment>/RAW/`, the same RAW/MD pattern as
+`§ FAG/`: the conversion turns it into `.../MD/<filename>.md`, and the note
+links there (not to the RAW file, same rule as issue #26). Fails softly:
+no attachment found is not an error, only the source link is then the only one.
+Runs only once per assignment (same dedup as the note itself), not on every
+run.
 
-## Sikkerhed
+## Security
 
-Ingen session-cookies, antiforgery-tokens eller andre secrets må committes.
-De skal læses dynamisk fra browserens egen session ved runtime.
+No session cookies, anti-forgery tokens or other secrets may be committed.
+They must be read dynamically from the browser's own session at runtime.
 
-## Udvikling — tests
+## Development: tests
 
 ```bash
 node --test plugin/test/*.test.js
-git config core.hooksPath .githooks   # én gang: pre-push kører testene
+git config core.hooksPath .githooks   # once: pre-push runs the tests
 ```
 
-`.githooks/` indeholder også `post-commit`/`post-checkout` der kører graphify-rs (springes over hvis
-`graphify-rs` ikke er installeret), så `core.hooksPath` ikke slår dem fra.
+`.githooks/` also contains `post-commit`/`post-checkout` that run graphify-rs (skipped if
+`graphify-rs` is not installed), so `core.hooksPath` doesn't switch them off.
