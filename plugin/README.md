@@ -36,6 +36,11 @@ Noter/
 Changing either folder in the settings moves the old folder if it exists (links follow). Names with symbols
 (`§`, `✎`) work, but are harder to type in a terminal.
 
+**Course names.** Each itslearning course code gets a name in the settings (new codes appear there after the
+first run; empty = the code itself). The name is the folder name, `fag:` in the notes, the Hold Course class
+and, with Hold Course sync on, the calendar title gets a colour circle matching the class colour. A changed
+name only applies to new notes: existing folders are not renamed.
+
 ## Usage (development: symlink from the repo)
 
 1. Symlink into the vault (done for ViaVault), from the repo root:

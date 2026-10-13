@@ -16,6 +16,14 @@ function applyRoots(settings) {
 }
 const underRoot = (path, root) => path.startsWith(`${root}/`);
 
+// Fagnavne er en indstilling (#270, plan i #266): kursuskode -> navn. Navnet bruges til mappen,
+// `fag:`, kalendertitlen og Hold Course-klassen. Ukendt kode eller tomt navn = den rå kode.
+// Samme modulvariabel-mønster som rødderne ovenfor, sat af applyCourseNames().
+let COURSE_NAMES = {};
+function applyCourseNames(settings) {
+  COURSE_NAMES = { ...(settings?.courseNames ?? {}) };
+}
+
 // #202: Hold Course-pluginets egen data.json, ikke en vaultsti under FAG_ROOT/OPGAVER_ROOT — læst
 // (aldrig skrevet) for at se om Valdemar har trykket Done DER, uden om et kryds i [NOTE]-stubben.
 const HOLD_COURSE_DATA_PATH = ".obsidian/plugins/hold-course/data.json";
@@ -377,12 +385,10 @@ function weekFolderName(plan) {
 // lektioner i samme forløb deler mappe, så genbrugt materiale ligger ét sted og ikke som
 // per-uge redirect-noter. Se ValdiVault 15-vault-fillayout-enhedsmapper.md + issue #148/#149/#150.
 // Lektion uden brugbart emne falder tilbage til dato (samme fallback som før).
-// TOPIC_DISPLAY_NAMES normaliserer forurenede topics (underviser-navne, logistik) — samme
-// hånd-vedligeholdte mønster som COURSE_DISPLAY_NAMES.
 function enhedFolder(plan) {
   const topic = plan.topic?.name?.trim();
   if (!topic) return weekFolderBase(plan);
-  return sanitizeFilename(TOPIC_DISPLAY_NAMES[topic] ?? topic);
+  return sanitizeFilename(topic);
 }
 
 // [PLAN]-notens FILNAVN (issue #184). Mappen deles fortsat af enhedens lektioner (enhedFolder
@@ -460,29 +466,18 @@ function simpleHash(text) {
 // RAW/ — den skriver aldrig ind i Obsidian-grenen. Se ValdiVault:
 // 10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md.
 //
-// itslearnings API har et FriendlyName-felt på kurset, men det er altid null — det eneste
-// pæne navn der findes er COURSE_DISPLAY_NAMES, som Valdemar allerede vedligeholder i hånden
-// til kalendersyncen. Ukendte kursuskoder (nye fag, "Hjælp", "VIAs onlinekurser") falder
-// tilbage til den rå kode i stedet for at fejle.
+// itslearnings API har et FriendlyName-felt på kurset, men det er altid null, og kortets Title er
+// selve kursuskoden. Det pæne navn kommer derfor fra indstillingen `courseNames` (COURSE_NAMES).
+// Ukendte kursuskoder (nye fag, "Hjælp", "VIAs onlinekurser") falder tilbage til den rå kode i
+// stedet for at fejle.
 function courseDisplayName(courseName) {
-  return COURSE_DISPLAY_NAMES[courseName] ?? courseName;
+  return COURSE_NAMES[courseName] || courseName;
 }
 
-// Kun til vault-mappestier og Google Calendar-navne (begge er steder man navigerer visuelt hen —
-// Valdemar har omdøbt de faktiske kalendere til at matche, fx "♪ Musik"). IKKE til
-// fag:-frontmatter-feltet (courseDisplayName ovenfor), som Seminarium.base filtrerer eksakt på
-// (`fag == "Musik"`) — et symbol blandet ind der ville splitte eksisterende og nye noter i to
-// grupper i stedet for at være rent kosmetisk (issue #63).
-// LivsOplysning bruger ⚖︎ (U+2696 + U+FE0E, tekst-variationsselector) i stedet for bare ⚖ — uden
-// den render macOS/Apples emoji-font symbolet farvet, selvom Unicode-standarden angiver monokrom
-// som default presentation (bekræftet 2026-08-12). ♪/♱ har ingen emoji-variant og rammer altid
-// monokromt uden selektoren.
-const FOLDER_SYMBOLS = { Musik: "♪", Religion: "♱", LivsOplysning: "⚖︎" };
-
+// Mappenavn = fagnavn, uden symbol (#270): ikoner og farver ejes af Hold Course. Navnet bruges
+// også i `fag:`-frontmatter, som Seminarium.base filtrerer eksakt på (`fag == "Musik"`).
 function courseFolderName(courseName) {
-  const display = courseDisplayName(courseName);
-  const symbol = FOLDER_SYMBOLS[display];
-  return symbol ? `${symbol} ${display}` : display;
+  return courseDisplayName(courseName);
 }
 
 // Fritekstfelt underviseren selv udfylder — henviser ofte til grundbogssider, ikke kun vedhæftede
@@ -885,8 +880,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // RAW/MD/NOTER files alle efter enhed (issue #209) — kun selve stub-FILNAVNET bærer "<dato> - <emne>".
     const weekFolder = enhedFolder(plan);
     const courseName = plan.courseName ?? "ukendt-fag";
-    // Symbol-navnet er kun til selve mappestien — fag:-feltet nedenfor skal blive ved den rene
-    // værdi (courseDisplayName), da Seminarium.base filtrerer eksakt på den (issue #63).
+    // Mappenavn og fag:-felt er samme fagnavn (#270), så Seminarium.base kan filtrere eksakt på det (issue #63).
     const fag = sanitizeFilename(courseFolderName(courseName));
     const fagField = courseDisplayName(courseName);
     const existingIds = await existingMaterialeIds(plan, courseName, weekFolder);
@@ -1150,8 +1144,7 @@ async function writeTaskNotes(tasks) {
     if (written.has(noteId)) continue;
 
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
-    // OPGAVER/<opgave>/ har ingen fag-undermappe (issue #37 §2) — fag bruges kun i frontmatter
-    // her, så det rene navn (courseDisplayName), ikke symbol-varianten (courseFolderName).
+    // OPGAVER/<opgave>/ har ingen fag-undermappe (issue #37 §2) — fag bruges kun i frontmatter her.
     const fag = courseDisplayName(task.CourseTitle ?? "ukendt-fag");
 
     let attachmentPath = null;
@@ -1331,28 +1324,6 @@ async function downloadFileElements(plans, tabId) {
   }
   return true;
 }
-
-const COURSE_DISPLAY_NAMES = {
-  "LSmu-2527": "Musik",
-  "LSmu-ec2425": "Musik",
-  "LSkr-2628": "Religion",
-  "LSS24.1livs": "LivsOplysning",
-  "LSdau2-2526": "Dansk",
-  "LSS24.1da": "Dansk",
-  "LSS24.1psyk.spæd": "PædPsyk",
-  "LSS24pra1-2425": "Praktik",
-  "LStek-f26": "Teknologiforståelse",
-  "LSS24.1pæd.ad": "PædAd",
-};
-
-// itslearning-topic -> mappenavn i RAW/MD (enhedFolder). Kun til at rydde op i forurenede
-// topics — Musik har underviser-navne og logistik i topic-listen. Tom entry = brug topic som det er.
-// Kandidater fundet i dry-run (migrate_to_enhed_mapper.py), Valdemar udfylder de rigtige mål:
-//   "Underviser Klaus Glüsing", "Underviser Lone Sonne", "Anne Katrine Christensen" (underviser-navne)
-//   "LMS KULTURFESTIVAL Silkeborg 2025", "Studietur", "Selvstudie", "Opfinderdag", "JEPPEs undervisning"
-// Samme tabel speciles ind i migrate_to_enhed_mapper.py's TOPIC_OVERRIDES så migrering og
-// fremadrettet skrivning er enige.
-const TOPIC_DISPLAY_NAMES = {};
 
 const TIME_ZONE = "Europe/Copenhagen";
 
@@ -1546,8 +1517,19 @@ async function getSettings() {
 // som Outlook og telefonen abonnerer på via iCal-feedet. plan_id -> eventId ligger i data.json
 // (calendarEventMap). ItsWiz rører kun event-id'er fra det kort, aldrig noget den ikke selv har oprettet.
 
-// Kun kalenderen: vaultmapperne (FOLDER_SYMBOLS) ændres ikke.
-const CALENDAR_SYMBOLS = { ...FOLDER_SYMBOLS, Dansk: "Æ", PædPsyk: "Ψ", PædAd: "⚘", Praktik: "⌂", Teknologiforståelse: "⌘" };
+// Farvecirkel i kalendertitlen (#270): Hold Course ejer farven (klassens colorIndex), så den sættes ét
+// sted. Rækkefølgen følger Hold Courses COLOR_PALETTE: amber, teal, coral, purple, pink, green.
+// Pink har ingen egen cirkel, så 🟠 er et kompromis. Uden Hold Course-synk er der intet præfiks.
+const COLOR_CIRCLES = ["🟡", "🔵", "🔴", "🟣", "🟠", "🟢"];
+// fag -> colorIndex ud fra Hold Courses data.json (vswFag = det fagnavn ItsWiz selv satte på klassen).
+function fagColors(holdCourseData) {
+  const colors = {};
+  for (const sem of holdCourseData?.semesters ?? []) {
+    for (const cls of sem.classes ?? []) if (cls.vswFag && Number.isInteger(cls.colorIndex)) colors[cls.vswFag] = cls.colorIndex;
+  }
+  return colors;
+}
+const colorPrefix = (fag, colors) => (fag in colors ? `${COLOR_CIRCLES[colors[fag] % COLOR_CIRCLES.length]} ` : "");
 const TASK_EVENT_MINUTES = 30;
 const CANCELLED_PREFIX = "AFLYST · ";
 
@@ -1560,14 +1542,13 @@ function planHasSpecificTime(plan) {
 const escapeHtml = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const itslLink = (url, text) => (url ? `<a href="${escapeHtml(url.startsWith("/") ? BASE + url : url)}">${escapeHtml(text)}</a>` : escapeHtml(text));
 
-function calendarTitle(courseName, ...parts) {
+function calendarTitle(courseName, colors, ...parts) {
   const fag = courseDisplayName(courseName ?? "ukendt-fag");
-  const sym = CALENDAR_SYMBOLS[fag];
-  return `${sym ? sym + " " : ""}${fag}: ${parts.filter(Boolean).join(" — ")}`;
+  return `${colorPrefix(fag, colors)}${fag}: ${parts.filter(Boolean).join(" — ")}`;
 }
 
 // itslearning gemmer vægur-tid uden zone, så plan.start.slice(0, 19) er det rigtige format.
-function lessonEvent(key, plan) {
+function lessonEvent(key, plan, colors) {
   const topic = plan.topic?.name?.trim();
   const title = (plan.title ?? "").replace(/^Uge\s*\d+\s+\S+\s*[-–:]?\s*/i, "").trim();
   const parts = [`<p>${plan.description ?? ""}</p>`];
@@ -1578,24 +1559,25 @@ function lessonEvent(key, plan) {
   }
   const mats = (plan.elements ?? []).filter((el) => el.typeName !== "Arbejdsopgave");
   if (mats.length) parts.push(`<p><b>Materialer</b></p><ul>${mats.map((el) => `<li>${itslLink(el.url, el.title)}</li>`).join("")}</ul>`);
-  return { key, title: calendarTitle(plan.courseName, topic, title), description: parts.join(""), start: plan.start.slice(0, 19), end: plan.stop.slice(0, 19) };
+  return { key, title: calendarTitle(plan.courseName, colors, topic, title), description: parts.join(""), start: plan.start.slice(0, 19), end: plan.stop.slice(0, 19) };
 }
 
-function taskEvent(task) {
+function taskEvent(task, colors) {
   const end = task.Deadline.slice(0, 19);
   const start = new Date(new Date(end + "Z").getTime() - TASK_EVENT_MINUTES * 60000).toISOString().slice(0, 19);
-  const title = `⚑ ${courseDisplayName(task.CourseTitle ?? "ukendt-fag")}: aflevering: ${task.TaskTitle}`;
+  const fag = courseDisplayName(task.CourseTitle ?? "ukendt-fag");
+  const title = `${colorPrefix(fag, colors)}⚑ ${fag}: aflevering: ${task.TaskTitle}`;
   return { key: taskId(task), title, description: `<p>${itslLink(task.TaskUrl, "Åbn opgaven i itslearning")}</p>`, start, end };
 }
 
 // Alle events der skal findes, fra en høst. Planer uden tid og planer før i går springes over.
-function calendarItems(result, nowIso) {
+function calendarItems(result, nowIso, colors = {}) {
   const from = new Date(new Date(nowIso).getTime() - 86400e3).toISOString().slice(0, 19);
   const items = [];
   for (const [key, plan] of Object.entries({ ...result.plans, ...result.orphanPlans })) {
-    if (plan && planHasSpecificTime(plan) && plan.start.slice(0, 19) >= from) items.push(lessonEvent(key, plan));
+    if (plan && planHasSpecificTime(plan) && plan.start.slice(0, 19) >= from) items.push(lessonEvent(key, plan, colors));
   }
-  for (const task of result.tasks ?? []) if (task.Deadline.slice(0, 19) >= from) items.push(taskEvent(task));
+  for (const task of result.tasks ?? []) if (task.Deadline.slice(0, 19) >= from) items.push(taskEvent(task, colors));
   for (const it of items) it.hash = simpleHash(`${it.title}\n${it.description}`);
   return items;
 }
@@ -1994,6 +1976,21 @@ async function collect(startUnix, endUnix) {
   }
 }
 
+// Ukendte kursuskoder fra en høst tilføjes til indstillingen courseNames med tomt navn (= den rå
+// kode, som er det eneste itslearning kender: kortets Title er koden selv), så de dukker op i
+// indstillingerne og kan få et pænt navn (#270).
+async function registerCourseCodes(result) {
+  const names = (plugin.data.settings.courseNames ??= {});
+  const codes = [
+    ...Object.values({ ...result.plans, ...result.orphanPlans }).map((p) => p?.courseName),
+    ...(result.tasks ?? []).map((t) => t.CourseTitle),
+  ].filter((c) => c && !(c in names));
+  if (!codes.length) return;
+  for (const code of codes) names[code] = "";
+  applyCourseNames(plugin.data.settings);
+  await plugin.saveData(plugin.data);
+}
+
 async function collectAndDownload(startUnix, endUnix) {
   console.log(`VIAstudyWiz: starter kørsel (${new Date(startUnix * 1000).toISOString()} → ${new Date(endUnix * 1000).toISOString()})`);
   runErrorCount = 0;
@@ -2008,6 +2005,7 @@ async function collectAndDownload(startUnix, endUnix) {
     console.log(
       `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer, ${(result.tasks ?? []).length} opgaver med deadline`
     );
+    await registerCourseCodes(result);
     // Download FØR noteskrivning (#129): writePlanNotes linker kun til filer der findes.
     if (settings.enableFileDownloads) {
       // ItsWiz: myEvents returnerer kun begivenheder fra stjernemarkerede rum (målt 2026-10-12:
@@ -2150,7 +2148,8 @@ async function drainCalendarDeleteQueue() {
 async function syncCalendar(result) {
   const map = plugin.data.calendarEventMap;
   const nowIso = new Date().toISOString();
-  const items = calendarItems(result, nowIso);
+  const colors = (await getSettings()).enableHoldCourseSync ? fagColors(await readHoldCourseData()) : {};
+  const items = calendarItems(result, nowIso, colors);
   plugin.lastCalendar = { items: items.length, plans: Object.keys({ ...result.plans, ...result.orphanPlans }).length, tasks: (result.tasks ?? []).length }; // aflæses udefra (obsidian eval)
   const starts = [...items, ...Object.values(map)];
   if (starts.length === 0) return;
@@ -2465,11 +2464,6 @@ function timeFieldsFromStart(start) {
   return { uge: `${thursday.getUTCFullYear()}-W${String(week).padStart(2, "0")}`, ugedag: DAYS_DA_MON[wd], dato: `${m[1]}-${m[2]}-${m[3]}` };
 }
 
-function plainFag(folderName) {
-  for (const [name, symbol] of Object.entries(FOLDER_SYMBOLS)) if (folderName === `${symbol} ${name}`) return name;
-  return folderName;
-}
-
 // Ren del af watcherens frontmatter(): planNotes er MD-ugemappens [PLAN]-noter, hentet = formatNow().
 function materialeFrontmatter(rawFilePath, planNotes, hentet, extra = "") {
   const t = mdTargets(rawFilePath);
@@ -2489,7 +2483,7 @@ function materialeFrontmatter(rawFilePath, planNotes, hentet, extra = "") {
   let timeFields = Object.fromEntries(["uge", "ugedag", "dato"].filter((k) => k in fields).map((k) => [k, fields[k]]));
   if (!Object.keys(timeFields).length && fields.start) timeFields = timeFieldsFromStart(fields.start);
 
-  const lines = [`fag: ${plainFag(t.fagFolder)}\n`];
+  const lines = [`fag: ${t.fagFolder}\n`];
   for (const k of ["uge", "ugedag", "dato"]) if (k in timeFields) lines.push(`${k}: ${timeFields[k]}\n`);
   lines.push("type: materiale\n", `kilde: "[[${rawFilePath}]]"\n`, `hentet: "${hentet}"\n`);
   if (emne) lines.push(`emne: "${emne}"\n`);
@@ -3013,11 +3007,6 @@ function scanExisting() {
 const HC_KNOWN_DATA_VERSION = 2;
 const HC_COLOR_PALETTE_SIZE = 6;
 const HC_COURSE_URL = "https://via.itslearning.com/Course/Course.aspx?CourseId=";
-const HC_FAG_STYLE = {
-  Musik: { symbol: "♪", colorIndex: 5, itslearningCode: "LSmu-2527" },
-  Religion: { symbol: "♱", colorIndex: 0, itslearningCode: "LSkr-2628" },
-  LivsOplysning: { symbol: "⚖︎", colorIndex: 2, itslearningCode: "LSS24.1livs" },
-};
 const LITTERATUR_PREFIX = "▥";
 const LITTERATUR_FIL_PREFIX = "📎";
 const MATERIALE_FIL_PREFIX = "📎";
@@ -3301,9 +3290,6 @@ function ensureAllSemesters(data, plans, tasks, newId) {
 const courseUrl = (courseId) => (courseId ? HC_COURSE_URL + courseId : "");
 
 function ensureClass(sem, fag, newId, courseId = "") {
-  const style = HC_FAG_STYLE[fag] ?? {};
-  const symbol = style.symbol ?? fag;
-  const code = style.itslearningCode ? `${symbol} ${style.itslearningCode}` : symbol;
   const url = courseUrl(courseId);
   let cls = findStamped(sem.classes, "vswFag", fag);
   if (cls) {
@@ -3311,11 +3297,12 @@ function ensureClass(sem, fag, newId, courseId = "") {
       cls.courseUrl = url;
       cls.vswCourseUrl = url;
     }
-    cls.code = code;
     return cls;
   }
+  // code, colorIndex og name sættes kun ved oprettelsen (#270), så brugerens egne rettelser i Hold Course overlever.
+  const code = Object.keys(COURSE_NAMES).find((k) => COURSE_NAMES[k] === fag) ?? fag;
   cls = {
-    id: newId(), colorIndex: style.colorIndex ?? sem.classes.length % HC_COLOR_PALETTE_SIZE,
+    id: newId(), colorIndex: sem.classes.length % HC_COLOR_PALETTE_SIZE,
     code, name: fag, courseUrl: url, vswCourseUrl: url, meetingLink: "",
     professorName: "", professorEmail: "", officeHours: "",
     taName: "", taEmail: "", taOfficeHours: "",
@@ -3666,12 +3653,11 @@ function renderForloeb(sem, cls, genereret) {
 
 const stripGenereret = (text) => text.replace(/^genereret: .*$/m, "genereret:");
 
-// `isDir(sti)` er et synkront opslag. null = faget har ingen kendt mappe.
+// `isDir(sti)` er et synkront opslag. null = faget har ingen mappe (mappenavn = fagnavn, #270).
 function forloebPath(sem, cls, multi, isDir) {
   const fag = cls.vswFag || cls.name || "";
-  const style = HC_FAG_STYLE[fag];
-  if (!style) return null;
-  const fagDir = `${FAG_ROOT}/${style.symbol} ${fag}`;
+  if (!fag) return null;
+  const fagDir = `${FAG_ROOT}/${sanitizeFilename(fag)}`;
   if (!isDir(fagDir)) return null;
   return multi ? `${fagDir}/_HoldCourse/${nfc(`${sem.name ?? "ukendt"}.md`)}` : `${fagDir}/${nfc("_forløb.md")}`;
 }
@@ -3973,6 +3959,19 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     }
 
+    containerEl.createEl("h3", { text: "Course names" });
+    containerEl.createEl("p", { text: "The name used for each itslearning course code: the folder, fag: in the notes, the calendar and Hold Course. Empty = the code itself. Courses appear here after the first run. A change only applies to new notes; existing folders are not renamed.", cls: "setting-item-description" });
+    s.courseNames ??= {};
+    for (const code of Object.keys(s.courseNames)) {
+      new Setting(containerEl).setName(code).addText((t) =>
+        t.setPlaceholder(code).setValue(s.courseNames[code]).onChange((v) => {
+          s.courseNames[code] = v.trim();
+          applyCourseNames(s);
+          save();
+        })
+      );
+    }
+
     containerEl.createEl("h3", { text: "Conversion to markdown (MinerU)" });
     new Setting(containerEl)
       .setName("Convert RAW files")
@@ -4021,6 +4020,7 @@ class ItsWizPlugin extends Plugin {
       await this.loadData()
     );
     applyRoots(this.data.settings);
+    applyCourseNames(this.data.settings);
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
     this.addRibbonIcon("graduation-cap", "ItsWiz", () => this.openView());
     this.addCommand({ id: "open", name: "Open itslearning", callback: () => this.openView() });
@@ -4085,6 +4085,11 @@ Object.assign(module.exports, {
   mdTargets,
   inRawBranch,
   applyRoots,
+  applyCourseNames,
+  courseDisplayName,
+  ensureClass,
+  forloebPath,
+  fagColors,
   touchesHoldCourseInput,
   errorMarkerPath,
   timeFieldsFromStart,
