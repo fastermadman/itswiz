@@ -37,7 +37,7 @@ const HOLD_COURSE_DATA_PATH = ".obsidian/plugins/hold-course/data.json";
 // Modulniveau, ikke kun lokal i writePlanNotes: runCollectAndDownload skal kunne sammenligne den
 // mod den senest GENNEMFØRTE version (issue #121) for at vide om en engangs-backfill er
 // nødvendig — se FRONTMATTER_VERSION_KEY og runCollectAndDownload.
-const FRONTMATTER_VERSION = 11; // 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129), 10 = [PLAN]-note pr. lektion (#184), 11 = forberedelse_tekst (#205)
+const FRONTMATTER_VERSION = 12; // 12 = engelske nøgler/overskrifter, uden uge/ugedag/dato, false-værdier og præfikser (#271), 2 = forberedelse-feltet (#59), 3 = fjernet dato:-felt, 4 = plan_id: (#96), 5 = litteratur-case-fix (#44), 6 = litteratur_filer (#44), 7 = materiale_filer (#113), 8 = beskrivelse (#113), 9 = kun linke downloadede elementer (#129), 10 = [PLAN]-note pr. lektion (#184), 11 = forberedelse_tekst (#205)
 
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
 // fordi myEvents-POST'et afvises med 403 når Origin er chrome-extension://... i stedet for
@@ -339,38 +339,9 @@ async function extractExtensionFromWopi(wopiContentsUrl) {
 // ISO-ugenummer-beregning (issue #135), som manglede årstal helt: "W35fre" for to forskellige
 // år regnede sig frem til NØJAGTIG samme vaultsti, så et gammelt semesters materiale kunne blive
 // forvekslet med indeværende semesters. Dato er årstals-unik i sig selv uden ekstra logik.
-// Bruges til `dato:`-frontmatterfeltet og til NOTER-grenens "<dato> - <emne>".
+// Bruges til NOTER-grenens "<dato> - <emne>".
 function weekFolderBase(plan) {
   return plan.start.slice(0, 10);
-}
-
-// Frontmatter-tid (issue #154): tre adskilte felter afledt af plan.start, i stedet for det gamle
-// sammenblandede "uge: W38fre". Date.UTC(y,m,d) er tidszone-sikkert (i modsætning til
-// new Date(<lokal streng>), jf. #135) — vi regner kun på kalenderdato, aldrig klokkeslæt.
-const DAYS_DA = ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"];
-
-function ymd(plan) {
-  return plan.start.slice(0, 10).split("-").map(Number); // [y, m, d]
-}
-
-function isoWeek(plan) {
-  const [y, m, d] = ymd(plan);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  const dayNum = dt.getUTCDay() || 7; // man=1 … søn=7
-  dt.setUTCDate(dt.getUTCDate() + 4 - dayNum); // ISO: uge tilhører sin torsdag
-  const yearStart = Date.UTC(dt.getUTCFullYear(), 0, 1);
-  const week = Math.ceil((dt.getTime() - yearStart) / 86400000 / 7 + 1 / 7);
-  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
-function weekdayDa(plan) {
-  const [y, m, d] = ymd(plan);
-  return DAYS_DA[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
-}
-
-// De tre tids-linjer der før var "uge: <dato>" — samme tre linjer i [PLAN]- og [NOTE]-frontmatter.
-function timeFrontmatterLines(plan) {
-  return [`uge: ${isoWeek(plan)}`, `ugedag: ${weekdayDa(plan)}`, `dato: ${weekFolderBase(plan)}`];
 }
 
 // [NOTE]-stubbens FILNAVN: fortsat "<dato> - <emne>" pr. lektion (issue #209 grupperede kun selve
@@ -581,7 +552,7 @@ function noteStubPath(courseName, enhedFolder, weekFolder) {
 // Indholdet står i lektionsplan-notens AUTO-blok, som kilde: wikilinker til, og som genskrives når
 // underviseren retter noget. Stod teksten også her, ville Valdemars egen fil — der per design
 // aldrig overskrives — drifte væk fra itslearning uden at nogen kunne se det.
-const FORB_HEADING = "## ⚒ Forberedelse";
+const FORB_HEADING = "## Preparation";
 
 // Skriver kun hvis filen ikke findes i forvejen — modsat lektionsplan-noten (som genskrives når
 // planen ændrer sig), er denne stub udelukkende til at give Valdemar et sted at skrive: findes
@@ -635,7 +606,7 @@ function holdCourseDoneForbTitles(holdCourseData, planKey) {
 async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forberedelse, tabId, syncEnabled, holdCourseDone) {
   const courseName = plan.courseName ?? "ukendt-fag";
   const path = noteStubPath(courseName, enhedFolder(plan), weekFolder);
-  const labels = forberedelse.map((el) => `⚒ ${el.titel}`);
+  const labels = forberedelse.map((el) => el.titel);
   try {
     const existing = await readFromVault(path);
     if (existing != null) {
@@ -651,7 +622,7 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
           existing.split("\n").filter((line) => /^- \[[xX]\]/.test(line.trim())).map((line) => line.replace(/^- \[[xX]\]\s*/, "").trim())
         );
         const skalMarkeres = forberedelse.filter((el) =>
-          !el.isCompleted && (afkrydsede.has(`⚒ ${el.titel}`) || holdCourseDone.has(el.titel))
+          !el.isCompleted && (afkrydsede.has(el.titel) || holdCourseDone.has(el.titel))
         );
         if (skalMarkeres.length) await completeTasks(skalMarkeres, tabId);
       }
@@ -659,7 +630,10 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
       // aldrig dukke op i noten, fordi stubben kun skrives én gang.
       // ponytail: matcher på titel, ikke element-id. To elementer med IDENTISK titel i samme
       // lektion giver kun én linje; et id i en HTML-kommentar er opgraderingen hvis det sker.
-      const nye = labels.filter((label) => !existing.includes(label)).map((label) => `- [ ] ${label}`);
+      // Whole checkbox lines, not substrings: without the old ⚒ marker a title like "Preparation"
+      // would otherwise match the heading itself.
+      const present = new Set(existing.split("\n").map((line) => /^- \[[ xX]\]\s*(.*)$/.exec(line.trim())?.[1]).filter(Boolean));
+      const nye = labels.filter((label) => !present.has(label)).map((label) => `- [ ] ${label}`);
       if (nye.length === 0) return true;
       const opdateret = existing.includes(FORB_HEADING)
         ? existing.replace(FORB_HEADING, [FORB_HEADING, ...nye].join("\n"))
@@ -672,17 +646,15 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
     const note = [
       "---",
       "type: note",
-      `fag: ${courseDisplayName(courseName)}`,
-      ...timeFrontmatterLines(plan),
-      ...(topic ? [`emne: "${topic}"`] : []),
-      // uge er ISO (2026-W38), årstals-unik; ugedag/dato er egne felter (#154). start er stadig
-      // den universelle kronologiske nøgle, samme lærepenge som Seminarium.base's sorteringsfejl (#65).
+      `course: ${courseDisplayName(courseName)}`,
+      ...(topic ? [`topic: "${topic}"`] : []),
+      // start is the chronological key (the week/weekday/date fields are gone, #271).
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
-      `kilde: "[[${kildeStem}]]"`,
+      `source: "[[${kildeStem}]]"`,
       "tags: []",
       "---",
       "",
-      `Kilde: [[${kildeStem}]]`,
+      `Source: [[${kildeStem}]]`,
       "",
       ...(labels.length ? [FORB_HEADING, ...labels.map((label) => `- [ ] ${label}`), ""] : []),
     ].join("\n");
@@ -931,7 +903,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const materials = (plan.elements ?? [])
       .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && hasFile(el)))
       .map((el) => {
-        if (el.typeName === "Link") return `- ${el.title} (link — åbn selve lektionsplanen i itslearning for at følge det)`;
+        if (el.typeName === "Link") return `- ${el.title} (link — open the lesson plan in itslearning to follow it)`;
         if (!existingIds.has(el.id)) return `- ${rawLink(courseName, weekFolder, el.title)} · [${el.title} (web)](https://via.itslearning.com${el.url})`;
         const raw = rawIds.has(el.id) ? ` · ${rawLink(courseName, weekFolder, el.title)}` : "";
         return `- ${mdLink(courseName, weekFolder, el.title)}${raw} · [${el.title} (web)](https://via.itslearning.com${el.url})`;
@@ -985,16 +957,16 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const forberedelseLines = forberedelse.flatMap((el) => [
       "",
       ...(forberedelse.length > 1 ? [`### ${el.titel}`, ""] : []),
-      stripHtml(el.body, true) || "_(intet indhold hentet — åbn i itslearning)_",
+      stripHtml(el.body, true) || "_(no content fetched — open in itslearning)_",
       "",
-      `[Åbn "${el.titel}" i itslearning](https://via.itslearning.com${el.url})`,
+      `[Open "${el.titel}" in itslearning](https://via.itslearning.com${el.url})`,
     ]);
 
     const autoContent = [
       `# ${plan.title ?? weekFolder}`,
       "",
       stripHtml(plan.description),
-      ...(materials.length ? ["", "## Materialer", ...materials] : []),
+      ...(materials.length ? ["", "## Materials", ...materials] : []),
       ...(forberedelse.length ? ["", FORB_HEADING, ...forberedelseLines] : []),
     ].join("\n");
 
@@ -1021,11 +993,8 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
 
     const frontmatter = [
       "---",
-      `fag: ${fagField}`,
-      ...timeFrontmatterLines(plan),
-      ...(topic ? [`emne: "${topic}"`] : []),
-      // uge/ugedag/dato er adskilte felter afledt af plan.start (#154). start/stop nedenfor har
-      // klokkeslættet oveni og er den universelle kronologiske nøgle til Bases.
+      `course: ${fagField}`,
+      ...(topic ? [`topic: "${topic}"`] : []),
       // Lektionens rigtige tidspunkt (ikke lokale-bookingens) — se toGoogleDateTime/syncCalendar
       // for hvorfor plan.start/stop er den pålidelige kilde.
       `start: "${toGoogleDateTime(plan.start ?? "").replace("T", " ")}"`,
@@ -1034,40 +1003,41 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       // #124) — sync_hold_course.py skriver dem videre til Hold Course KUN når de afviger fra
       // klassens standard, så en manglende linje her er ikke tabt information, bare "ingen
       // afvigelse at rapportere".
-      ...(plan.room ? [`lokale: "${plan.room}"`] : []),
-      ...(plan.teacher ? [`underviser: "${plan.teacher}"`] : []),
-      `hentet: "${formatNow()}"`,
-      "type: lektionsplan",
+      ...(plan.room ? [`room: "${plan.room}"`] : []),
+      ...(plan.teacher ? [`teacher: "${plan.teacher}"`] : []),
+      `fetched: "${formatNow()}"`,
+      "type: lesson-plan",
       // Samme stabile id som weekFolder-flytningen (issue #96) sporer på — synligt her frem for
       // kun i extensionens storage.local, så identiteten overlever en nulstillet extension-storage og
       // kan slås op direkte i vaulten (fx grep efter planKey for at rekonstruere cachen manuelt).
       `plan_id: "${planKey}"`,
-      ...(literature ? yamlBlockLines("litteratur", `▥ ${literature}`) : ["litteratur: false"]),
+      // A field is only written when it has content (no `false` placeholders, #271).
+      ...(literature ? yamlBlockLines("literature", literature) : []),
       // Separat felt fra litteratur selv (issue #44, spørgsmål 1+3): litteratur-teksten er ofte en
       // ren grundbogshenvisning uden fil, så et match mod plan.elements er ikke garanteret — basen
       // skal kunne skelne "har litteratur OG en fundet fil" fra "har kun litteratur-tekst" uden at
       // parse brødteksten. `false` når matchLiteratureElements ikke fandt noget, samme mønster som
       // litteratur/forberedelse ovenfor.
       ...(literatureFiles.length
-        ? yamlBlockLines("litteratur_filer", literatureFiles.map((el) => `📎 ${fileLink(courseName, weekFolder, el.title, existingIds.has(el.id))}`).join("\n"))
-        : ["litteratur_filer: false"]),
+        ? yamlBlockLines("literature_files", literatureFiles.map((el) => fileLink(courseName, weekFolder, el.title, existingIds.has(el.id))).join("\n"))
+        : []),
       // Kun titlerne, ikke indholdet: Properties-panelet og basens kolonne skal kunne læses på et
       // blik, og selve teksten står i AUTO-sektionen nedenfor. `false` frem for at udelade feltet,
       // så basens formel kan bruge et eksplicit `!= false` i stedet for antaget truthiness — samme
       // mønster som `litteratur` lige ovenfor.
       ...(forberedelse.length
-        ? yamlBlockLines("forberedelse", forberedelse.map((el) => `⚒ ${el.titel}`).join("\n"))
-        : ["forberedelse: false"]),
+        ? yamlBlockLines("preparation", forberedelse.map((el) => el.titel).join("\n"))
+        : []),
       // #205: selve instruktionsteksten til feltet ovenfor — se kommentaren ved forberedelseTekst
       // for hvorfor den har sit eget felt. Samme `false`-mønster.
-      ...(forberedelseTekst ? yamlBlockLines("forberedelse_tekst", forberedelseTekst) : ["forberedelse_tekst: false"]),
+      ...(forberedelseTekst ? yamlBlockLines("preparation_text", forberedelseTekst) : []),
       // Alt vedhæftet fil-materiale der IKKE allerede står i litteratur_filer — dækker fag hvor
       // underviseren aldrig udfylder litteratur-feltet (se kommentaren ved materialeFiler ovenfor).
       // Samme false-mønster som de øvrige felter.
       ...(materialeFiler.length
-        ? yamlBlockLines("materiale_filer", materialeFiler.map((el) => `📎 ${fileLink(courseName, weekFolder, el.title, existingIds.has(el.id))}`).join("\n"))
-        : ["materiale_filer: false"]),
-      ...(beskrivelse ? yamlBlockLines("beskrivelse", beskrivelse) : ["beskrivelse: false"]),
+        ? yamlBlockLines("material_files", materialeFiler.map((el) => fileLink(courseName, weekFolder, el.title, existingIds.has(el.id))).join("\n"))
+        : []),
+      ...(beskrivelse ? yamlBlockLines("description", beskrivelse) : []),
       "---",
       "",
     ].join("\n");
@@ -1158,20 +1128,20 @@ async function writeTaskNotes(tasks) {
 
     const note = [
       "---",
-      "type: opgave",
-      `fag: ${fag}`,
+      "type: assignment",
+      `course: ${fag}`,
       `deadline: "${toGoogleDateTime(task.Deadline).replace("T", " ")}"`,
-      ...(task.TaskUrl ? [`kilde: "${task.TaskUrl}"`] : []),
-      `hentet: "${formatNow()}"`,
+      ...(task.TaskUrl ? [`source: "${task.TaskUrl}"`] : []),
+      `fetched: "${formatNow()}"`,
       "---",
       "",
       `# ${task.TaskTitle ?? folder}`,
       "",
       `Deadline: ${task.DeadlineDisplayTime ?? task.Deadline}`,
-      ...(task.TaskUrl ? ["", `[Åbn opgaven i itslearning](${task.TaskUrl})`] : []),
+      ...(task.TaskUrl ? ["", `[Open the assignment in itslearning](${task.TaskUrl})`] : []),
       // Link til MD-noten, ikke RAW-filen — samme regel som lektionsplan-noternes
       // materialer-liste (issue #26), af samme grund: MD er læselaget.
-      ...(attachmentPath ? ["", "## Opgavebeskrivelse", `- [[${attachmentPath}]]`] : []),
+      ...(attachmentPath ? ["", "## Assignment description", `- [[${attachmentPath}]]`] : []),
       "",
     ].join("\n");
 
@@ -1531,7 +1501,7 @@ function fagColors(holdCourseData) {
 }
 const colorPrefix = (fag, colors) => (fag in colors ? `${COLOR_CIRCLES[colors[fag] % COLOR_CIRCLES.length]} ` : "");
 const TASK_EVENT_MINUTES = 30;
-const CANCELLED_PREFIX = "AFLYST · ";
+const CANCELLED_PREFIX = "CANCELLED · ";
 
 // itslearning koder "ingen specifik tid" som 00:01–23:59 (samme regel som background.js).
 function planHasSpecificTime(plan) {
@@ -2378,9 +2348,8 @@ const UPLOAD_RETRIES = 3;
 const UPLOAD_RETRY_BACKOFF_MS = 30e3;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60e3;
 const ANCHOR_LENGTH = 40;
-const AUTO_MATERIALER_RE = /^## Materialer\n([\s\S]*?)(?=\n## |\n<!-- AUTO:END|$(?![\s\S]))/m;
+const AUTO_MATERIALER_RE = /^## Materials\n([\s\S]*?)(?=\n## |\n<!-- AUTO:END|$(?![\s\S]))/m;
 const HIGHLIGHT_RE = /==[^=\n]+==/;
-const DAYS_DA_MON = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"];
 
 // Nøglen ligger i Obsidians localStorage pr. enhed, ikke i data.json: plugin-data i ViaVault er
 // git-tracket og pushes til GitHub, og synkes til Boox'en.
@@ -2454,18 +2423,8 @@ function owningPlanId(notes, mdName) {
   return notes.length ? readFrontmatterField(planNoteFor(notes, mdName).text, "plan_id") : null;
 }
 
-function timeFieldsFromStart(start) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T]\d{2}:\d{2}(?::\d{2})?)?$/.exec(start.trim());
-  if (!m) return {};
-  const day = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
-  const wd = (day.getUTCDay() + 6) % 7;
-  const thursday = new Date(day.getTime() + (3 - wd) * 864e5);
-  const week = Math.floor((thursday - Date.UTC(thursday.getUTCFullYear(), 0, 1)) / 864e5 / 7) + 1;
-  return { uge: `${thursday.getUTCFullYear()}-W${String(week).padStart(2, "0")}`, ugedag: DAYS_DA_MON[wd], dato: `${m[1]}-${m[2]}-${m[3]}` };
-}
-
 // Ren del af watcherens frontmatter(): planNotes er MD-ugemappens [PLAN]-noter, hentet = formatNow().
-function materialeFrontmatter(rawFilePath, planNotes, hentet, extra = "") {
+function materialeFrontmatter(rawFilePath, planNotes, fetched, extra = "") {
   const t = mdTargets(rawFilePath);
   const parts = rawFilePath.split("/");
   const folder = parts[parts.length - 2] ?? "";
@@ -2473,31 +2432,28 @@ function materialeFrontmatter(rawFilePath, planNotes, hentet, extra = "") {
   const fields = {};
   if (planNotes.length) {
     const text = planNoteFor(planNotes, `${stemName(stemOf(parts[parts.length - 1]))}.md`).text;
-    for (const key of ["emne", "uge", "ugedag", "dato", "start", "stop"]) {
+    for (const key of ["topic", "start", "stop"]) {
       const value = readFrontmatterField(text, key);
       if (value) fields[key] = value;
     }
   }
   const noFolderMeta = folder === "RAW" || /^(\d{4}-\d{2}-\d{2}|W\d{1,2}[a-zæøå]+)$/i.test(folder);
-  const emne = fields.emne || folderEmne || (noFolderMeta ? "" : folder);
-  let timeFields = Object.fromEntries(["uge", "ugedag", "dato"].filter((k) => k in fields).map((k) => [k, fields[k]]));
-  if (!Object.keys(timeFields).length && fields.start) timeFields = timeFieldsFromStart(fields.start);
+  const topic = fields.topic || folderEmne || (noFolderMeta ? "" : folder);
 
-  const lines = [`fag: ${t.fagFolder}\n`];
-  for (const k of ["uge", "ugedag", "dato"]) if (k in timeFields) lines.push(`${k}: ${timeFields[k]}\n`);
-  lines.push("type: materiale\n", `kilde: "[[${rawFilePath}]]"\n`, `hentet: "${hentet}"\n`);
-  if (emne) lines.push(`emne: "${emne}"\n`);
+  const lines = [`course: ${t.fagFolder}\n`];
+  lines.push("type: material\n", `source: "[[${rawFilePath}]]"\n`, `fetched: "${fetched}"\n`);
+  if (topic) lines.push(`topic: "${topic}"\n`);
   for (const key of ["start", "stop"]) if (key in fields) lines.push(`${key}: "${fields[key]}"\n`);
   return "---\n" + lines.join("") + extra + "---\n\n";
 }
 
-// Bevar `lektion:` og `used_in:` ved genkonvertering (#186, #148).
+// Bevar `lesson:` og `used_in:` ved genkonvertering (#186, #148).
 function carriedFields(previousText) {
   if (previousText == null) return "";
   const fm = previousText.startsWith("---") ? previousText.split("---")[1] ?? "" : "";
   let out = "";
-  const lektion = readFrontmatterField(fm, "lektion");
-  if (lektion) out += `lektion: "${lektion}"\n`;
+  const lesson = readFrontmatterField(fm, "lesson");
+  if (lesson) out += `lesson: "${lesson}"\n`;
   const usedIn = /^used_in:[ \t]*\n(?:[ \t]+-[^\n]*\n?)+/m.exec(fm);
   if (usedIn) out += usedIn[0].endsWith("\n") ? usedIn[0] : usedIn[0] + "\n";
   return out;
@@ -2509,7 +2465,7 @@ function appendUsedIn(text, planId) {
   if (!m) return null;
   let [, fm, close, body] = m;
   const entry = `  - "${planId}"\n`;
-  if (fm.includes(entry) || readFrontmatterField(fm, "lektion") === planId) return null;
+  if (fm.includes(entry) || readFrontmatterField(fm, "lesson") === planId) return null;
   fm = /^used_in:[ \t]*$/m.test(fm) ? fm.replace(/^(used_in:[ \t]*\n)/m, `$1${entry}`) : fm + `used_in:\n${entry}`;
   return fm + close + body;
 }
@@ -2864,7 +2820,7 @@ async function planNotesIn(mdDir) {
   return Promise.all(files.map(async (f) => ({ name: f.name, text: await plugin.app.vault.read(f) })));
 }
 
-// Byte-dublet i samme RAW-gren, hvis MD-note er en ægte `type: materiale` (#136/#148).
+// Byte-dublet i samme RAW-gren, hvis MD-note er en ægte `type: material` (#136/#148).
 async function existingConversion(file, bytes, digest) {
   const { rawRoot } = mdTargets(file.path);
   const suffix = file.name.slice(file.name.lastIndexOf("."));
@@ -2875,7 +2831,7 @@ async function existingConversion(file, bytes, digest) {
     if (sha256(await plugin.app.vault.readBinary(other)) !== digest) continue;
     const otherMd = mdTargets(other.path).md;
     const text = await readFromVault(otherMd);
-    if (text != null && readFrontmatterField(text, "type") === "materiale") return otherMd;
+    if (text != null && readFrontmatterField(text, "type") === "material") return otherMd;
   }
   return null;
 }
@@ -3007,11 +2963,7 @@ function scanExisting() {
 const HC_KNOWN_DATA_VERSION = 2;
 const HC_COLOR_PALETTE_SIZE = 6;
 const HC_COURSE_URL = "https://via.itslearning.com/Course/Course.aspx?CourseId=";
-const LITTERATUR_PREFIX = "▥";
-const LITTERATUR_FIL_PREFIX = "📎";
-const MATERIALE_FIL_PREFIX = "📎";
-const FORBEREDELSE_PREFIX = "⚒";
-const FORLOEB_HEADER = "> Genereret fil — rediger ikke; ret i Hold Course.";
+const FORLOEB_HEADER = "> Generated file — do not edit; edit in Hold Course.";
 const PREP_DAY_RE = /sat\s+af\s+til[^.\n]{0,60}forbere/i;
 
 const nfc = (s) => s.normalize("NFC");
@@ -3062,15 +3014,9 @@ function parseFrontmatter(text) {
   return fields;
 }
 
-function prefixedLines(value, prefix) {
-  if (!value || value === "false") return [];
-  const out = [];
-  for (let line of value.split("\n")) {
-    line = line.trim();
-    if (line.startsWith(prefix)) line = line.slice(prefix.length).trim();
-    if (line) out.push(line);
-  }
-  return out;
+// One entry per non-empty line of a block-scalar field (literature, preparation, *_files).
+function fieldLines(value) {
+  return value ? value.split("\n").map((l) => l.trim()).filter(Boolean) : [];
 }
 
 // [NOTE]-stubben hvis den findes, ellers selve planen. `exists` er et synkront opslag (se øverst).
@@ -3088,25 +3034,26 @@ function wikilinkTarget(line) {
 
 const wikilinkFor = (rel) => `[[${rel}|${baseOf(rel)}]]`;
 
-function appendFileListField(text, key, prefix, newLinks) {
+// Appends links to the `key: |` block, or creates the key just before the closing `---` when the
+// field is absent (fields are only written when they have content, #271).
+function appendFileListField(text, key, newLinks) {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i] === `${key}: false`) {
-      return [...lines.slice(0, i), `${key}: |`, ...newLinks.map((l) => `  ${prefix} ${l}`), ...lines.slice(i + 1)].join("\n");
-    }
     if (lines[i].trim() === `${key}: |`) {
       let j = i + 1;
       while (j < lines.length && lines[j].startsWith("  ")) j++;
-      return [...lines.slice(0, j), ...newLinks.map((l) => `  ${prefix} ${l}`), ...lines.slice(j)].join("\n");
+      return [...lines.slice(0, j), ...newLinks.map((l) => `  ${l}`), ...lines.slice(j)].join("\n");
     }
   }
-  return text;
+  const close = lines.indexOf("---", 1);
+  if (lines[0] !== "---" || close === -1) return text;
+  return [...lines.slice(0, close), `${key}: |`, ...newLinks.map((l) => `  ${l}`), ...lines.slice(close)].join("\n");
 }
 
 function ownedTargets(text, fields) {
   const m = AUTO_MATERIALER_RE.exec(text);
   const owned = new Set(m ? [...m[1].matchAll(/\[\[([^|\]]+)/g)].map((x) => nfc(x[1])) : []);
-  for (const l of prefixedLines(fields.litteratur_filer ?? "", LITTERATUR_FIL_PREFIX)) {
+  for (const l of fieldLines(fields.literature_files)) {
     const t = wikilinkTarget(l);
     if (t) owned.add(nfc(t));
   }
@@ -3114,18 +3061,17 @@ function ownedTargets(text, fields) {
 }
 
 function isPrepDay(fields) {
-  const own = fields.forberedelse_tekst;
-  return !(own && own !== "false") && PREP_DAY_RE.test(fields.beskrivelse || "");
+  return !fields.preparation_text && PREP_DAY_RE.test(fields.description || "");
 }
 
-function removeFileListLines(text, key, prefix, drop) {
+function removeFileListLines(text, key, drop) {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim() !== `${key}: |`) continue;
     let j = i + 1;
     while (j < lines.length && lines[j].startsWith("  ")) j++;
-    const kept = lines.slice(i + 1, j).filter((l) => !drop.has(nfc(wikilinkTarget(l.trim().slice(prefix.length).trim()) || "")));
-    return [...lines.slice(0, i), ...(kept.length ? [`${key}: |`, ...kept] : [`${key}: false`]), ...lines.slice(j)].join("\n");
+    const kept = lines.slice(i + 1, j).filter((l) => !drop.has(nfc(wikilinkTarget(l.trim()) || "")));
+    return [...lines.slice(0, i), ...(kept.length ? [`${key}: |`, ...kept] : []), ...lines.slice(j)].join("\n");
   }
   return text;
 }
@@ -3139,7 +3085,7 @@ async function declaredOwners(vault, files, dir) {
   const declared = {};
   for (const md of mdIn(files, dir)) {
     if (!isMaterialeName(baseOf(md))) continue;
-    const pid = parseFrontmatter(await vault.read(md)).lektion;
+    const pid = parseFrontmatter(await vault.read(md)).lesson;
     if (pid) declared[nfc(md)] = pid;
   }
   return declared;
@@ -3151,7 +3097,7 @@ async function patchPendingMateriale(vault, apply) {
   for (const planPath of planFiles(files)) {
     const text = await vault.read(planPath);
     const fields = parseFrontmatter(text);
-    if (fields.type !== "lektionsplan") continue;
+    if (fields.type !== "lesson-plan") continue;
     const dir = dirOf(planPath);
     if (!folders.has(dir)) folders.set(dir, []);
     folders.get(dir).push({ planPath, text, fields });
@@ -3168,8 +3114,8 @@ async function patchPendingMateriale(vault, apply) {
       const claimedElsewhere = new Set();
       for (const [p, ts] of owned) if (p !== planPath) for (const t of ts) if (!mine.has(t)) claimedElsewhere.add(t);
       const linked = new Set();
-      for (const [key, pfx] of [["materiale_filer", MATERIALE_FIL_PREFIX], ["litteratur_filer", LITTERATUR_FIL_PREFIX]]) {
-        for (const l of prefixedLines(fields[key] ?? "", pfx)) {
+      for (const key of ["material_files", "literature_files"]) {
+        for (const l of fieldLines(fields[key])) {
           const t = wikilinkTarget(l);
           if (t) linked.add(nfc(t));
         }
@@ -3184,13 +3130,13 @@ async function patchPendingMateriale(vault, apply) {
       orphans = orphans.filter((o) => !linked.has(o) && !claimedElsewhere.has(o));
       if (isPrepDay(fields)) orphans = [];
       const foreign = new Set();
-      for (const l of prefixedLines(fields.materiale_filer ?? "", MATERIALE_FIL_PREFIX)) {
+      for (const l of fieldLines(fields.material_files)) {
         const t = nfc(wikilinkTarget(l) || "");
         if (claimedElsewhere.has(t)) foreign.add(t);
       }
       if (!orphans.length && !foreign.size) continue;
-      let updated = orphans.length ? appendFileListField(text, "materiale_filer", MATERIALE_FIL_PREFIX, orphans.map(wikilinkFor)) : text;
-      if (foreign.size) updated = removeFileListLines(updated, "materiale_filer", MATERIALE_FIL_PREFIX, foreign);
+      let updated = orphans.length ? appendFileListField(text, "material_files", orphans.map(wikilinkFor)) : text;
+      if (foreign.size) updated = removeFileListLines(updated, "material_files", foreign);
       if (updated === text) continue;
       patched.push(planPath);
       if (apply) await vault.write(planPath, updated);
@@ -3203,8 +3149,8 @@ async function readTasks(vault) {
   const tasks = [];
   for (const path of (await vault.list()).filter((f) => f.endsWith(".md") && underRoot(f, OPGAVER_ROOT)).sort(cmpParts)) {
     const fields = parseFrontmatter(await vault.read(path));
-    if (fields.type !== "opgave" || !fields.fag || !fields.deadline) continue;
-    const m = /ElementID=(\d+)/.exec(fields.kilde ?? "");
+    if (fields.type !== "assignment" || !fields.course || !fields.deadline) continue;
+    const m = /ElementID=(\d+)/.exec(fields.source ?? "");
     if (!m) continue;
     tasks.push({ ...fields, _element_id: m[1], _path: nfc(path), _title: pathStem(path) });
   }
@@ -3218,7 +3164,7 @@ async function readPlans(vault) {
   for (const path of planFiles(files)) {
     const text = await vault.read(path);
     const fields = parseFrontmatter(text);
-    if (fields.type !== "lektionsplan" || !fields.fag) continue;
+    if (fields.type !== "lesson-plan" || !fields.course) continue;
     if (!fields.plan_id) {
       udenPlanId.push(path);
       continue;
@@ -3230,7 +3176,7 @@ async function readPlans(vault) {
     const autoOwned = ownedTargets(text, fields);
     for (const t of autoOwned) {
       const pid = declared[t];
-      if (pid && pid !== fields.plan_id) console.log(`Advarsel: ${t} står i ${fields.plan_id}s Materialer, men lektion: siger ${pid}`);
+      if (pid && pid !== fields.plan_id) console.log(`Advarsel: ${t} står i ${fields.plan_id}s Materials, men lesson: siger ${pid}`);
     }
     for (const [t, pid] of Object.entries(declared)) if (pid === fields.plan_id) autoOwned.add(t);
     fields._owned = [...autoOwned].sort(cmpStr);
@@ -3337,15 +3283,15 @@ function ensureLecture(cls, plan, newId, stubFor = (p) => p) {
     };
     cls.lectures.push(lec);
   }
-  lec.title = plan.emne || plan.uge || "Lektion";
+  lec.title = plan.topic || (plan.start || "").slice(0, 10) || "Lesson";
   lec.date = (plan.start || "").slice(0, 10);
   setDeviationField(lec, "meetingStartTime", cls.meetingStartTime ?? "", hhmm(plan.start ?? ""));
   setDeviationField(lec, "meetingEndTime", cls.meetingEndTime ?? "", hhmm(plan.stop ?? ""));
-  setDeviationField(lec, "location", cls.location ?? "", plan.lokale ?? "");
-  setDeviationField(lec, "professorName", cls.professorName ?? "", plan.underviser ?? "");
-  const beskrivelse = (plan.beskrivelse ?? "") === "false" ? "" : plan.beskrivelse ?? "";
-  const forbTekst = (plan.forberedelse_tekst ?? "") === "false" ? "" : plan.forberedelse_tekst ?? "";
-  const description = [beskrivelse, forbTekst ? `**Forberedelse**\n\n${forbTekst}` : ""].filter(Boolean).join("\n\n---\n\n");
+  setDeviationField(lec, "location", cls.location ?? "", plan.room ?? "");
+  setDeviationField(lec, "professorName", cls.professorName ?? "", plan.teacher ?? "");
+  const planDescription = plan.description ?? "";
+  const prepText = plan.preparation_text ?? "";
+  const description = [planDescription, prepText ? `**Preparation**\n\n${prepText}` : ""].filter(Boolean).join("\n\n---\n\n");
   if (description) {
     lec.description = description;
     lec.vswDescription = description;
@@ -3470,11 +3416,11 @@ function syncData(data, plans, newId = null, tasks = null, droppedOut = null, re
   const fallbackClaimed = new Map();
   const markSeen = (res, cls) => { if (!seenRes.has(res.id)) seenRes.set(res.id, new Set()); seenRes.get(res.id).add(cls.id); };
 
-  for (const plan of [...plans].sort((a, b) => cmpTuple([a.fag, a.start ?? ""], [b.fag, b.start ?? ""]))) {
+  for (const plan of [...plans].sort((a, b) => cmpTuple([a.course, a.start ?? ""], [b.course, b.start ?? ""]))) {
     if (!plan.start) continue;
     const sem = semFor(plan.start);
     if (!sem) continue;
-    const cls = ensureClass(sem, plan.fag, newId, plan.plan_id.split(":")[0]);
+    const cls = ensureClass(sem, plan.course, newId, plan.plan_id.split(":")[0]);
     relocateStamped(data, "lectures", "vswPlanId", plan.plan_id, cls);
     const lec = ensureLecture(cls, plan, newId, stubFor);
     const tk = `${sem.id}|${cls.id}`;
@@ -3485,7 +3431,7 @@ function syncData(data, plans, newId = null, tasks = null, droppedOut = null, re
     const stub = lec.vswVaultLink || lec.vaultLink;
     const validFileKeys = new Set();
 
-    const targets = prefixedLines(plan.litteratur_filer ?? "", LITTERATUR_FIL_PREFIX).map(wikilinkTarget).filter(Boolean).map(nfc);
+    const targets = fieldLines(plan.literature_files).map(wikilinkTarget).filter(Boolean).map(nfc);
     if (targets.length) {
       for (const target of targets) {
         const res = ensureResource(sem, cls, target, newId);
@@ -3495,17 +3441,17 @@ function syncData(data, plans, newId = null, tasks = null, droppedOut = null, re
         validFileKeys.add(key);
       }
     } else {
-      const litText = prefixedLines(plan.litteratur ?? "", LITTERATUR_PREFIX);
+      const litText = fieldLines(plan.literature);
       if (litText.length) {
         const key = `${akey}|lit|`;
         ensureAssignment(lec, key, [...litText.join(" ")].slice(0, 200).join(""), "Reading", due, "", newId, stub);
         validFileKeys.add(key);
       }
     }
-    for (const titel of prefixedLines(plan.forberedelse ?? "", FORBEREDELSE_PREFIX)) {
+    for (const titel of fieldLines(plan.preparation)) {
       ensureAssignment(lec, `${akey}|forb|${titel}`, titel, "Preparation", due, "", newId, stub);
     }
-    for (const line of prefixedLines(plan.materiale_filer ?? "", MATERIALE_FIL_PREFIX)) {
+    for (const line of fieldLines(plan.material_files)) {
       const target = nfc(wikilinkTarget(line) || "");
       if (!target) continue;
       if ("_owned" in plan && !plan._owned.includes(target)) {
@@ -3526,11 +3472,11 @@ function syncData(data, plans, newId = null, tasks = null, droppedOut = null, re
   }
 
   const touchedTasks = new Map();
-  for (const task of [...tasks].sort((a, b) => cmpTuple([a.fag, a.deadline ?? ""], [b.fag, b.deadline ?? ""]))) {
+  for (const task of [...tasks].sort((a, b) => cmpTuple([a.course, a.deadline ?? ""], [b.course, b.deadline ?? ""]))) {
     if (!task.deadline) continue;
     const sem = semFor(task.deadline);
     if (!sem) continue;
-    const cls = ensureClass(sem, task.fag, newId);
+    const cls = ensureClass(sem, task.course, newId);
     const key = `opgave|${task._element_id}`;
     relocateStamped(data, "assignments", "vswKey", key, cls);
     ensureAssignment(cls, key, task._title, "Writing", task.deadline.slice(0, 10), "", newId, task._path);
@@ -3586,7 +3532,7 @@ function syncTaskCompletion(data, readText) {
       const key = a.vswKey ?? "";
       if (!key.includes("|forb|") || a.status !== "not-started") continue;
       const titel = key.slice(key.indexOf("|forb|") + 6);
-      if (text.includes(`- [x] ${FORBEREDELSE_PREFIX} ${titel}`)) {
+      if (text.split("\n").some((line) => line.trim() === `- [x] ${titel}`)) {
         a.status = "done";
         markedDone.push(`${titel} (${stubRel})`);
       }
@@ -3620,10 +3566,10 @@ const cell = (text) => (text || "—").replaceAll("|", "\\|").replaceAll("\n", "
 function renderForloeb(sem, cls, genereret) {
   const fag = cls.vswFag || cls.name || "";
   const out = [
-    "---", `fag: ${fag}`, `semester: ${sem.name ?? ""}`,
-    `genereret: ${genereret}`, "kilde: hold-course-sync", "---", "",
+    "---", `course: ${fag}`, `semester: ${sem.name ?? ""}`,
+    `generated: ${genereret}`, "source: hold-course-sync", "---", "",
     FORLOEB_HEADER, "",
-    "| dato | uge | enhed | titel | status | materialer | opgaver + frist |",
+    "| date | week | unit | title | status | materials | tasks + due |",
     "| --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const lec of [...(cls.lectures ?? [])].sort((a, b) => cmpTuple([a.date ?? "", a.title ?? ""], [b.date ?? "", b.title ?? ""]))) {
@@ -3642,7 +3588,7 @@ function renderForloeb(sem, cls, genereret) {
     out.push(`| ${row.map(cell).join(" | ")} |`);
   }
   if (cls.assignments?.length) {
-    out.push("", "## Afleveringer (uden lektion)", "", "| titel | frist | status | note |", "| --- | --- | --- | --- |");
+    out.push("", "## Assignments (without lesson)", "", "| title | due | status | note |", "| --- | --- | --- | --- |");
     for (const a of [...cls.assignments].sort((x, y) => cmpTuple([x.dueDate ?? "", x.title ?? ""], [y.dueDate ?? "", y.title ?? ""]))) {
       const note = a.linkedNote || "";
       out.push(`| ${[a.title ?? "", a.dueDate ?? "", a.status ?? "", note ? `[[${note}|${pathStem(note)}]]` : ""].map(cell).join(" | ")} |`);
@@ -3651,7 +3597,7 @@ function renderForloeb(sem, cls, genereret) {
   return `${out.join("\n")}\n`;
 }
 
-const stripGenereret = (text) => text.replace(/^genereret: .*$/m, "genereret:");
+const stripGenereret = (text) => text.replace(/^generated: .*$/m, "generated:");
 
 // `isDir(sti)` er et synkront opslag. null = faget har ingen mappe (mappenavn = fagnavn, #270).
 function forloebPath(sem, cls, multi, isDir) {
@@ -3938,7 +3884,7 @@ class ItsWizSettingTab extends PluginSettingTab {
     }
     for (const [key, name, desc] of [
       ["enableFileDownloads", "Download materials and write notes", "Off: a run only fetches data from itslearning."],
-      ["enableTaskCompletionSync", "Mark Forberedelse (preparation) as completed in itslearning", "Ticked in the NOTER stub note or Done in Hold Course (#70, #202)."],
+      ["enableTaskCompletionSync", "Mark preparation tasks as completed in itslearning", "Ticked in the NOTER stub note or Done in Hold Course (#70, #202)."],
     ]) {
       new Setting(containerEl).setName(name).setDesc(desc).addToggle((t) =>
         t.setValue(s[key] ?? DEFAULT_SETTINGS[key]).onChange((v) => ((s[key] = v), save()))
@@ -3960,7 +3906,7 @@ class ItsWizSettingTab extends PluginSettingTab {
     }
 
     containerEl.createEl("h3", { text: "Course names" });
-    containerEl.createEl("p", { text: "The name used for each itslearning course code: the folder, fag: in the notes, the calendar and Hold Course. Empty = the code itself. Courses appear here after the first run. A change only applies to new notes; existing folders are not renamed.", cls: "setting-item-description" });
+    containerEl.createEl("p", { text: "The name used for each itslearning course code: the folder, `course:` in the notes, the calendar and Hold Course. Empty = the code itself. Courses appear here after the first run. A change only applies to new notes; existing folders are not renamed.", cls: "setting-item-description" });
     s.courseNames ??= {};
     for (const code of Object.keys(s.courseNames)) {
       new Setting(containerEl).setName(code).addText((t) =>
@@ -4073,8 +4019,6 @@ module.exports = ItsWizPlugin;
 Object.assign(module.exports, {
   sanitizeFilename,
   extractExtension,
-  isoWeek,
-  weekdayDa,
   enhedFolder,
   planNoteName,
   weekFolderName,
@@ -4092,7 +4036,6 @@ Object.assign(module.exports, {
   fagColors,
   touchesHoldCourseInput,
   errorMarkerPath,
-  timeFieldsFromStart,
   materialeFrontmatter,
   carriedFields,
   appendUsedIn,
@@ -4118,9 +4061,10 @@ Object.assign(module.exports, {
   calendarItems,
   calendarActions,
   parseFrontmatter,
-  prefixedLines,
+  fieldLines,
   wikilinkTarget,
   isPrepDay,
+  appendFileListField,
   removeFileListLines,
   patchPendingMateriale,
   readPlans,
