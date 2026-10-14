@@ -32,7 +32,9 @@ const result = (function () {
   const DROP_KEYS = new Set(["uge", "ugedag", "dato"]);
   const DROP_WHEN_FALSE = new Set(["literature", "literature_files", "preparation", "preparation_text", "material_files", "description"]);
   const PREFIXED_LISTS = new Set(["literature", "literature_files", "preparation", "material_files"]);
-  const OUR_TYPES = new Set(["lektionsplan", "materiale", "opgave", "lesson-plan", "material", "assignment"]);
+  // `dublet` is written by the old watcher on byte-duplicate conversions (the code still reads it,
+  // see patchPendingMateriale) and is NOT renamed; its keys and headings are migrated like the rest.
+  const OUR_TYPES = new Set(["lektionsplan", "materiale", "opgave", "dublet", "lesson-plan", "material", "assignment"]);
 
   const BODY_RULES = [
     [/^## Materialer$/gm, "## Materials"],

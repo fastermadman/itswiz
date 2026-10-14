@@ -130,6 +130,12 @@ test('materiale: lektion/used_in-stemplet og kilde følger med', () => {
   assert.equal(migrateNote(old, 'Fag/Musik/MD/E/Bog.md').text, want);
 });
 
+test('type: dublet: nøgler og overskrifter migreres, typen beholdes', () => {
+  const old = '---\nfag: Religion\nuge: 2026-W37\ndato: 2026-09-09\nemne: "T"\nhentet: "2026-09-06 08:00"\ntype: dublet\nlitteratur: false\n---\n\n## ⚒ Forberedelse\n';
+  const want = '---\ncourse: Religion\ntopic: "T"\nfetched: "2026-09-06 08:00"\ntype: dublet\n---\n\n## Preparation\n';
+  assert.equal(migrateNote(old, 'Fag/Religion/MD/T/[PLAN] x.md').text, want);
+});
+
 test('opgavenote', () => {
   const old = '---\ntype: opgave\nfag: Musik\ndeadline: "2026-10-01 12:00"\nkilde: "https://via.itslearning.com/x?ElementID=1"\nhentet: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Åbn opgaven i itslearning](https://x)\n\n## Opgavebeskrivelse\n- [[Noter/Opgaver/O/MD/O.md]]\n';
   const want = '---\ntype: assignment\ncourse: Musik\ndeadline: "2026-10-01 12:00"\nsource: "https://via.itslearning.com/x?ElementID=1"\nfetched: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Open the assignment in itslearning](https://x)\n\n## Assignment description\n- [[Noter/Opgaver/O/MD/O.md]]\n';
