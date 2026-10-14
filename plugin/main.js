@@ -2411,11 +2411,14 @@ function mdTargets(rawFilePath) {
   return { mdDir, md: `${mdDir}/${title}.md`, images: `${mdDir}/_attachments/${title}`, rawRoot: parts.slice(0, i + 1).join("/"), fagFolder: parts[i - 1] ?? "" };
 }
 
-// #275: the reading copy of a PDF lives in the MD folder next to its note. It gets its own name, so
-// [[X.pdf]] links to the RAW original stay unambiguous on the Mac.
-function readingCopyTarget(rawFilePath) {
+// #275: the copy a device can read (PDFable's reading copy, or a plain copy of the original) lives in
+// _attachments/ next to the images, so MD/ itself only holds notes. It is a sibling of the image folder,
+// which is wiped on every conversion. It gets its own name, so [[X.pdf]] links to the RAW original stay
+// unambiguous on the Mac.
+function copyTarget(rawFilePath) {
   const { mdDir } = mdTargets(rawFilePath);
-  return `${mdDir}/${stemName(stemOf(rawFilePath.slice(rawFilePath.lastIndexOf("/") + 1)))} (reading copy).pdf`;
+  const name = rawFilePath.slice(rawFilePath.lastIndexOf("/") + 1);
+  return `${mdDir}/_attachments/${stemName(stemOf(name))} (copy)${name.slice(stemOf(name).length)}`;
 }
 
 function inRawBranch(path) {
@@ -2962,11 +2965,10 @@ async function processDocument(file, { force = false } = {}) {
   }
 
   try {
-    // #275: the MD folder holds one reading copy per converted PDF, never overwritten (annotations made on it
+    // #275: _attachments/ holds one copy per converted file, never overwritten (annotations made on it
     // would be lost), so pass 1 is only needed on a cache hit when that file is still missing.
-    const isPdf = file.extension.toLowerCase() === "pdf";
-    const copyPath = isPdf ? readingCopyTarget(file.path) : null;
-    const needCopy = isPdf && !(await existsInVault(copyPath));
+    const copyPath = copyTarget(file.path);
+    const needCopy = !(await existsInVault(copyPath));
     let zips = cachedZips(digest);
     // null: no PDFable, not scanned (PDFable writes no file for a real-text PDF) or PDFable failed.
     const oneBit = zips && !needCopy ? null : await pdfable(file, bytes);
@@ -2981,8 +2983,8 @@ async function processDocument(file, { force = false } = {}) {
     const parts = zips.map(unzip);
     await writeConversion(file, parts);
     if (needCopy) {
-      // A scanned PDF gets pass 2 (text layer + colour figures); anything else, or a failed pass 2, gets
-      // a plain copy of the original, so every PDF can be read on the device when RAW PDFs are not synced.
+      // A scanned PDF gets pass 2 (text layer + colour figures); anything else (a text PDF, docx, pptx, or
+      // a failed pass 2) gets a plain copy of the original, so it can be read when RAW is not synced.
       const layouts = oneBit && layoutsOf(parts);
       const reading = layouts ? await pdfable(file, bytes, layouts) : null;
       await writeVaultFile(copyPath, reading ?? bytes);
@@ -4059,7 +4061,7 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("PDFable-program")
-      .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU and writes a small reading copy next to the note in MD/. Empty: the original is uploaded and copied to MD/.")
+      .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU and writes a small reading copy to _attachments/ next to the note. Empty: the original is uploaded and copied to _attachments/.")
       .addText((t) => t.setPlaceholder("/path/to/pdfable").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
   }
 }
@@ -4135,7 +4137,7 @@ Object.assign(module.exports, {
   mdPath,
   fileLink,
   mdTargets,
-  readingCopyTarget,
+  copyTarget,
   pdfableArgs,
   hasMineruWarning,
   layoutsOf,

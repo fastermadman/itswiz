@@ -41,9 +41,9 @@ test('PDF over 200 sider deles i bidder på 100 (#211)', () => {
   assert.strictEqual(plugin.pdfPageCount(pdf), 2);
 });
 
-test('læsekopien ligger i MD-mappen ved noten med eget navn (#275)', () => {
-  assert.strictEqual(plugin.readingCopyTarget('§ FAG/♪ Musik/RAW/Enhed/korte..pdf'), '§ FAG/♪ Musik/MD/Enhed/korte. (reading copy).pdf');
-  assert.strictEqual(plugin.readingCopyTarget('Opgaver/RAW/Bog: 1.pdf'), 'Opgaver/MD/Bog_ 1 (reading copy).pdf');
+test('kopien ligger i _attachments ved noten med eget navn og samme endelse (#275)', () => {
+  assert.strictEqual(plugin.copyTarget('§ FAG/♪ Musik/RAW/Enhed/korte..pdf'), '§ FAG/♪ Musik/MD/Enhed/_attachments/korte. (copy).pdf');
+  assert.strictEqual(plugin.copyTarget('Opgaver/RAW/Bog: 1.pptx'), 'Opgaver/MD/_attachments/Bog_ 1 (copy).pptx');
 });
 
 test('pass 2 får samme flag som pass 1 plus ét --mineru pr. layout, i rækkefølge (#275)', () => {
