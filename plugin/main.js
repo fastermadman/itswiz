@@ -2411,13 +2411,11 @@ function mdTargets(rawFilePath) {
   return { mdDir, md: `${mdDir}/${title}.md`, images: `${mdDir}/_attachments/${title}`, rawRoot: parts.slice(0, i + 1).join("/"), fagFolder: parts[i - 1] ?? "" };
 }
 
-// #275: the reading copy of a PDF lives in DOCS/, mirroring RAW/ and MD/. It gets its own name, so
+// #275: the reading copy of a PDF lives in the MD folder next to its note. It gets its own name, so
 // [[X.pdf]] links to the RAW original stay unambiguous on the Mac.
-function docsTarget(rawFilePath) {
-  const parts = rawFilePath.split("/");
-  const i = parts.lastIndexOf("RAW", parts.length - 2);
-  const dir = [...parts.slice(0, i), "DOCS", ...parts.slice(i + 1, -1)].join("/");
-  return `${dir}/${stemName(stemOf(parts[parts.length - 1]))} (reading copy).pdf`;
+function readingCopyTarget(rawFilePath) {
+  const { mdDir } = mdTargets(rawFilePath);
+  return `${mdDir}/${stemName(stemOf(rawFilePath.slice(rawFilePath.lastIndexOf("/") + 1)))} (reading copy).pdf`;
 }
 
 function inRawBranch(path) {
@@ -2964,14 +2962,14 @@ async function processDocument(file, { force = false } = {}) {
   }
 
   try {
-    // #275: DOCS holds one PDF per converted PDF and is never overwritten (annotations made on it
+    // #275: the MD folder holds one reading copy per converted PDF, never overwritten (annotations made on it
     // would be lost), so pass 1 is only needed on a cache hit when that file is still missing.
     const isPdf = file.extension.toLowerCase() === "pdf";
-    const docs = isPdf ? docsTarget(file.path) : null;
-    const needDocs = isPdf && !(await existsInVault(docs));
+    const copyPath = isPdf ? readingCopyTarget(file.path) : null;
+    const needCopy = isPdf && !(await existsInVault(copyPath));
     let zips = cachedZips(digest);
     // null: no PDFable, not scanned (PDFable writes no file for a real-text PDF) or PDFable failed.
-    const oneBit = zips && !needDocs ? null : await pdfable(file, bytes);
+    const oneBit = zips && !needCopy ? null : await pdfable(file, bytes);
     if (zips) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
     else {
       console.log(`ItsWiz: uploader til MinerU: ${file.name}${oneBit ? ` (1-bit, ${oneBit.byteLength} B; original ${bytes.byteLength} B)` : ` (${bytes.byteLength} B)`}`);
@@ -2982,13 +2980,13 @@ async function processDocument(file, { force = false } = {}) {
     }
     const parts = zips.map(unzip);
     await writeConversion(file, parts);
-    if (needDocs) {
+    if (needCopy) {
       // A scanned PDF gets pass 2 (text layer + colour figures); anything else, or a failed pass 2, gets
-      // a plain copy of the original, so every PDF can be read on the device when RAW/*.pdf is not synced.
+      // a plain copy of the original, so every PDF can be read on the device when RAW PDFs are not synced.
       const layouts = oneBit && layoutsOf(parts);
       const reading = layouts ? await pdfable(file, bytes, layouts) : null;
-      await writeVaultFile(docs, reading ?? bytes);
-      console.log(`ItsWiz: ${reading ? `læsekopi (${reading.byteLength} B)` : `kopi af originalen (${bytes.byteLength} B)`} skrevet til ${docs}`);
+      await writeVaultFile(copyPath, reading ?? bytes);
+      console.log(`ItsWiz: ${reading ? `læsekopi (${reading.byteLength} B)` : `kopi af originalen (${bytes.byteLength} B)`} skrevet til ${copyPath}`);
     }
     // En gammel fejlmarkør (fx fra før opdelingen, #211) må ikke stå tilbage, når MD'en findes.
     if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
@@ -4061,7 +4059,7 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("PDFable-program")
-      .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU and writes a small reading copy to DOCS/. Empty: the original is uploaded and copied to DOCS/.")
+      .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU and writes a small reading copy next to the note in MD/. Empty: the original is uploaded and copied to MD/.")
       .addText((t) => t.setPlaceholder("/path/to/pdfable").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
   }
 }
@@ -4137,7 +4135,7 @@ Object.assign(module.exports, {
   mdPath,
   fileLink,
   mdTargets,
-  docsTarget,
+  readingCopyTarget,
   pdfableArgs,
   hasMineruWarning,
   layoutsOf,
