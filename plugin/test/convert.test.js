@@ -66,6 +66,16 @@ test('PDFables --mineru-advarsler genkendes, andre advarsler ikke (#275)', () =>
   assert.strictEqual(plugin.hasMineruWarning(''), false);
 });
 
+test('PDF er digital når mere end halvdelen af siderne er det; uafgjort og tomt er scan (#281)', () => {
+  assert.strictEqual(plugin.isDigitalPdf('DDDDDD\n'), true);
+  assert.strictEqual(plugin.isDigitalPdf('SDDDDD'), true); // billedforside i et digitalt dokument
+  assert.strictEqual(plugin.isDigitalPdf('DDS'), true);
+  assert.strictEqual(plugin.isDigitalPdf('DS'), false);
+  assert.strictEqual(plugin.isDigitalPdf('SSSSSD'), false);
+  assert.strictEqual(plugin.isDigitalPdf(''), false);
+  assert.strictEqual(plugin.isDigitalPdf('Warning: unknown option'), false);
+});
+
 test('layout.json fra alle zips i rækkefølge, ellers null (#275)', () => {
   const a = Buffer.from('{"a":1}');
   const b = Buffer.from('{"b":2}');

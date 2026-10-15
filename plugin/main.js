@@ -2854,6 +2854,36 @@ async function pdfable(file, bytes, layouts = []) {
   }
 }
 
+// #281: `pdfable --classify` prints one letter per page, D (digital: visible text) or S (scan). A file is digital when
+// more than half of its pages are, so a cover page without text does not turn a digital PDF into a scan. Ties and
+// scan-heavy files take the scan path.
+// ponytail: a mixed file is judged as a whole, because PDFable turns every page into an image or none; per-page
+// pass-through would need PDFable to copy the digital pages as they are.
+function isDigitalPdf(letters) {
+  const pages = [...String(letters).trim()];
+  return pages.length > 0 && pages.filter((c) => c === "D").length * 2 > pages.length;
+}
+
+// true only when PDFable ran and called the file digital. No path, not a PDF, an older PDFable without --classify
+// (exit 1) or any failure: false, so the file takes the scan path as before.
+async function pdfableDigital(file, bytes) {
+  const bin = pdfablePath();
+  if (!bin || file.extension.toLowerCase() !== "pdf") return false;
+  const fs = require("fs");
+  const path = require("path");
+  const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "itswiz-pdfable-"));
+  const input = path.join(dir, "in.pdf");
+  try {
+    fs.writeFileSync(input, Buffer.from(bytes));
+    const { code, stdout } = await new Promise((resolve) =>
+      require("child_process").execFile(bin, ["--classify", input], { timeout: PDFABLE_TIMEOUT_MS },
+        (err, stdout) => resolve({ code: err ? err.code ?? -1 : 0, stdout: String(stdout) })));
+    return code === 0 && isDigitalPdf(stdout);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // layout.json of every zip in page order, or null when one is missing (then pass 2 cannot be trusted).
 function layoutsOf(parts) {
   const layouts = parts.map((entries) => entries.get("layout.json"));
@@ -2937,8 +2967,11 @@ async function processDocument(file, { force = false } = {}) {
     const copyPath = copyTarget(file.path);
     const needCopy = !(await existsInVault(copyPath));
     let zips = cachedZips(digest);
-    // null: no PDFable, not scanned (PDFable writes no file for a real-text PDF) or PDFable failed.
-    const oneBit = zips && !needCopy ? null : await pdfable(file, bytes);
+    // #281: a digital PDF keeps its own text: no 1-bit pass, the original goes to MinerU and is copied as it is.
+    const digital = (!zips || needCopy) && await pdfableDigital(file, bytes);
+    if (digital) console.log(`ItsWiz: digital PDF, left untouched: ${file.name}`);
+    // null: no PDFable, digital, nothing to do on a cache hit, or PDFable failed or wrote no file (not smaller).
+    const oneBit = digital || (zips && !needCopy) ? null : await pdfable(file, bytes);
     if (zips) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
     else {
       console.log(`ItsWiz: uploader til MinerU: ${file.name}${oneBit ? ` (1-bit, ${oneBit.byteLength} B; original ${bytes.byteLength} B)` : ` (${bytes.byteLength} B)`}`);
@@ -2950,7 +2983,7 @@ async function processDocument(file, { force = false } = {}) {
     const parts = zips.map(unzip);
     await writeConversion(file, parts);
     if (needCopy) {
-      // A scanned PDF gets pass 2 (text layer + colour figures); anything else (a text PDF, docx, pptx, or
+      // A scanned PDF gets pass 2 (text layer + colour figures); anything else (a digital PDF, docx, pptx, or
       // a failed pass 2) gets a plain copy of the original, so it can be read when RAW is not synced.
       const layouts = oneBit && layoutsOf(parts);
       const reading = layouts ? await pdfable(file, bytes, layouts) : null;
@@ -4095,6 +4128,7 @@ Object.assign(module.exports, {
   copyTarget,
   pdfableArgs,
   hasMineruWarning,
+  isDigitalPdf,
   layoutsOf,
   inRawBranch,
   applyRoots,
