@@ -28,3 +28,8 @@ test('text route is refused for a scan page, a picture page, many unmapped glyph
   assert.strictEqual(plugin.textRouteOk('', report([])), false);
   assert.strictEqual(plugin.textRouteOk('D', report([row(1, 0, 0, '0.00')])), false);
 });
+
+test('parseTextReport also reads the 9-column report that --figures prints', () => {
+  const r = plugin.parseTextReport('page\tlabel\tkind\tglyphs\tunmapped\trotated\ttables\timage_share\tfigures\n1\t1\tdigital\t900\t0\t0\t0\t0.04\t2');
+  assert.deepStrictEqual(r.map((x) => [x.page, x.glyphs, x.imageShare]), [[1, 900, 0.04]]);
+});
