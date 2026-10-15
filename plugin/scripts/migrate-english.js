@@ -3,7 +3,7 @@
 //   keys      fag->course, emne->topic, lokale->room, underviser->teacher, hentet->fetched, kilde->source,
 //             lektion->lesson, litteratur->literature, litteratur_filer->literature_files,
 //             materiale_filer->material_files, forberedelse->preparation,
-//             forberedelse_tekst->preparation_text, beskrivelse->description
+//             forberedelse_tekst->preparation_text, beskrivelse->description, sektion->section
 //   types     lektionsplan->lesson-plan, materiale->material, opgave->assignment
 //   removed   uge, ugedag, dato; `false` placeholders; the ▥/📎/⚒ prefixes in list fields
 //   headings  ## Materialer, ## ⚒ Forberedelse, ## Opgavebeskrivelse (+ ⚒ in [NOTE] checkboxes), `Kilde:` in stubs
@@ -26,7 +26,7 @@ const result = (function () {
     fag: "course", emne: "topic", lokale: "room", underviser: "teacher", hentet: "fetched", kilde: "source",
     lektion: "lesson", litteratur: "literature", litteratur_filer: "literature_files",
     materiale_filer: "material_files", forberedelse: "preparation", forberedelse_tekst: "preparation_text",
-    beskrivelse: "description",
+    beskrivelse: "description", sektion: "section",
   };
   const TYPE_MAP = { lektionsplan: "lesson-plan", materiale: "material", opgave: "assignment" };
   const DROP_KEYS = new Set(["uge", "ugedag", "dato"]);

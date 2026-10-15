@@ -136,6 +136,19 @@ test('type: dublet: nøgler og overskrifter migreres, typen beholdes', () => {
   assert.equal(migrateNote(old, 'Fag/Religion/MD/T/[PLAN] x.md').text, want);
 });
 
+test('materiale: sektion -> section', () => {
+  const old = '---\ntype: material\ncourse: M\nsektion: "Kap. 8"\nlesson: "1:2"\n---\n';
+  assert.equal(migrateNote(old, 'Fag/M/MD/E/x.md').text, '---\ntype: material\ncourse: M\nsection: "Kap. 8"\nlesson: "1:2"\n---\n');
+});
+
+test('keepLocation: room/teacher fra den gamle note bevares, nye værdier vinder', () => {
+  const fm = '---\ncourse: M\nstop: "x"\nfetched: "y"\n---\n';
+  const old = '---\nroom: "A212"\nteacher: "MKOR"\n---\n';
+  assert.equal(plugin.keepLocation(fm, old), '---\ncourse: M\nstop: "x"\nroom: "A212"\nteacher: "MKOR"\nfetched: "y"\n---\n');
+  assert.equal(plugin.keepLocation(fm.replace('stop: "x"', 'stop: "x"\nroom: "B1"'), old), '---\ncourse: M\nstop: "x"\nroom: "B1"\nteacher: "MKOR"\nfetched: "y"\n---\n');
+  assert.equal(plugin.keepLocation(fm, null), fm);
+});
+
 test('opgavenote', () => {
   const old = '---\ntype: opgave\nfag: Musik\ndeadline: "2026-10-01 12:00"\nkilde: "https://via.itslearning.com/x?ElementID=1"\nhentet: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Åbn opgaven i itslearning](https://x)\n\n## Opgavebeskrivelse\n- [[Noter/Opgaver/O/MD/O.md]]\n';
   const want = '---\ntype: assignment\ncourse: Musik\ndeadline: "2026-10-01 12:00"\nsource: "https://via.itslearning.com/x?ElementID=1"\nfetched: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Open the assignment in itslearning](https://x)\n\n## Assignment description\n- [[Noter/Opgaver/O/MD/O.md]]\n';

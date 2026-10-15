@@ -714,6 +714,16 @@ async function toggleTaskCompletedInPage(url) {
 // ikke maskinens egen, og samme "yyyy-MM-dd HH:mm"-format som start/stop-felterne ovenfor, for
 // konsistens (issue #34). Opdateres hver gang AUTO-sektionen i en lektionsplan-note regenereres
 // (issue #61), ikke kun ved første hentning — fungerer derfor reelt som et "sidst opdateret".
+// room/teacher only come from the calendar event's free text (#118/#124). A rewrite without that
+// event (backfill of an old lesson) would erase them, so they are carried over from the old note.
+// ponytail: a room that itslearning removes on purpose is never removed here; clear it by hand.
+function keepLocation(frontmatter, existingText) {
+  if (!existingText) return frontmatter;
+  const old = parseFrontmatter(existingText);
+  const add = ["room", "teacher"].filter((k) => old[k] && !new RegExp(`^${k}:`, "m").test(frontmatter)).map((k) => `${k}: "${old[k]}"`);
+  return add.length ? frontmatter.replace(/^fetched: /m, (m) => `${add.join("\n")}\n${m}`) : frontmatter;
+}
+
 function formatNow() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: TIME_ZONE,
@@ -991,7 +1001,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       continue;
     }
 
-    const frontmatter = [
+    const newFrontmatter = [
       "---",
       `course: ${fagField}`,
       ...(topic ? [`topic: "${topic}"`] : []),
@@ -1045,6 +1055,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     const path = lektionsplanPath;
     try {
       const existingText = await readFromVault(path);
+      const frontmatter = keepLocation(newFrontmatter, existingText);
       const existingBody = existingText ? existingText.replace(/^---\n[\s\S]*?\n---\n\n?/, "") : null;
       // Kun et resumé når noten reelt fandtes FØR (prevRecord !== null) — ellers ville enhver
       // nyoprettet note (en plan der lige kom ind i tidsvinduet) fejlagtigt blive rapporteret som
@@ -2849,9 +2860,9 @@ async function writeConversion(file, parts) {
   const planNotes = await planNotesIn(t.mdDir);
   const mdName = t.md.slice(t.md.lastIndexOf("/") + 1);
   let carried = carriedFields(previous);
-  const owner = carried.includes("lektion:") ? null : provenPlanId(planNotes, mdName);
-  if (owner) carried = `lektion: "${owner}"\n` + carried;
-  const extra = (sektion ? `sektion: "${sektion}"\n` : "") + carried;
+  const owner = carried.includes("lesson:") ? null : provenPlanId(planNotes, mdName);
+  if (owner) carried = `lesson: "${owner}"\n` + carried;
+  const extra = (sektion ? `section: "${sektion}"\n` : "") + carried;
   await writeVaultFile(destMd, materialeFrontmatter(file.path, planNotes, formatNow(), extra) + body);
 
   const images = parts.flatMap((entries) => [...entries].filter(([n]) => n.startsWith("images/")));
@@ -4062,6 +4073,7 @@ Object.assign(module.exports, {
   calendarActions,
   parseFrontmatter,
   fieldLines,
+  keepLocation,
   wikilinkTarget,
   isPrepDay,
   appendFileListField,
