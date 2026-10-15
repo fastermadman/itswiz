@@ -2666,6 +2666,160 @@ function unzip(arrayBuffer) {
   return entries;
 }
 
+// #286: .docx and .pptx are zips of XML, so their text is read straight from the file: no OCR, no MinerU.
+// ponytail: regex over the XML, not a parser (no DOM in the test runner). Covers headings, lists, bold/italic, links, tables,
+// pictures and speaker notes; text boxes inside groups come out in document order. Nested tables are flattened.
+const xmlText = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+
+function relsOf(entries, partPath) {
+  const dir = partPath.slice(0, partPath.lastIndexOf("/") + 1);
+  const rels = entries.get(`${dir}_rels/${partPath.slice(dir.length)}.rels`);
+  const map = new Map();
+  if (!rels) return map;
+  for (const m of rels.toString("utf8").matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = /\bId="([^"]*)"/.exec(m[0])?.[1];
+    const target = /\bTarget="([^"]*)"/.exec(m[0])?.[1];
+    if (!id || !target) continue;
+    const external = /TargetMode="External"/.test(m[0]);
+    const parts = (external || target.startsWith("/") ? target.replace(/^\//, "") : dir + target).split("/");
+    const out = [];
+    for (const seg of external ? [target] : parts) { if (seg === "..") out.pop(); else if (seg !== ".") out.push(seg); }
+    map.set(id, external ? target : out.join("/"));
+  }
+  return map;
+}
+
+function officeToMarkdown(ext, entries, stem) {
+  const images = [];
+  const seen = new Map();
+  const pictureLink = (partPath) => {
+    const data = entries.get(partPath);
+    if (!data) return "";
+    if (!seen.has(partPath)) {
+      const e = partPath.slice(partPath.lastIndexOf(".") + 1).toLowerCase();
+      const name = `${stem}-${images.length + 1}.${e}`;
+      images.push([name, data.buffer.slice(data.byteOffset, data.byteOffset + data.length)]);
+      seen.set(partPath, name);
+    }
+    return `![[${seen.get(partPath)}]]`;
+  };
+  const body = ext === ".docx" ? docxMarkdown(entries, pictureLink) : ext === ".pptx" ? pptxMarkdown(entries, pictureLink) : null;
+  if (body == null) throw new Error(`office-text does not handle ${ext}`);
+  return { body, images };
+}
+
+function docxMarkdown(entries, pictureLink) {
+  const doc = entries.get("word/document.xml");
+  if (!doc) throw new Error("docx without word/document.xml");
+  const rels = relsOf(entries, "word/document.xml");
+  const xml = doc.toString("utf8");
+  const paragraph = (p) => {
+    let out = "";
+    let link = null;
+    for (const t of p.matchAll(/<w:hyperlink\b([^>]*)>|<\/w:hyperlink>|<w:r[ >][\s\S]*?<\/w:r>/g)) {
+      if (t[0].startsWith("<w:hyperlink")) { link = rels.get(/r:id="([^"]*)"/.exec(t[1])?.[1]) ?? null; continue; }
+      if (t[0] === "</w:hyperlink>") { link = null; continue; }
+      const r = t[0];
+      let text = "";
+      for (const x of r.matchAll(/<w:t\b[^>]*>([^<]*)<\/w:t>|<w:tab\/>|<w:br\/>|<a:blip\b[^>]*r:embed="([^"]*)"/g)) {
+        if (x[0].startsWith("<w:t ") || x[0].startsWith("<w:t>")) text += xmlText(x[1]);
+        else if (x[0] === "<w:tab/>") text += " ";
+        else if (x[0] === "<w:br/>") text += "\n";
+        else { const img = rels.get(x[2]); if (img) out += pictureLink(img); }
+      }
+      if (!text.trim()) { out += text; continue; }
+      const rpr = /<w:rPr>[\s\S]*?<\/w:rPr>/.exec(r)?.[0] ?? "";
+      const mark = (/<w:b\/>|<w:b w:val="(1|true)"\/>/.test(rpr) ? "**" : "") + (/<w:i\/>|<w:i w:val="(1|true)"\/>/.test(rpr) ? "*" : "");
+      const lead = /^\s*/.exec(text)[0], trail = /\s*$/.exec(text)[0];
+      const core = text.trim();
+      const wrapped = mark ? `${mark}${core}${[...mark].reverse().join("")}` : core;
+      out += lead + (link ? `[${wrapped}](${link})` : wrapped) + trail;
+    }
+    return out.trim();
+  };
+  const blocks = [];
+  for (const m of xml.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>|<w:p[ >][\s\S]*?<\/w:p>/g)) {
+    if (m[0].startsWith("<w:tbl>")) {
+      const rows = [...m[0].matchAll(/<w:tr[ >][\s\S]*?<\/w:tr>/g)].map((tr) =>
+        [...tr[0].matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)].map((tc) =>
+          [...tc[0].matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)].map((p) => paragraph(p[0])).filter(Boolean).join(" ").replace(/\|/g, "\\|")));
+      if (rows.length) {
+        const width = Math.max(...rows.map((r) => r.length));
+        const line = (r) => `| ${Array.from({ length: width }, (_, i) => r[i] ?? "").join(" | ")} |`;
+        blocks.push([line(rows[0]), line(Array(width).fill("---")), ...rows.slice(1).map(line)].join("\n"));
+      }
+      continue;
+    }
+    const text = paragraph(m[0]);
+    if (!text) continue;
+    const style = /<w:pStyle w:val="([^"]*)"/.exec(m[0])?.[1] ?? "";
+    const heading = /^(?:Heading|Overskrift)\s*(\d)$/i.exec(style) ?? (/^Title$/i.test(style) ? [0, 1] : null);
+    if (heading) { blocks.push(`${"#".repeat(Math.min(6, +heading[1]))} ${text.replace(/\*+/g, "")}`); continue; }
+    if (m[0].includes("<w:numPr>")) {
+      const lvl = +(/<w:ilvl w:val="(\d+)"/.exec(m[0])?.[1] ?? 0);
+      blocks.push(`${"  ".repeat(lvl)}- ${text}`);
+      continue;
+    }
+    blocks.push(text);
+  }
+  // consecutive list items stay in one block
+  return blocks.reduce((acc, b, i) => acc + (i && /^\s*- /.test(b) && /^\s*- /.test(blocks[i - 1]) ? "\n" : i ? "\n\n" : "") + b, "") + "\n";
+}
+
+function pptxMarkdown(entries, pictureLink) {
+  const order = [];
+  const pres = entries.get("ppt/presentation.xml");
+  if (pres) {
+    const rels = relsOf(entries, "ppt/presentation.xml");
+    for (const m of pres.toString("utf8").matchAll(/<p:sldId\b[^>]*r:id="([^"]*)"/g)) if (rels.has(m[1])) order.push(rels.get(m[1]));
+  }
+  if (!order.length) {
+    order.push(...[...entries.keys()].filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a, b) => parseInt(a.match(/(\d+)\.xml$/)[1]) - parseInt(b.match(/(\d+)\.xml$/)[1])));
+  }
+  const paragraphs = (xml) => [...xml.matchAll(/<a:p>[\s\S]*?<\/a:p>|<a:p [\s\S]*?<\/a:p>/g)].map((p) => ({
+    lvl: +(/<a:pPr\b[^>]*\blvl="(\d+)"/.exec(p[0])?.[1] ?? 0),
+    text: [...p[0].matchAll(/<a:t>([^<]*)<\/a:t>|<a:br\/>/g)].map((t) => (t[0] === "<a:br/>" ? " " : xmlText(t[1]))).join("").trim(),
+  })).filter((p) => p.text);
+  const slides = [];
+  order.forEach((slidePath, n) => {
+    const slide = entries.get(slidePath);
+    if (!slide) return;
+    const rels = relsOf(entries, slidePath);
+    const xml = slide.toString("utf8");
+    let title = "";
+    const parts = [];
+    for (const m of xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>|<p:pic>[\s\S]*?<\/p:pic>|<p:graphicFrame>[\s\S]*?<\/p:graphicFrame>/g)) {
+      const s = m[0];
+      if (s.startsWith("<p:pic>")) { const img = rels.get(/r:embed="([^"]*)"/.exec(s)?.[1]); if (img) parts.push(pictureLink(img)); continue; }
+      if (s.startsWith("<p:graphicFrame>")) {
+        const rows = [...s.matchAll(/<a:tr\b[\s\S]*?<\/a:tr>/g)].map((tr) =>
+          [...tr[0].matchAll(/<a:tc\b[\s\S]*?<\/a:tc>/g)].map((tc) => paragraphs(tc[0]).map((p) => p.text).join(" ").replace(/\|/g, "\\|")));
+        if (rows.length) {
+          const width = Math.max(...rows.map((r) => r.length));
+          const line = (r) => `| ${Array.from({ length: width }, (_, i) => r[i] ?? "").join(" | ")} |`;
+          parts.push([line(rows[0]), line(Array(width).fill("---")), ...rows.slice(1).map(line)].join("\n"));
+        }
+        continue;
+      }
+      const ps = paragraphs(s);
+      if (!ps.length) continue;
+      if (/<p:ph\b[^>]*type="(?:title|ctrTitle)"/.test(s)) { title = ps.map((p) => p.text).join(" "); continue; }
+      if (/<p:ph\b[^>]*type="(?:sldNum|dt|ftr)"/.test(s)) continue;
+      parts.push(ps.map((p) => `${"  ".repeat(p.lvl)}- ${p.text}`).join("\n"));
+    }
+    let notes = "";
+    const notesPath = [...rels.values()].find((t) => /^ppt\/notesSlides\//.test(t));
+    if (notesPath && entries.has(notesPath)) {
+      const nx = entries.get(notesPath).toString("utf8");
+      const sp = [...nx.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)].map((m) => m[0]).find((x) => /<p:ph\b[^>]*type="body"/.test(x));
+      if (sp) notes = paragraphs(sp).map((p) => `> ${p.text}`).join("\n");
+    }
+    slides.push([`## Slide ${n + 1}${title ? `: ${title}` : ""}`, ...parts, ...(notes ? [`> **Notes**\n${notes}`] : [])].join("\n\n"));
+  });
+  return slides.join("\n\n") + "\n";
+}
+
 // ── MinerU-API og cache ──
 
 function withTimeout(promise, ms, what) {
@@ -3035,6 +3189,19 @@ async function processDocument(file, { force = false } = {}) {
       console.log(`ItsWiz: written from the PDF's text layer, no MinerU: ${file.name}`);
       return;
     }
+    // #286: docx and pptx are read straight from the file. A file that cannot be read falls through to MinerU.
+    const ext = `.${file.extension.toLowerCase()}`;
+    if (ext === ".docx" || ext === ".pptx") {
+      let office = null;
+      try { office = officeToMarkdown(ext, unzip(bytes), stemName(stemOf(file.name))); } catch (err) { console.warn(`ItsWiz: ${file.name} could not be read directly (${err.message}), trying MinerU`); }
+      if (office && office.body.trim()) {
+        await writeNote(file, { body: office.body, sektion: null, images: office.images, converter: "office-text" });
+        if (needCopy) await writeVaultFile(copyPath, bytes);
+        if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
+        console.log(`ItsWiz: written from the ${ext.slice(1)} text, no MinerU: ${file.name}`);
+        return;
+      }
+    }
     if (!mineruToken()) return;
     let zips = cachedZips(digest);
     // #281: a digital PDF keeps its own text: no 1-bit pass, the original goes to MinerU and is copied as it is.
@@ -3083,7 +3250,7 @@ function isConvertible(file) {
 
 async function queueConversion(file) {
   const { enableConversion, pdfableText: useText } = await getSettings();
-  if (!enableConversion || !(mineruToken() || useText) || !isConvertible(file) || queuedConversions.has(file.path)) return;
+  if (!enableConversion || !(mineruToken() || useText || /^(docx|pptx)$/i.test(file.extension)) || !isConvertible(file) || queuedConversions.has(file.path)) return;
   queuedConversions.add(file.path);
   conversionQueue = conversionQueue
     .then(() => processDocument(file))
@@ -4226,6 +4393,7 @@ Object.assign(module.exports, {
   pageRanges,
   pdfPageCount,
   unzip,
+  officeToMarkdown,
   noteStubPath,
   planLiteratureText,
   matchLiteratureElements,
