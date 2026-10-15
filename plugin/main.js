@@ -3874,7 +3874,7 @@ class ItsWizView extends ItemView {
   }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "ItsWiz"; }
-  getIcon() { return "graduation-cap"; }
+  getIcon() { return "wand-sparkles"; }
 
   async onOpen() {
     const root = this.contentEl;
@@ -4022,7 +4022,7 @@ class ItsWizPlugin extends Plugin {
     applyRoots(this.data.settings);
     applyCourseNames(this.data.settings);
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
-    this.addRibbonIcon("graduation-cap", "ItsWiz", () => this.openView());
+    this.addRibbonIcon("wand-sparkles", "ItsWiz", () => this.openView());
     this.addCommand({ id: "open", name: "Open itslearning", callback: () => this.openView() });
     this.addCommand({ id: "harvest", name: "Harvest now", callback: () => runCollectAndDownload() });
     this.addCommand({ id: "path-test", name: "Path test (one file per download route into ItsWiz-test/)", callback: () => runPathTest() });
