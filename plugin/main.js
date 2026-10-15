@@ -2,7 +2,7 @@
 // Kun desktop. Ingen build, ingen dependencies. Logikken nedenfor er kopieret fra Chrome-extensionens
 // background.js (#239, plan i issue-kommentaren); extensionen er slettet i #244 og findes kun i git-historikken.
 
-const { Plugin, ItemView, Modal, PluginSettingTab, Setting, Notice, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
+const { Plugin, addIcon, ItemView, Modal, PluginSettingTab, Setting, Notice, TFile, TFolder, normalizePath, requestUrl } = require("obsidian");
 
 // Vaultens to rodmapper er indstillinger (#269, plan i #266): fagmappen og den fulde sti til
 // opgaverne. De er modulvariabler, sat af applyRoots() ved start og når indstillingen ændres, så
@@ -3874,7 +3874,7 @@ class ItsWizView extends ItemView {
   }
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "ItsWiz"; }
-  getIcon() { return "graduation-cap"; }
+  getIcon() { return WIZARD_HAT_ICON; }
 
   async onOpen() {
     const root = this.contentEl;
@@ -4012,6 +4012,13 @@ class ItsWizSettingTab extends PluginSettingTab {
   }
 }
 
+// Wizard hat for addIcon (100x100 viewBox, currentColor so it follows the theme). Cone, band gap, brim, star cut-out.
+const WIZARD_HAT_ICON = "itswiz-wizard-hat";
+const WIZARD_HAT_SVG =
+  '<path fill="currentColor" fill-rule="evenodd" d="M62 6 C50 12 42 30 37 54 L68 54 C67 36 66 18 62 6 Z M52 40 l2.2 4.6 5 .6 -3.7 3.4 1 5 -4.5 -2.5 -4.5 2.5 1 -5 -3.7 -3.4 5 -.6 Z"/>' +
+  '<path fill="currentColor" d="M35 60 L69 60 L71 68 L33 68 Z"/>' +
+  '<path fill="currentColor" d="M8 78 C8 70 30 71 50 71 C70 71 92 70 92 78 C92 88 70 90 50 90 C30 90 8 88 8 78 Z"/>';
+
 class ItsWizPlugin extends Plugin {
   async onload() {
     plugin = this;
@@ -4022,7 +4029,8 @@ class ItsWizPlugin extends Plugin {
     applyRoots(this.data.settings);
     applyCourseNames(this.data.settings);
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
-    this.addRibbonIcon("graduation-cap", "ItsWiz", () => this.openView());
+    addIcon(WIZARD_HAT_ICON, WIZARD_HAT_SVG);
+    this.addRibbonIcon(WIZARD_HAT_ICON, "ItsWiz", () => this.openView());
     this.addCommand({ id: "open", name: "Open itslearning", callback: () => this.openView() });
     this.addCommand({ id: "harvest", name: "Harvest now", callback: () => runCollectAndDownload() });
     this.addCommand({ id: "path-test", name: "Path test (one file per download route into ItsWiz-test/)", callback: () => runPathTest() });
