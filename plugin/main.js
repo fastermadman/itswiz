@@ -2871,7 +2871,7 @@ const TEXT_MAX_IMAGE_SHARE = 0.15;
 const TEXT_MAX_UNMAPPED = 0.01;
 
 function parseTextReport(stderr) {
-  return String(stderr).split("\n").map((l) => l.split("\t")).filter((c) => c.length === 8 && /^\d+$/.test(c[0]))
+  return String(stderr).split("\n").map((l) => l.split("\t")).filter((c) => c.length >= 8 && /^\d+$/.test(c[0]))
     .map((c) => ({ page: +c[0], label: c[1], kind: c[2], glyphs: +c[3], unmapped: +c[4], imageShare: +c[7] }));
 }
 
@@ -2886,7 +2886,7 @@ function textRouteOk(letters, report) {
   return glyphs > 0 && unmapped / glyphs < TEXT_MAX_UNMAPPED && report.every((r) => r.kind === "digital" && r.imageShare < TEXT_MAX_IMAGE_SHARE);
 }
 
-// The note body, or null: no PDFable path, not a PDF, an older PDFable without --text, a file the rule sends to MinerU,
+// {body, images: [[name, ArrayBuffer]]} or null: no PDFable path, not a PDF, an older PDFable without --text, a file the rule sends to MinerU,
 // or any failure (then MinerU as before).
 async function pdfableText(file, bytes) {
   const bin = pdfablePath();
@@ -2894,7 +2894,9 @@ async function pdfableText(file, bytes) {
   const fs = require("fs");
   const path = require("path");
   const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "itswiz-pdfable-"));
-  const input = path.join(dir, "in.pdf");
+  // The picture files are named after the input, and the note links them by that name: it must be the document's own name.
+  const input = path.join(dir, file.name);
+  const figures = path.join(dir, "figures");
   const run = (args) => new Promise((resolve) =>
     require("child_process").execFile(bin, args, { timeout: PDFABLE_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024 },
       (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout), stderr: String(stderr) })));
@@ -2902,9 +2904,12 @@ async function pdfableText(file, bytes) {
     fs.writeFileSync(input, Buffer.from(bytes));
     const classify = await run(["--classify", input]);
     if (!classify.ok) return null;
-    const text = await run(["--text", input]);
+    const text = await run(["--text", "--figures", figures, input]);
     if (!text.ok || !textRouteOk(classify.stdout, parseTextReport(text.stderr)) || !text.stdout.trim()) return null;
-    return text.stdout;
+    const images = fs.existsSync(figures)
+      ? fs.readdirSync(figures).sort().map((n) => { const b = fs.readFileSync(path.join(figures, n)); return [n, b.buffer.slice(b.byteOffset, b.byteOffset + b.length)]; })
+      : [];
+    return { body: text.stdout, images };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -3024,7 +3029,7 @@ async function processDocument(file, { force = false } = {}) {
     const wasText = force && readFrontmatterField((await readFromVault(t.md)) ?? "", "converter") === "pdfable-text";
     const fromText = !wasText && (await getSettings()).pdfableText ? await pdfableText(file, bytes) : null;
     if (fromText != null) {
-      await writeNote(file, { body: fromText, sektion: null, images: [], converter: "pdfable-text" });
+      await writeNote(file, { body: fromText.body, sektion: null, images: fromText.images, converter: "pdfable-text" });
       if (needCopy) await writeVaultFile(copyPath, bytes);
       if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
       console.log(`ItsWiz: written from the PDF's text layer, no MinerU: ${file.name}`);
