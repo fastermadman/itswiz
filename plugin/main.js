@@ -2391,6 +2391,16 @@ function mdTargets(rawFilePath) {
   return { mdDir, md: `${mdDir}/${title}.md`, images: `${mdDir}/_attachments/${title}`, rawRoot: parts.slice(0, i + 1).join("/"), fagFolder: parts[i - 1] ?? "" };
 }
 
+// #275: the copy a device can read (PDFable's reading copy, or a plain copy of the original) lives in
+// _attachments/ next to the images, so MD/ itself only holds notes. It is a sibling of the image folder,
+// which is wiped on every conversion. It gets its own name, so [[X.pdf]] links to the RAW original stay
+// unambiguous on the Mac.
+function copyTarget(rawFilePath) {
+  const { mdDir } = mdTargets(rawFilePath);
+  const name = rawFilePath.slice(rawFilePath.lastIndexOf("/") + 1);
+  return `${mdDir}/_attachments/${stemName(stemOf(name))} (copy)${name.slice(stemOf(name).length)}`;
+}
+
 function inRawBranch(path) {
   // Kun de to rødder: en tilfældig RAW/-mappe andre steder i en fremmed vault sendes ikke til MinerU (#269).
   return (underRoot(path, FAG_ROOT) || underRoot(path, OPGAVER_ROOT)) && path.split("/").slice(0, -1).includes("RAW");
@@ -2792,9 +2802,23 @@ const PDFABLE_FLAGS = ["--rotate", "--crop", "--split", "auto", "--deskew"];
 const PDFABLE_TIMEOUT_MS = 5 * 60e3;
 const pdfablePath = () => plugin.app.loadLocalStorage(PDFABLE_PATH_KEY) ?? "";
 
-// Den forbehandlede PDF, eller null (ingen sti, ikke en PDF, ingen fil skrevet, fejl), hvorefter
-// originalen uploades. Originalen i RAW røres aldrig; kopien lever kun i en temp-mappe.
-async function pdfable(file, bytes) {
+// #275: pass 2 uses the same flags as pass 1 on the ORIGINAL, plus one --mineru per layout.json
+// (in page order), so MinerU's boxes fit the output pages of pass 1 directly.
+function pdfableArgs(layoutPaths, input, output) {
+  return [...PDFABLE_FLAGS, ...layoutPaths.flatMap((p) => ["--mineru", p]), input, output];
+}
+
+// PDFable reports a layout.json that does not fit (page count or size) on stderr with exit 0 and an
+// output without text or figures; that output is not worth keeping.
+function hasMineruWarning(stderr) {
+  return /^Warning: --mineru/m.test(stderr);
+}
+
+// Pass 1 (no layouts): the 1-bit PDF uploaded to MinerU. Pass 2 (layouts: layout.json contents):
+// the reading copy with MinerU's text and colour figures. Returns the PDF bytes, or null (no path, not
+// a PDF, no file written, failure), after which the original is used. The original in RAW is never
+// touched; the work happens in a temp folder.
+async function pdfable(file, bytes, layouts = []) {
   const bin = pdfablePath();
   if (!bin || file.extension.toLowerCase() !== "pdf") return null;
   const fs = require("fs");
@@ -2804,13 +2828,22 @@ async function pdfable(file, bytes) {
   const output = path.join(dir, "out.pdf");
   try {
     fs.writeFileSync(input, Buffer.from(bytes));
+    const layoutPaths = layouts.map((layout, i) => {
+      const p = path.join(dir, `layout-${i + 1}.json`);
+      fs.writeFileSync(p, layout);
+      return p;
+    });
     const { code, stderr } = await new Promise((resolve) =>
-      require("child_process").execFile(bin, [...PDFABLE_FLAGS, input, output], { timeout: PDFABLE_TIMEOUT_MS },
+      require("child_process").execFile(bin, pdfableArgs(layoutPaths, input, output), { timeout: PDFABLE_TIMEOUT_MS },
         (err, _stdout, stderr) => resolve({ code: err ? err.code ?? -1 : 0, stderr: String(stderr).trim() })));
     // Exit 2: PDF'en er skrevet, men nogle opslag blev ikke splittet. Uploades alligevel.
     if (code === 2) console.warn(`ItsWiz: PDFable usikker på sider i ${file.name}: ${stderr.split("\n").pop()}`);
     else if (code !== 0) {
-      console.warn(`ItsWiz: PDFable fejlede på ${file.name} (exit ${code}), uploader originalen: ${stderr}`);
+      console.warn(`ItsWiz: PDFable fejlede på ${file.name} (exit ${code}), bruger originalen: ${stderr}`);
+      return null;
+    }
+    if (hasMineruWarning(stderr)) {
+      console.warn(`ItsWiz: PDFable kunne ikke bruge MinerUs layout for ${file.name}, bruger originalen: ${stderr}`);
       return null;
     }
     if (!fs.existsSync(output)) return null;
@@ -2819,6 +2852,12 @@ async function pdfable(file, bytes) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// layout.json of every zip in page order, or null when one is missing (then pass 2 cannot be trusted).
+function layoutsOf(parts) {
+  const layouts = parts.map((entries) => entries.get("layout.json"));
+  return layouts.every(Boolean) ? layouts : null;
 }
 
 // ── Vault-siden ──
@@ -2893,16 +2932,31 @@ async function processDocument(file, { force = false } = {}) {
   }
 
   try {
+    // #275: _attachments/ holds one copy per converted file, never overwritten (annotations made on it
+    // would be lost), so pass 1 is only needed on a cache hit when that file is still missing.
+    const copyPath = copyTarget(file.path);
+    const needCopy = !(await existsInVault(copyPath));
     let zips = cachedZips(digest);
+    // null: no PDFable, not scanned (PDFable writes no file for a real-text PDF) or PDFable failed.
+    const oneBit = zips && !needCopy ? null : await pdfable(file, bytes);
     if (zips) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
     else {
-      console.log(`ItsWiz: uploader til MinerU: ${file.name}`);
+      console.log(`ItsWiz: uploader til MinerU: ${file.name}${oneBit ? ` (1-bit, ${oneBit.byteLength} B; original ${bytes.byteLength} B)` : ` (${bytes.byteLength} B)`}`);
       // #250: MinerU afviser data_id over 128 bytes.
       const dataId = Buffer.from(stemName(file.basename)).subarray(0, 128).toString("utf8").replace(/�+$/, "");
-      zips = await mineruConvert(mineruToken(), file.name, dataId, (await pdfable(file, bytes)) ?? bytes);
+      zips = await mineruConvert(mineruToken(), file.name, dataId, oneBit ?? bytes);
       writeCache(digest, zips);
     }
-    await writeConversion(file, zips.map(unzip));
+    const parts = zips.map(unzip);
+    await writeConversion(file, parts);
+    if (needCopy) {
+      // A scanned PDF gets pass 2 (text layer + colour figures); anything else (a text PDF, docx, pptx, or
+      // a failed pass 2) gets a plain copy of the original, so it can be read when RAW is not synced.
+      const layouts = oneBit && layoutsOf(parts);
+      const reading = layouts ? await pdfable(file, bytes, layouts) : null;
+      await writeVaultFile(copyPath, reading ?? bytes);
+      console.log(`ItsWiz: ${reading ? `læsekopi (${reading.byteLength} B)` : `kopi af originalen (${bytes.byteLength} B)`} skrevet til ${copyPath}`);
+    }
     // En gammel fejlmarkør (fx fra før opdelingen, #211) må ikke stå tilbage, når MD'en findes.
     if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
     console.log(`ItsWiz: færdig: ${file.name}`);
@@ -3964,7 +4018,7 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     new Setting(containerEl)
       .setName("PDFable-program")
-      .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU. Empty: the original is uploaded.")
+      .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU and writes a small reading copy to _attachments/ next to the note. Empty: the original is uploaded and copied to _attachments/.")
       .addText((t) => t.setPlaceholder("/path/to/pdfable").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
   }
 }
@@ -4038,6 +4092,10 @@ Object.assign(module.exports, {
   mdPath,
   fileLink,
   mdTargets,
+  copyTarget,
+  pdfableArgs,
+  hasMineruWarning,
+  layoutsOf,
   inRawBranch,
   applyRoots,
   applyCourseNames,

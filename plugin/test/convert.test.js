@@ -47,3 +47,28 @@ test('PDF over 200 sider deles i bidder på 100 (#211)', () => {
   const pdf = Buffer.from('<< /Type /Pages /Count 2 >> << /Type /Page >> <</Type/Page/Parent 1 0 R>>', 'latin1');
   assert.strictEqual(plugin.pdfPageCount(pdf), 2);
 });
+
+test('kopien ligger i _attachments ved noten med eget navn og samme endelse (#275)', () => {
+  assert.strictEqual(plugin.copyTarget('§ FAG/♪ Musik/RAW/Enhed/korte..pdf'), '§ FAG/♪ Musik/MD/Enhed/_attachments/korte. (copy).pdf');
+  assert.strictEqual(plugin.copyTarget('Opgaver/RAW/Bog: 1.pptx'), 'Opgaver/MD/_attachments/Bog_ 1 (copy).pptx');
+});
+
+test('pass 2 får samme flag som pass 1 plus ét --mineru pr. layout, i rækkefølge (#275)', () => {
+  assert.deepStrictEqual(plugin.pdfableArgs([], 'in.pdf', 'out.pdf'), ['--rotate', '--crop', '--split', 'auto', '--deskew', 'in.pdf', 'out.pdf']);
+  assert.deepStrictEqual(plugin.pdfableArgs(['l1.json', 'l2.json'], 'in.pdf', 'out.pdf'),
+    ['--rotate', '--crop', '--split', 'auto', '--deskew', '--mineru', 'l1.json', '--mineru', 'l2.json', 'in.pdf', 'out.pdf']);
+});
+
+test('PDFables --mineru-advarsler genkendes, andre advarsler ikke (#275)', () => {
+  assert.strictEqual(plugin.hasMineruWarning('Warning: --mineru: layout.json has 25 pages but the output has 50: no text layer (use the same flags as the run MinerU read)'), true);
+  assert.strictEqual(plugin.hasMineruWarning('x\nWarning: --mineru: page 3 is [595, 842] pt in layout.json but 420x595 in the output: no text on it'), true);
+  assert.strictEqual(plugin.hasMineruWarning('Warning: pages look like double pages but no confident gutter was found'), false);
+  assert.strictEqual(plugin.hasMineruWarning(''), false);
+});
+
+test('layout.json fra alle zips i rækkefølge, ellers null (#275)', () => {
+  const a = Buffer.from('{"a":1}');
+  const b = Buffer.from('{"b":2}');
+  assert.deepStrictEqual(plugin.layoutsOf([new Map([['layout.json', a]]), new Map([['layout.json', b]])]), [a, b]);
+  assert.strictEqual(plugin.layoutsOf([new Map([['layout.json', a]]), new Map([['full.md', b]])]), null);
+});
