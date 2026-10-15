@@ -50,10 +50,10 @@ ViaVault/§ FAG/<subject>/
   NOTER/<week> - <topic>/<week> - <topic> note.md        ← lecture-note STUB, see below
 ```
 
-The notes get frontmatter (`fag`, `uge`, `type`, `kilde`, and `emne`/`start`/`stop`
-when the plan has them), so `Seminarium.base` can build overviews across weeks
-and topics without the structure encoding everything. `uge` is the plain week code
-(`W34tors`), `emne` is its own field, not buried in the folder name string.
+The notes get frontmatter (`course`, `type`, `source`, and `topic`/`start`/`stop` when the plan has them),
+so a base can build overviews across weeks and topics without the structure encoding everything.
+`topic` is its own field, not buried in the folder name string. The keys and `type:` values
+(`lesson-plan`, `material`, `assignment`, `note`) are English for everyone: there is no language setting (#271).
 Image embeds are wikilinks (`![[<sha>.jpg]]`), not relative paths: those
 break on titles with parentheses. Rationale and alternatives in ValdiVault:
 `10_Projects/VIAstudyWiz/10-filsystem-design-raw-md.md`.
