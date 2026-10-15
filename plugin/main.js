@@ -1483,6 +1483,7 @@ const DEFAULT_SETTINGS = {
   enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
   enableConversion: false,
+  pdfableText: false,
   enableHoldCourseSync: false,
   enableCalendarSync: false,
   fagRoot: "Fag",
@@ -2864,6 +2865,51 @@ function isDigitalPdf(letters) {
   return pages.length > 0 && pages.filter((c) => c === "D").length * 2 > pages.length;
 }
 
+// #283: `pdfable --text` writes the note from a digital PDF's own text layer. stderr carries one tab-separated row per
+// page: page label kind glyphs unmapped rotated tables image_share (PDFable docs/text-extraction.md).
+const TEXT_MAX_IMAGE_SHARE = 0.15;
+const TEXT_MAX_UNMAPPED = 0.01;
+
+function parseTextReport(stderr) {
+  return String(stderr).split("\n").map((l) => l.split("\t")).filter((c) => c.length === 8 && /^\d+$/.test(c[0]))
+    .map((c) => ({ page: +c[0], label: c[1], kind: c[2], glyphs: +c[3], unmapped: +c[4], imageShare: +c[7] }));
+}
+
+// letters: the `--classify` output. Only a file that is digital on every page, has no page where a picture may hold
+// text (image_share), and has almost no glyphs without a Unicode mapping, takes the text route; MinerU gets the rest.
+// ponytail: image_share misses some screenshots (madariaga), which is why the setting is off by default.
+function textRouteOk(letters, report) {
+  const pages = [...String(letters).trim()];
+  if (!pages.length || pages.some((c) => c !== "D") || report.length !== pages.length) return false;
+  const glyphs = report.reduce((n, r) => n + r.glyphs, 0);
+  const unmapped = report.reduce((n, r) => n + r.unmapped, 0);
+  return glyphs > 0 && unmapped / glyphs < TEXT_MAX_UNMAPPED && report.every((r) => r.kind === "digital" && r.imageShare < TEXT_MAX_IMAGE_SHARE);
+}
+
+// The note body, or null: no PDFable path, not a PDF, an older PDFable without --text, a file the rule sends to MinerU,
+// or any failure (then MinerU as before).
+async function pdfableText(file, bytes) {
+  const bin = pdfablePath();
+  if (!bin || file.extension.toLowerCase() !== "pdf") return null;
+  const fs = require("fs");
+  const path = require("path");
+  const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "itswiz-pdfable-"));
+  const input = path.join(dir, "in.pdf");
+  const run = (args) => new Promise((resolve) =>
+    require("child_process").execFile(bin, args, { timeout: PDFABLE_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024 },
+      (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout), stderr: String(stderr) })));
+  try {
+    fs.writeFileSync(input, Buffer.from(bytes));
+    const classify = await run(["--classify", input]);
+    if (!classify.ok) return null;
+    const text = await run(["--text", input]);
+    if (!text.ok || !textRouteOk(classify.stdout, parseTextReport(text.stderr)) || !text.stdout.trim()) return null;
+    return text.stdout;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // true only when PDFable ran and called the file digital. No path, not a PDF, an older PDFable without --classify
 // (exit 1) or any failure: false, so the file takes the scan path as before.
 async function pdfableDigital(file, bytes) {
@@ -2918,8 +2964,16 @@ async function existingConversion(file, bytes, digest) {
 
 // parts: én zip-indholds-Map pr. bid (#211), i sideorden.
 async function writeConversion(file, parts) {
-  const t = mdTargets(file.path);
   const { body, sektion } = joinedBody(parts);
+  const images = parts.flatMap((entries) => [...entries].filter(([n]) => n.startsWith("images/")))
+    .map(([n, data]) => [n.slice("images/".length), data.buffer.slice(data.byteOffset, data.byteOffset + data.length)]);
+  await writeNote(file, { body, sektion, images, converter: null });
+}
+
+// #283: converter is null for MinerU (no field), "pdfable-text" for a note written from the PDF's text layer, so a later
+// forced conversion can pick MinerU instead.
+async function writeNote(file, { body, sektion, images, converter }) {
+  const t = mdTargets(file.path);
   const previous = await readFromVault(t.md);
   // #42: skriv ved siden af, hvis den eksisterende note har highlights.
   const protect = previous != null && HIGHLIGHT_RE.test(previous);
@@ -2931,14 +2985,13 @@ async function writeConversion(file, parts) {
   let carried = carriedFields(previous);
   const owner = carried.includes("lesson:") ? null : provenPlanId(planNotes, mdName);
   if (owner) carried = `lesson: "${owner}"\n` + carried;
-  const extra = (sektion ? `section: "${sektion}"\n` : "") + carried;
+  const extra = (sektion ? `section: "${sektion}"\n` : "") + (converter ? `converter: ${converter}\n` : "") + carried;
   await writeVaultFile(destMd, materialeFrontmatter(file.path, planNotes, formatNow(), extra) + body);
 
-  const images = parts.flatMap((entries) => [...entries].filter(([n]) => n.startsWith("images/")));
   if (images.length) {
     const { adapter } = plugin.app.vault;
     if (await adapter.exists(normalizePath(destImages))) await adapter.rmdir(normalizePath(destImages), true);
-    for (const [n, data] of images) await writeVaultFile(`${destImages}/${n.slice("images/".length)}`, data.buffer.slice(data.byteOffset, data.byteOffset + data.length));
+    for (const [n, data] of images) await writeVaultFile(`${destImages}/${n}`, data);
   }
   if (protect) console.log(`ItsWiz: highlights i ${mdName} — ny konvertering skrevet til ${destMd.slice(destMd.lastIndexOf("/") + 1)} (#42)`);
 }
@@ -2966,6 +3019,18 @@ async function processDocument(file, { force = false } = {}) {
     // would be lost), so pass 1 is only needed on a cache hit when that file is still missing.
     const copyPath = copyTarget(file.path);
     const needCopy = !(await existsInVault(copyPath));
+    // #283: a digital PDF the rule trusts is written from its text layer, without MinerU. A forced conversion of such a
+    // note goes to MinerU, so the choice can be undone per file.
+    const wasText = force && readFrontmatterField((await readFromVault(t.md)) ?? "", "converter") === "pdfable-text";
+    const fromText = !wasText && (await getSettings()).pdfableText ? await pdfableText(file, bytes) : null;
+    if (fromText != null) {
+      await writeNote(file, { body: fromText, sektion: null, images: [], converter: "pdfable-text" });
+      if (needCopy) await writeVaultFile(copyPath, bytes);
+      if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
+      console.log(`ItsWiz: written from the PDF's text layer, no MinerU: ${file.name}`);
+      return;
+    }
+    if (!mineruToken()) return;
     let zips = cachedZips(digest);
     // #281: a digital PDF keeps its own text: no 1-bit pass, the original goes to MinerU and is copied as it is.
     const digital = (!zips || needCopy) && await pdfableDigital(file, bytes);
@@ -3012,8 +3077,8 @@ function isConvertible(file) {
 }
 
 async function queueConversion(file) {
-  const { enableConversion } = await getSettings();
-  if (!enableConversion || !mineruToken() || !isConvertible(file) || queuedConversions.has(file.path)) return;
+  const { enableConversion, pdfableText: useText } = await getSettings();
+  if (!enableConversion || !(mineruToken() || useText) || !isConvertible(file) || queuedConversions.has(file.path)) return;
   queuedConversions.add(file.path);
   conversionQueue = conversionQueue
     .then(() => processDocument(file))
@@ -4021,6 +4086,10 @@ class ItsWizSettingTab extends PluginSettingTab {
       .setName("Convert RAW files")
       .setDesc("Sends new PDF and Office files under RAW/ to MinerU and writes the MD note. Optional: when off, the lesson plans link to the original file.")
       .addToggle((t) => t.setValue(s.enableConversion ?? false).onChange((v) => ((s.enableConversion = v), save(), v && scanExisting())));
+    new Setting(containerEl)
+      .setName("Use PDF text for digital PDFs")
+      .setDesc("Needs the PDFable program. A PDF that is digital on every page, with no picture-heavy pages, gets its note straight from the PDF's text layer: instant, no upload, no MinerU key needed. Everything else still goes to MinerU. Experimental, so off by default; \"force\" on such a note converts it with MinerU instead.")
+      .addToggle((t) => t.setValue(s.pdfableText ?? false).onChange((v) => ((s.pdfableText = v), save(), v && scanExisting())));
     containerEl.createEl("h3", { text: "Calendar" });
     new Setting(containerEl)
       .setName("Personal calendar events in itslearning")
@@ -4129,6 +4198,8 @@ Object.assign(module.exports, {
   pdfableArgs,
   hasMineruWarning,
   isDigitalPdf,
+  parseTextReport,
+  textRouteOk,
   layoutsOf,
   inRawBranch,
   applyRoots,
