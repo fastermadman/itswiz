@@ -2,7 +2,7 @@
 
 // #241: konverterings-porten skal give samme output som watch_viastudywiz.py. Forventningerne er
 // genereret af Python-watcheren på samme input (opslag der splittes, fodnote, billede, ISO-uge 53,
-// lektion:/used_in:). Paritet på rigtige MinerU-zips blev målt separat: 20/20 ens (PR-beskrivelsen).
+// lesson:/used_in:). Paritet på rigtige MinerU-zips blev målt separat: 20/20 ens (PR-beskrivelsen).
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -18,17 +18,24 @@ test('zip → MD-brødtekst som watcheren', () => {
 });
 
 test('frontmatter-felter som watcheren', () => {
-  assert.deepStrictEqual(plugin.timeFieldsFromStart('2027-01-01 08:15:00'), {"uge": "2026-W53", "ugedag": "fredag", "dato": "2027-01-01"});
-  const note = "---\nfag: Musik\nlektion: \"36016:1\"\nused_in:\n  - \"36016:2\"\n---\n\nbrødtekst\n";
-  assert.strictEqual(plugin.carriedFields(note), "lektion: \"36016:1\"\nused_in:\n  - \"36016:2\"\n");
-  assert.strictEqual(plugin.appendUsedIn(note, '36016:3'), "---\nfag: Musik\nlektion: \"36016:1\"\nused_in:\n  - \"36016:3\"\n  - \"36016:2\"\n---\n\nbrødtekst\n");
+  const note = "---\ncourse: Musik\nlesson: \"36016:1\"\nused_in:\n  - \"36016:2\"\n---\n\nbrødtekst\n";
+  assert.strictEqual(plugin.carriedFields(note), "lesson: \"36016:1\"\nused_in:\n  - \"36016:2\"\n");
+  assert.strictEqual(plugin.appendUsedIn(note, '36016:3'), "---\ncourse: Musik\nlesson: \"36016:1\"\nused_in:\n  - \"36016:3\"\n  - \"36016:2\"\n---\n\nbrødtekst\n");
   assert.strictEqual(plugin.appendUsedIn(note, '36016:1'), null);
   assert.deepStrictEqual(plugin.mdTargets('§ FAG/♪ Musik/RAW/Enhed/korte..pdf').md, '§ FAG/♪ Musik/MD/Enhed/korte..md');
   assert.strictEqual(plugin.errorMarkerPath('Litteratur/RAW/Bog.pdf'), 'Litteratur/RAW/.Bog.mineru-error.txt');
 });
 
+test('materialenotens frontmatter: engelske nøgler, emne/start/stop fra planen, ingen uge/ugedag/dato (#271)', () => {
+  const plan = { name: '[PLAN] 2026-09-01 - Tema.md', text: '---\ncourse: Musik\ntopic: "Tema"\nstart: "2026-09-01 12:25:00"\nstop: "2026-09-01 15:45:00"\ntype: lesson-plan\nplan_id: "1:2"\n---\n' };
+  assert.strictEqual(
+    plugin.materialeFrontmatter('Fag/Musik/RAW/Tema/Bog.pdf', [plan], '2026-10-14 10:00'),
+    '---\ncourse: Musik\ntype: material\nsource: "[[Fag/Musik/RAW/Tema/Bog.pdf]]"\nfetched: "2026-10-14 10:00"\ntopic: "Tema"\nstart: "2026-09-01 12:25:00"\nstop: "2026-09-01 15:45:00"\n---\n\n'
+  );
+});
+
 test('ejer-lektion findes også via RAW-link og NFD-navn (#241)', () => {
-  const plan = (id, link) => ({ name: `[PLAN] ${id}.md`, text: `---\nplan_id: "${id}"\n---\n<!-- AUTO:START -->\n## Materialer\n- ${link}\n<!-- AUTO:END -->\n` });
+  const plan = (id, link) => ({ name: `[PLAN] ${id}.md`, text: `---\nplan_id: "${id}"\n---\n<!-- AUTO:START -->\n## Materials\n- ${link}\n<!-- AUTO:END -->\n` });
   const notes = [plan('1', '[[§ FAG/M/MD/E/Andet.md|Andet.md]]'), plan('2', '[[§ FAG/M/RAW/E/Musikforståelse.pdf|Musikforståelse.pdf]]')];
   assert.strictEqual(plugin.provenPlanId(notes, 'Musikforståelse.md'.normalize('NFD')), '2');
   assert.strictEqual(plugin.provenPlanId(notes, 'Ukendt.md'), null);
