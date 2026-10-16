@@ -31,3 +31,10 @@ test('ekstra mapper konverteres og får folder: i stedet for course:', () => {
   plugin.applyRoots({});
   assert.match(plugin.materialeFrontmatter('Fag/Musik/RAW/a.pdf', [], 'x'), /course: Musik/);
 });
+
+test('ekstra mappe: RAW-undermappen og bagudvendt skråstreg accepteres', () => {
+  plugin.applyRoots({ extraFolders: ['SFF/RAW', '/SFF2/RAW/'] });
+  assert.ok(plugin.inRawBranch('SFF/RAW/a.pdf'));
+  assert.ok(plugin.inRawBranch('SFF2/RAW/a.pdf'));
+  plugin.applyRoots({});
+});

@@ -11,9 +11,18 @@ let FAG_ROOT = "Fag";
 let OPGAVER_ROOT = "Noter/Opgaver";
 // Extra folders outside Fag whose RAW/ branches are converted too; their notes get `folder:`, not `course:`.
 let EXTRA_FOLDERS = [];
+// Accepts what people paste: an absolute path inside the vault, and/or the RAW folder itself.
+function extraFolderPath(value) {
+  let v = String(value ?? "").trim();
+  try {
+    const base = plugin?.app?.vault?.adapter?.getBasePath?.();
+    if (base && v.startsWith(base + "/")) v = v.slice(base.length + 1);
+  } catch {}
+  return normRoot(v.replace(/\/+$/, "").replace(/\/RAW$/, ""), "");
+}
 const normRoot = (v, fallback) => (String(v ?? "").trim().replace(/^\/+|\/+$/g, "") || fallback);
 function applyRoots(settings) {
-  EXTRA_FOLDERS = (settings?.extraFolders ?? []).map((f) => normRoot(f, "")).filter(Boolean);
+  EXTRA_FOLDERS = (settings?.extraFolders ?? []).map(extraFolderPath).filter(Boolean);
   FAG_ROOT = normRoot(settings?.fagRoot, "Fag");
   OPGAVER_ROOT = normRoot(settings?.opgaverRoot, "Noter/Opgaver");
 }
