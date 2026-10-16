@@ -20,3 +20,14 @@ test('rødderne kan ændres og normaliseres', () => {
   assert.ok(!plugin.touchesHoldCourseInput('Andet/OPGAVER/O.md'));
   plugin.applyRoots({});
 });
+
+test('ekstra mapper konverteres og får folder: i stedet for course:', () => {
+  plugin.applyRoots({ extraFolders: ['/almind/SFF/', ''] });
+  assert.ok(plugin.inRawBranch('almind/SFF/RAW/a.pdf'));
+  assert.ok(!plugin.inRawBranch('almind/Andet/RAW/a.pdf'));
+  const fm = plugin.materialeFrontmatter('almind/SFF/RAW/a.pdf', [], '2026-10-15T22:00');
+  assert.match(fm, /^---\nfolder: "SFF"\n/);
+  assert.doesNotMatch(fm, /course:/);
+  plugin.applyRoots({});
+  assert.match(plugin.materialeFrontmatter('Fag/Musik/RAW/a.pdf', [], 'x'), /course: Musik/);
+});

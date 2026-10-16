@@ -9,8 +9,11 @@ const { Plugin, ItemView, Modal, PluginSettingTab, Setting, Notice, TFile, TFold
 // alle sti-byggende funktioner bruger samme navn (issue #63: ellers opstår tomme dublet-mapper).
 let FAG_ROOT = "Fag";
 let OPGAVER_ROOT = "Noter/Opgaver";
+// Extra folders outside Fag whose RAW/ branches are converted too; their notes get `folder:`, not `course:`.
+let EXTRA_FOLDERS = [];
 const normRoot = (v, fallback) => (String(v ?? "").trim().replace(/^\/+|\/+$/g, "") || fallback);
 function applyRoots(settings) {
+  EXTRA_FOLDERS = (settings?.extraFolders ?? []).map((f) => normRoot(f, "")).filter(Boolean);
   FAG_ROOT = normRoot(settings?.fagRoot, "Fag");
   OPGAVER_ROOT = normRoot(settings?.opgaverRoot, "Noter/Opgaver");
 }
@@ -2404,7 +2407,7 @@ function copyTarget(rawFilePath) {
 
 function inRawBranch(path) {
   // Kun de to rødder: en tilfældig RAW/-mappe andre steder i en fremmed vault sendes ikke til MinerU (#269).
-  return (underRoot(path, FAG_ROOT) || underRoot(path, OPGAVER_ROOT)) && path.split("/").slice(0, -1).includes("RAW");
+  return (underRoot(path, FAG_ROOT) || underRoot(path, OPGAVER_ROOT) || EXTRA_FOLDERS.some((r) => underRoot(path, r))) && path.split("/").slice(0, -1).includes("RAW");
 }
 
 function errorMarkerPath(rawFilePath) {
@@ -2462,7 +2465,8 @@ function materialeFrontmatter(rawFilePath, planNotes, fetched, extra = "") {
   const noFolderMeta = folder === "RAW" || /^(\d{4}-\d{2}-\d{2}|W\d{1,2}[a-zæøå]+)$/i.test(folder);
   const topic = fields.topic || folderEmne || (noFolderMeta ? "" : folder);
 
-  const lines = [`course: ${t.fagFolder}\n`];
+  const outside = EXTRA_FOLDERS.some((r) => underRoot(rawFilePath, r)) && !underRoot(rawFilePath, FAG_ROOT) && !underRoot(rawFilePath, OPGAVER_ROOT);
+  const lines = [outside ? `folder: "${t.fagFolder}"\n` : `course: ${t.fagFolder}\n`];
   lines.push("type: material\n", `source: "[[${rawFilePath}]]"\n`, `fetched: "${fetched}"\n`);
   if (topic) lines.push(`topic: "${topic}"\n`);
   for (const key of ["start", "stop"]) if (key in fields) lines.push(`${key}: "${fields[key]}"\n`);
@@ -4239,6 +4243,19 @@ class ItsWizSettingTab extends PluginSettingTab {
         })
       );
     }
+
+    containerEl.createEl("h3", { text: "Extra folders" });
+    containerEl.createEl("p", { text: "Folders outside the courses folder whose RAW/ subfolders are converted too, e.g. almind/SFF (RAW sits directly inside). Their notes get `folder:` with the folder name instead of `course:`.", cls: "setting-item-description" });
+    s.extraFolders ??= [];
+    s.extraFolders.forEach((folder, i) => {
+      new Setting(containerEl)
+        .addText((t) => t.setPlaceholder("almind/SFF").setValue(folder).onChange((v) => {
+          clearTimeout(this.extraTimer);
+          this.extraTimer = setTimeout(() => ((s.extraFolders[i] = v.trim()), applyRoots(s), save(), s.enableConversion && scanExisting()), 1500);
+        }))
+        .addExtraButton((b) => b.setIcon("trash").setTooltip("Remove").onClick(() => ((s.extraFolders.splice(i, 1), applyRoots(s), save(), this.display()))));
+    });
+    new Setting(containerEl).addButton((b) => b.setButtonText("+").setTooltip("Add folder").onClick(() => ((s.extraFolders.push(""), this.display()))));
 
     containerEl.createEl("h3", { text: "Course names" });
     containerEl.createEl("p", { text: "The name used for each itslearning course code: the folder, `course:` in the notes, the calendar and Hold Course. Empty = the code itself. Courses appear here after the first run. A change only applies to new notes; existing folders are not renamed.", cls: "setting-item-description" });
