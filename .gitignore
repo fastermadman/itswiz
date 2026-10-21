@@ -9,5 +9,3 @@ __pycache__/
 *.pem
 *.key
 
-# Lokal scratch-graf fra graphify-rs — ikke kilde-sandhed, druknede almind-grafen i støj engang, samme fejl her
-graphify-out/

@@ -67,12 +67,3 @@ Hold Course' `api.update()` (hold-course#84).
 ## Secret-redaction
 
 I et nyt checkout/worktree skal `claude plugin install secret-redactor@viastudywiz-mods --scope project` køres én gang (appens binær, 2.1.286+), og derefter `/reload-plugins` — ellers er mod'en slået til i settings men ikke indlæst.
-
-## graphify-rs
-
-This project has a graphify-rs knowledge graph at /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/.
-
-Rules:
-- On-demand: læs kun GRAPH_REPORT.md (/Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/) når spørgsmålet er arkitektur/tværgående, ikke ved hver søgning
-- If /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify-rs build --path . --output /Users/valdefar/.graphify-rs/viastudywiz-extension-e4f58d98ef1c95ca --no-llm --update` to keep the graph current (fast, AST-only, ~2-5s)

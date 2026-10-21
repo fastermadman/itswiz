@@ -149,5 +149,3 @@ node --test plugin/test/*.test.js
 git config core.hooksPath .githooks   # once: pre-push runs the tests
 ```
 
-`.githooks/` also contains `post-commit`/`post-checkout` that run graphify-rs (skipped if
-`graphify-rs` is not installed), so `core.hooksPath` doesn't switch them off.
