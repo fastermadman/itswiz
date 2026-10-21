@@ -43,6 +43,10 @@ or a run; empty = the code itself). The name is the folder name, `course:` in th
 and, with Hold Course sync on, the calendar title gets a colour circle matching the class colour. A changed
 name only applies to new notes: existing folders are not renamed.
 
+**File types.** The settings list which attachments are downloaded (PDF, Word, PowerPoint, Excel, images, video, audio,
+other), decided by the file extension, plus a largest-file limit (default 50 MB, 0 = none). Video and audio are off by
+default. Switch a type back on and the files are fetched on the next run.
+
 ## Usage (development: symlink from the repo)
 
 1. Symlink into the vault (done for ViaVault), from the repo root:

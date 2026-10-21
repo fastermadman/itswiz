@@ -1270,9 +1270,18 @@ async function downloadFileElements(plans, tabId) {
   // titel selv bærer en kendt endelse (isPdf/isOffice) kan tjekkes her — rawPath() kræver
   // endelsen, og "unknown type"-elementers endelse kendes først efter selve download-URL'en er
   // resolvet nedenfor, så de stoler stadig kun på flaget.
+  const settings = await getSettings();
+  const skipped = (plugin.data.skippedElements ??= {});
+  const skip = async (element, rec, why) => {
+    console.log(`ItsWiz: springer "${element.title}" over (${why})`);
+    skipped[element.id] = rec;
+    await plugin.saveData(plugin.data);
+  };
   const fileElements = [];
   for (const item of matchingElements) {
     const { courseName, weekFolder, element } = item;
+    if (skipStillApplies(skipped[element.id], settings)) continue;
+    delete skipped[element.id];
     if (!downloadedIds.has(element.id)) {
       fileElements.push(item);
       continue;
@@ -1290,6 +1299,14 @@ async function downloadFileElements(plans, tabId) {
     const titleLower = element.title.toLowerCase();
     const isPdf = titleLower.endsWith(".pdf");
     const isOffice = OFFICE_EXTENSIONS.some((ext) => titleLower.endsWith(ext));
+
+    // #301: bærer titlen en kendt endelse, afgøres typen før kæden løses. En ukendt endelse i titlen
+    // ("Fil v1.final") er ikke et signal; så ventes der på den rigtige endelse nedenfor.
+    const titleExt = titleLower.match(/\.[a-z0-9]{2,5}$/)?.[0];
+    if (titleExt && fileCategory(titleExt) !== "other" && !fileTypeAllowed(titleExt, settings)) {
+      await skip(element, { category: fileCategory(titleExt) }, `type ${fileCategory(titleExt)} er fra`);
+      continue;
+    }
 
     try {
       let downloadUrl;
@@ -1315,12 +1332,20 @@ async function downloadFileElements(plans, tabId) {
           recordError(`${element.title}: could not determine file extension`);
           continue;
         }
+        if (!fileTypeAllowed(extension, settings)) {
+          await skip(element, { category: fileCategory(extension) }, `type ${fileCategory(extension)} er fra`);
+          continue;
+        }
         filename = rawPath(courseName, weekFolder, element.title + extension);
       }
-      await writeToVault(filename, downloadUrl);
+      await writeToVault(filename, downloadUrl, maxFileBytes(settings));
       await markDownloaded(element.id);
       runFilesDownloaded++;
     } catch (err) {
+      if (err.code === "TOO_LARGE") {
+        await skip(element, { bytes: err.bytes }, `${(err.bytes / 1048576).toFixed(1)} MB er over grænsen`);
+        continue;
+      }
       console.error(`VIAstudyWiz fil-fejl (${element.title}):`, err);
       if (err.code === "VAULT_PERMISSION") return false;
       recordError(`${element.title}: ${err.message}`);
@@ -1434,7 +1459,7 @@ async function writeVaultFile(path, data) {
 }
 
 // Samme signatur som background.js: url er enten en data:-URL (noter) eller en download-URL.
-async function writeToVault(path, url) {
+async function writeToVault(path, url, maxBytes = Infinity) {
   if (url.startsWith("data:")) {
     const comma = url.indexOf(",");
     const meta = url.slice(5, comma);
@@ -1447,6 +1472,8 @@ async function writeToVault(path, url) {
   }
   const res = await requestUrl({ url, throw: false });
   if (res.status >= 400) throw new Error(`HTTP ${res.status} fetching ${url}`);
+  // ponytail: størrelsen kendes først efter hentning (HEAD er upålideligt på presigned URL'er), så en for stor fil hentes men skrives ikke.
+  if (res.arrayBuffer.byteLength > maxBytes) throw Object.assign(new Error(`${res.arrayBuffer.byteLength} bytes`), { code: "TOO_LARGE", bytes: res.arrayBuffer.byteLength });
   return writeVaultFile(path, res.arrayBuffer);
 }
 
@@ -1512,7 +1539,30 @@ const DEFAULT_SETTINGS = {
   fagRoot: "Fag",
   opgaverRoot: "Noter/Opgaver",
   selectedCourses: [],
+  fileTypes: {},
+  maxFileSizeMB: 50,
 };
+
+// #301: hvilke filtyper der hentes. Typen afgøres af filendelsen (titlen, viewerens FileName, URL'ens
+// content-disposition, WOPI eller opgave-vedhæftningens navn), aldrig af MIME. Ukendt endelse = other.
+const FILE_CATEGORIES = {
+  pdf: [".pdf"],
+  word: [".doc", ".docx", ".odt", ".rtf"],
+  powerpoint: [".ppt", ".pptx", ".odp"],
+  excel: [".xls", ".xlsx", ".ods", ".csv"],
+  image: [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".heic", ".bmp", ".tif", ".tiff"],
+  video: [".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm", ".m4v", ".mpg", ".mpeg"],
+  audio: [".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma"],
+};
+const DEFAULT_FILE_TYPES = { pdf: true, word: true, powerpoint: true, excel: true, image: true, video: false, audio: false, other: true };
+const fileCategory = (ext) => Object.keys(FILE_CATEGORIES).find((c) => FILE_CATEGORIES[c].includes(String(ext).toLowerCase())) ?? "other";
+const fileTypeEnabled = (settings, category) => settings.fileTypes?.[category] ?? DEFAULT_FILE_TYPES[category];
+const fileTypeAllowed = (ext, settings) => fileTypeEnabled(settings, fileCategory(ext));
+// maxFileSizeMB 0 (eller tom) = ingen grænse.
+const maxFileBytes = (settings) => (Number(settings.maxFileSizeMB ?? DEFAULT_SETTINGS.maxFileSizeMB) || Infinity) * 1048576;
+// En husket fravalgt fil (skippedElements, id -> {category|bytes}) gælder kun så længe indstillingen
+// stadig fravælger den: slås typen til eller hæves grænsen, hentes filen næste kørsel.
+const skipStillApplies = (rec, settings) => !!rec && (rec.category ? !fileTypeEnabled(settings, rec.category) : rec.bytes > maxFileBytes(settings));
 
 // #295: kun valgte fag høstes; standard er ingen. courseNames er kodelisten (fyldes fra kortene), så en
 // eksisterende installation uden udvalg får dem den allerede kender valgt én gang, og en ny starter tom.
@@ -1867,8 +1917,16 @@ async function downloadTaskAttachment(task, root = OPGAVER_ROOT) {
       console.warn(`VIAstudyWiz: siden landede for opgaven "${task.TaskTitle}", men fileListControl-data blev ikke fundet i HTML'en`);
       return null;
     }
+    // #301: samme filtyper og størrelsesgrænse som materialerne. Uden vedhæftning skrives noten alligevel.
+    const settings = await getSettings();
+    const ext = file.name.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? "";
+    if (!fileTypeAllowed(ext, settings)) {
+      console.log(`ItsWiz: springer opgavevedhæftningen "${file.name}" over (type ${fileCategory(ext)} er fra)`);
+      return null;
+    }
     const base64 = await frame.executeJavaScript(`fetch(${JSON.stringify(file.url)}, { credentials: "include" })
       .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
+      .then((b) => { if (b.size > ${maxFileBytes(settings)}) throw new Error("over grænsen: " + b.size + " bytes"); return b; })
       .then((b) => new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result.split(",")[1]); fr.readAsDataURL(b); }))`);
 
     const folder = sanitizeFilename(task.TaskTitle ?? "opgave");
@@ -4347,6 +4405,23 @@ class ItsWizSettingTab extends PluginSettingTab {
         );
     }
 
+    containerEl.createEl("h3", { text: "File types" });
+    containerEl.createEl("p", { text: "Which attachments are downloaded, by file extension. Applies to materials and assignment attachments. Files already in the vault are not removed; a file you switch back on is fetched on the next run.", cls: "setting-item-description" });
+    s.fileTypes ??= {};
+    for (const [category, name] of [["pdf", "PDF"], ["word", "Word (doc, docx)"], ["powerpoint", "PowerPoint (ppt, pptx)"], ["excel", "Excel and CSV"], ["image", "Images"], ["video", "Video"], ["audio", "Audio"], ["other", "Other file types"]]) {
+      new Setting(containerEl).setName(name).addToggle((t) =>
+        t.setValue(fileTypeEnabled(s, category)).onChange((v) => ((s.fileTypes[category] = v), save()))
+      );
+    }
+    new Setting(containerEl)
+      .setName("Largest file (MB)")
+      .setDesc("Bigger files are not saved. 0 = no limit. The file is still downloaded before the size is known, but not written to the vault.")
+      .addText((t) =>
+        t.setValue(String(s.maxFileSizeMB ?? DEFAULT_SETTINGS.maxFileSizeMB)).onChange((v) => {
+          if (Number.isFinite(Number(v)) && v.trim() !== "") (s.maxFileSizeMB = Number(v)), save();
+        })
+      );
+
     containerEl.createEl("h3", { text: "Conversion to markdown (MinerU)" });
     new Setting(containerEl)
       .setName("Convert RAW files")
@@ -4456,6 +4531,10 @@ Object.assign(module.exports, {
   sanitizeFilename,
   filterCourses,
   migrateSelectedCourses,
+  fileCategory,
+  fileTypeAllowed,
+  maxFileBytes,
+  skipStillApplies,
   extractExtension,
   enhedFolder,
   planNoteName,
