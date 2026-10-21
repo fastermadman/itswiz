@@ -4347,6 +4347,8 @@ class ItsWizPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       // Efter layout-ready: før det fyrer Obsidian "create" for hver eksisterende fil.
       this.registerEvent(this.app.vault.on("create", (f) => onVaultCreate(f)));
+      // Moving a file into a RAW folder fires "rename", not "create". processDocument skips files that already have a note.
+      this.registerEvent(this.app.vault.on("rename", (f) => onVaultCreate(f)));
       getSettings().then((st) => st.enableConversion && scanExisting());
       for (const ev of ["create", "modify", "delete"]) {
         this.registerEvent(this.app.vault.on(ev, (f) => touchesHoldCourseInput(f.path) && scheduleHoldCourseSync()));
