@@ -11,6 +11,7 @@ const stub = {
   Plugin: class {},
   ItemView: class {},
   PluginSettingTab: class {},
+  Modal: class {},
   Setting: class {},
   Notice: class {},
   TFile: class {},

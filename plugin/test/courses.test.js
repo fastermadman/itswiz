@@ -16,11 +16,11 @@ test('kode -> navn; ukendt kode og tomt navn falder tilbage til koden; mappen er
 });
 
 test('forloebPath virker for alle fag med en mappe, ikke kun de gamle tre', () => {
-  const dirs = new Set(['Fag/Musik', 'Fag/Dansk']);
+  const dirs = new Set(['Courses/Musik', 'Courses/Dansk']);
   const isDir = (p) => dirs.has(p);
   const sem = { name: 'Efterår 2026' };
-  assert.strictEqual(plugin.forloebPath(sem, { vswFag: 'Dansk' }, false, isDir), 'Fag/Dansk/_forløb.md');
-  assert.strictEqual(plugin.forloebPath(sem, { vswFag: 'Musik' }, true, isDir), 'Fag/Musik/_HoldCourse/Efterår 2026.md');
+  assert.strictEqual(plugin.forloebPath(sem, { vswFag: 'Dansk' }, false, isDir), 'Courses/Dansk/_forløb.md');
+  assert.strictEqual(plugin.forloebPath(sem, { vswFag: 'Musik' }, true, isDir), 'Courses/Musik/_HoldCourse/Efterår 2026.md');
   assert.strictEqual(plugin.forloebPath(sem, { vswFag: 'Praktik' }, false, isDir), null);
 });
 

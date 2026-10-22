@@ -5,17 +5,17 @@ const plugin = require('./_bootstrap');
 
 test('inRawBranch følger kun de to rødder (#269)', () => {
   plugin.applyRoots({});
-  assert.ok(plugin.inRawBranch('Fag/Musik/RAW/E/a.pdf'));
+  assert.ok(plugin.inRawBranch('Courses/Musik/RAW/E/a.pdf'));
   assert.ok(plugin.inRawBranch('Noter/Opgaver/Opg/RAW/a.pdf'));
   assert.ok(!plugin.inRawBranch('Andet/RAW/a.pdf'));
-  assert.ok(!plugin.inRawBranch('Fagx/M/RAW/a.pdf'));
+  assert.ok(!plugin.inRawBranch('Coursesx/M/RAW/a.pdf'));
 });
 
 test('rødderne kan ændres og normaliseres', () => {
   plugin.applyRoots({ fagRoot: '§ FAG/', opgaverRoot: '/✎ NOTER/OPGAVER' });
   assert.ok(plugin.inRawBranch('§ FAG/M/RAW/a.pdf'));
   assert.ok(plugin.inRawBranch('✎ NOTER/OPGAVER/O/RAW/a.pdf'));
-  assert.ok(!plugin.inRawBranch('Fag/M/RAW/a.pdf'));
+  assert.ok(!plugin.inRawBranch('Courses/M/RAW/a.pdf'));
   assert.ok(plugin.touchesHoldCourseInput('✎ NOTER/OPGAVER/O/O.md'));
   assert.ok(!plugin.touchesHoldCourseInput('Andet/OPGAVER/O.md'));
   plugin.applyRoots({});
@@ -37,4 +37,35 @@ test('ekstra mappe: RAW-undermappen og bagudvendt skråstreg accepteres', () => 
   assert.ok(plugin.inRawBranch('SFF/RAW/a.pdf'));
   assert.ok(plugin.inRawBranch('SFF2/RAW/a.pdf'));
   plugin.applyRoots({});
+});
+
+test('standardrod er Courses, og gemt fagRoot røres ikke (#304)', () => {
+  plugin.applyRoots({});
+  assert.ok(plugin.inRawBranch('Courses/Musik/RAW/a.pdf'));
+  assert.ok(!plugin.inRawBranch('Fag/Musik/RAW/a.pdf'));
+  plugin.applyRoots({ fagRoot: 'Fag' });
+  assert.ok(plugin.inRawBranch('Fag/Musik/RAW/a.pdf'));
+  plugin.applyRoots({});
+});
+
+test('pinLegacyRoots: gammel installation fastlåses på Fag, ny og gemt valg røres ikke (#304)', () => {
+  const old = {};
+  assert.equal(plugin.pinLegacyRoots(old, {}, true), true);
+  assert.equal(old.fagRoot, 'Fag');
+  const oldData = {};
+  assert.equal(plugin.pinLegacyRoots(oldData, { downloadedElementIds: ['1'] }, false), true);
+  assert.equal(oldData.fagRoot, 'Fag');
+  const fresh = {};
+  assert.equal(plugin.pinLegacyRoots(fresh, { downloadedElementIds: [], planNoteContentHashes: {}, calendarEventMap: {} }, false), false);
+  assert.equal(fresh.fagRoot, undefined);
+  const saved = { fagRoot: 'Kurser' };
+  assert.equal(plugin.pinLegacyRoots(saved, { downloadedElementIds: ['1'] }, true), false);
+  assert.equal(saved.fagRoot, 'Kurser');
+});
+
+test('spørgsmålet om mappenavne stilles kun i en ny, urørt vault (#304)', () => {
+  assert.equal(plugin.needsFolderQuestion({}), true);
+  assert.equal(plugin.needsFolderQuestion({ foldersAsked: true }), false);
+  assert.equal(plugin.needsFolderQuestion({ fagRoot: 'Fag' }), false);
+  assert.equal(plugin.needsFolderQuestion({ opgaverRoot: 'X' }), false);
 });

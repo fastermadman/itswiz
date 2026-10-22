@@ -7,7 +7,7 @@ const { Plugin, ItemView, Modal, PluginSettingTab, Setting, Notice, TFile, TFold
 // Vaultens to rodmapper er indstillinger (#269, plan i #266): fagmappen og den fulde sti til
 // opgaverne. De er modulvariabler, sat af applyRoots() ved start og når indstillingen ændres, så
 // alle sti-byggende funktioner bruger samme navn (issue #63: ellers opstår tomme dublet-mapper).
-let FAG_ROOT = "Fag";
+let FAG_ROOT = "Courses";
 let OPGAVER_ROOT = "Noter/Opgaver";
 // Extra folders outside Fag whose RAW/ branches are converted too; their notes get `folder:`, not `course:`.
 let EXTRA_FOLDERS = [];
@@ -23,7 +23,7 @@ function extraFolderPath(value) {
 const normRoot = (v, fallback) => (String(v ?? "").trim().replace(/^\/+|\/+$/g, "") || fallback);
 function applyRoots(settings) {
   EXTRA_FOLDERS = (settings?.extraFolders ?? []).map(extraFolderPath).filter(Boolean);
-  FAG_ROOT = normRoot(settings?.fagRoot, "Fag");
+  FAG_ROOT = normRoot(settings?.fagRoot, "Courses");
   OPGAVER_ROOT = normRoot(settings?.opgaverRoot, "Noter/Opgaver");
 }
 const underRoot = (path, root) => path.startsWith(`${root}/`);
@@ -1536,7 +1536,7 @@ const DEFAULT_SETTINGS = {
   pdfableText: false,
   enableHoldCourseSync: false,
   enableCalendarSync: false,
-  fagRoot: "Fag",
+  fagRoot: "Courses",
   opgaverRoot: "Noter/Opgaver",
   selectedCourses: [],
   fileTypes: {},
@@ -1563,6 +1563,18 @@ const maxFileBytes = (settings) => (Number(settings.maxFileSizeMB ?? DEFAULT_SET
 // En husket fravalgt fil (skippedElements, id -> {category|bytes}) gælder kun så længe indstillingen
 // stadig fravælger den: slås typen til eller hæves grænsen, hentes filen næste kørsel.
 const skipStillApplies = (rec, settings) => !!rec && (rec.category ? !fileTypeEnabled(settings, rec.category) : rec.bytes > maxFileBytes(settings));
+
+// #304: the default courses folder is "Courses" for new vaults. An installation that already used the
+// old default must keep "Fag": with fagRoot unset, the new default would make changeRoot move the folder.
+// "Already used" = a Fag folder exists or earlier harvests left data. Returns true when settings changed.
+function pinLegacyRoots(settings, data, hasFagFolder) {
+  if (settings.fagRoot != null) return false;
+  const usedBefore = hasFagFolder || (data?.downloadedElementIds?.length ?? 0) > 0
+    || Object.keys(data?.planNoteContentHashes ?? {}).length > 0 || Object.keys(data?.calendarEventMap ?? {}).length > 0;
+  if (!usedBefore) return false;
+  settings.fagRoot = "Fag";
+  return true;
+}
 
 // #295: kun valgte fag høstes; standard er ingen. courseNames er kodelisten (fyldes fra kortene), så en
 // eksisterende installation uden udvalg får dem den allerede kender valgt én gang, og en ny starter tom.
@@ -4325,6 +4337,43 @@ async function changeRoot(key, value) {
   scheduleHoldCourseSync();
 }
 
+// #304: first run in a new vault asks for the two folder names, with the defaults as suggestions, before the
+// first harvest writes anything. Shown once (settings.foldersAsked); an installation that already has its
+// folders (pinned or saved) is never asked. Closing the dialog keeps what the fields say.
+class FolderNamesModal extends Modal {
+  constructor(app, values, done) {
+    super(app);
+    this.values = values;
+    this.done = done;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "ItsWiz: where should notes go?" });
+    contentEl.createEl("p", { text: "These folders are created in your vault. You can change them later in the settings.", cls: "setting-item-description" });
+    for (const [key, name] of [["fagRoot", "Courses folder"], ["opgaverRoot", "Assignments folder"]]) {
+      new Setting(contentEl).setName(name).addText((t) => t.setPlaceholder(DEFAULT_SETTINGS[key]).setValue(this.values[key]).onChange((v) => (this.values[key] = v)));
+    }
+    new Setting(contentEl).addButton((b) => b.setButtonText("OK").setCta().onClick(() => this.close()));
+  }
+  onClose() {
+    this.contentEl.empty();
+    this.done(this.values);
+  }
+}
+const needsFolderQuestion = (settings) => settings.foldersAsked !== true && settings.fagRoot == null && settings.opgaverRoot == null;
+async function askFolderNames() {
+  const s = plugin.data.settings;
+  if (!needsFolderQuestion(s)) return;
+  const values = await new Promise((resolve) =>
+    new FolderNamesModal(plugin.app, { fagRoot: DEFAULT_SETTINGS.fagRoot, opgaverRoot: DEFAULT_SETTINGS.opgaverRoot }, resolve).open()
+  );
+  s.fagRoot = normRoot(values.fagRoot, DEFAULT_SETTINGS.fagRoot);
+  s.opgaverRoot = normRoot(values.opgaverRoot, DEFAULT_SETTINGS.opgaverRoot);
+  s.foldersAsked = true;
+  await plugin.saveData(plugin.data);
+  applyRoots(s);
+}
+
 class ItsWizSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
@@ -4353,7 +4402,7 @@ class ItsWizSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h3", { text: "Folders" });
     for (const [key, name, desc] of [
-      ["fagRoot", "Courses folder", "Holds one folder per course (RAW, MD, NOTER). Default: Fag. If you change it and the old folder exists, it is moved (links follow)."],
+      ["fagRoot", "Courses folder", "Holds one folder per course (RAW, MD, NOTER). Default: Courses (existing installations keep Fag). If you change it and the old folder exists, it is moved (links follow)."],
       ["opgaverRoot", "Assignments folder", "The full path to the assignments, e.g. Noter/Opgaver. If you change it and the old folder exists, it is moved (links follow)."],
     ]) {
       new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
@@ -4473,7 +4522,11 @@ class ItsWizPlugin extends Plugin {
       { downloadedElementIds: [], planNoteContentHashes: {}, syncedFrontmatterVersion: null, settings: {}, calendarEventMap: {}, calendarDeleteQueue: [] },
       await this.loadData()
     );
-    if (migrateSelectedCourses(this.data.settings)) await this.saveData(this.data);
+    const migrated = [
+      migrateSelectedCourses(this.data.settings),
+      pinLegacyRoots(this.data.settings, this.data, await this.app.vault.adapter.exists("Fag")),
+    ];
+    if (migrated.some(Boolean)) await this.saveData(this.data);
     applyRoots(this.data.settings);
     applyCourseNames(this.data.settings);
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
@@ -4488,12 +4541,13 @@ class ItsWizPlugin extends Plugin {
     this.statusEl.addClass("mod-clickable");
     this.statusEl.onClickEvent(() => showRunErrors());
     updateStatusBar();
-    this.app.workspace.onLayoutReady(() => {
+    this.app.workspace.onLayoutReady(async () => {
       // Efter layout-ready: før det fyrer Obsidian "create" for hver eksisterende fil.
       this.registerEvent(this.app.vault.on("create", (f) => onVaultCreate(f)));
       // Moving a file into a RAW folder fires "rename", not "create". processDocument skips files that already have a note.
       this.registerEvent(this.app.vault.on("rename", (f) => onVaultCreate(f)));
       getSettings().then((st) => st.enableConversion && scanExisting());
+      await askFolderNames();
       for (const ev of ["create", "modify", "delete"]) {
         this.registerEvent(this.app.vault.on(ev, (f) => touchesHoldCourseInput(f.path) && scheduleHoldCourseSync()));
       }
@@ -4531,6 +4585,8 @@ Object.assign(module.exports, {
   sanitizeFilename,
   filterCourses,
   migrateSelectedCourses,
+  pinLegacyRoots,
+  needsFolderQuestion,
   fileCategory,
   fileTypeAllowed,
   maxFileBytes,
