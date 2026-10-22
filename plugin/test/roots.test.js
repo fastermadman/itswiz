@@ -5,7 +5,7 @@ const plugin = require('./_bootstrap');
 
 test('inRawBranch følger kun de to rødder (#269)', () => {
   plugin.applyRoots({});
-  assert.ok(plugin.inRawBranch('Courses/Musik/RAW/E/a.pdf'));
+  assert.ok(plugin.inRawBranch('Courses/Dansk/RAW/E/a.pdf'));
   assert.ok(plugin.inRawBranch('Noter/Opgaver/Opg/RAW/a.pdf'));
   assert.ok(!plugin.inRawBranch('Andet/RAW/a.pdf'));
   assert.ok(!plugin.inRawBranch('Coursesx/M/RAW/a.pdf'));
@@ -29,7 +29,7 @@ test('ekstra mapper konverteres og får folder: i stedet for course:', () => {
   assert.match(fm, /^---\nfolder: "SFF"\n/);
   assert.doesNotMatch(fm, /course:/);
   plugin.applyRoots({});
-  assert.match(plugin.materialeFrontmatter('Fag/Musik/RAW/a.pdf', [], 'x'), /course: Musik/);
+  assert.match(plugin.materialeFrontmatter('Fag/Dansk/RAW/a.pdf', [], 'x'), /course: Dansk/);
 });
 
 test('ekstra mappe: RAW-undermappen og bagudvendt skråstreg accepteres', () => {
@@ -52,10 +52,10 @@ test('ekstra mappe "/" = hele vaulten (#308), men kun RAW-mapper', () => {
 
 test('standardrod er Courses, og gemt fagRoot røres ikke (#304)', () => {
   plugin.applyRoots({});
-  assert.ok(plugin.inRawBranch('Courses/Musik/RAW/a.pdf'));
-  assert.ok(!plugin.inRawBranch('Fag/Musik/RAW/a.pdf'));
+  assert.ok(plugin.inRawBranch('Courses/Dansk/RAW/a.pdf'));
+  assert.ok(!plugin.inRawBranch('Fag/Dansk/RAW/a.pdf'));
   plugin.applyRoots({ fagRoot: 'Fag' });
-  assert.ok(plugin.inRawBranch('Fag/Musik/RAW/a.pdf'));
+  assert.ok(plugin.inRawBranch('Fag/Dansk/RAW/a.pdf'));
   plugin.applyRoots({});
 });
 

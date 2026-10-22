@@ -26,7 +26,7 @@ An installation that already has a `Fag` folder keeps `Fag`, nothing is moved):
 
 ```
 Courses/
-  LivsOplysning/
+  <course>/
     RAW/<unit>/…      originals (for e-ink readers)
     MD/<unit>/…       [PLAN] notes and converted materials
     NOTER/<unit>/…    [NOTE] stubs, your own notes
