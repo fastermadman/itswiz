@@ -9,22 +9,22 @@ const plugin = require('./_bootstrap.js');
 
 const OLD_PLAN = [
   '---',
-  'fag: Musik',
+  'fag: Dansk',
   'uge: 2026-W36',
   'ugedag: tirsdag',
   'dato: 2026-09-01',
-  'emne: "Musikforståelse"',
+  'emne: "Danskforståelse"',
   'start: "2026-09-01 12:25"',
   'stop: "2026-09-01 15:45"',
   'lokale: "B204"',
   'hentet: "2026-09-06 08:00"',
   'type: lektionsplan',
-  'plan_id: "36016:1235133"',
+  'plan_id: "12345:1235133"',
   'litteratur: |',
   '  ▥ Frede V Nielsen (2010): Ars og Scientia',
   'litteratur_filer: |',
-  '  📎 [[Fag/Musik/MD/E/Ars.md|Ars.md]]',
-  '  📎 [[Fag/Musik/MD/E/Bog.md|Bog.md]]',
+  '  📎 [[Fag/Dansk/MD/E/Ars.md|Ars.md]]',
+  '  📎 [[Fag/Dansk/MD/E/Bog.md|Bog.md]]',
   'forberedelse: |',
   '  ⚒ Forberedelse',
   '  ⚒ Læs kapitel 2',
@@ -37,7 +37,7 @@ const OLD_PLAN = [
   '# Titel',
   '',
   '## Materialer',
-  '- [[Fag/Musik/MD/E/Ars.md|Ars.md]]',
+  '- [[Fag/Dansk/MD/E/Ars.md|Ars.md]]',
   '',
   '## ⚒ Forberedelse',
   '',
@@ -52,19 +52,19 @@ const OLD_PLAN = [
 
 const NEW_PLAN = [
   '---',
-  'course: Musik',
-  'topic: "Musikforståelse"',
+  'course: Dansk',
+  'topic: "Danskforståelse"',
   'start: "2026-09-01 12:25"',
   'stop: "2026-09-01 15:45"',
   'room: "B204"',
   'fetched: "2026-09-06 08:00"',
   'type: lesson-plan',
-  'plan_id: "36016:1235133"',
+  'plan_id: "12345:1235133"',
   'literature: |',
   '  Frede V Nielsen (2010): Ars og Scientia',
   'literature_files: |',
-  '  [[Fag/Musik/MD/E/Ars.md|Ars.md]]',
-  '  [[Fag/Musik/MD/E/Bog.md|Bog.md]]',
+  '  [[Fag/Dansk/MD/E/Ars.md|Ars.md]]',
+  '  [[Fag/Dansk/MD/E/Bog.md|Bog.md]]',
   'preparation: |',
   '  Forberedelse',
   '  Læs kapitel 2',
@@ -74,7 +74,7 @@ const NEW_PLAN = [
   '# Titel',
   '',
   '## Materials',
-  '- [[Fag/Musik/MD/E/Ars.md|Ars.md]]',
+  '- [[Fag/Dansk/MD/E/Ars.md|Ars.md]]',
   '',
   '## Preparation',
   '',
@@ -88,7 +88,7 @@ const NEW_PLAN = [
 ].join('\n');
 
 test('[PLAN]: nøgler, type, falske værdier, præfikser og overskrifter; egne ord røres ikke', () => {
-  const r = migrateNote(OLD_PLAN, 'Fag/Musik/MD/E/[PLAN] 2026-09-01 - T.md');
+  const r = migrateNote(OLD_PLAN, 'Fag/Dansk/MD/E/[PLAN] 2026-09-01 - T.md');
   assert.equal(r.text, NEW_PLAN);
   assert.ok(r.changed);
   assert.deepEqual(leftovers(OLD_PLAN), []);
@@ -103,31 +103,31 @@ test('idempotent: anden kørsel ændrer intet', () => {
 });
 
 test('[NOTE]-stub: ⚒ væk, kryds bevares, Kilde: -> Source:', () => {
-  const old = '---\ntype: note\nfag: Musik\nuge: 2026-W36\nugedag: tirsdag\ndato: 2026-09-01\nemne: "T"\nstart: "2026-09-01 12:25"\nkilde: "[[PLAN x]]"\ntags: []\n---\n\nKilde: [[PLAN x]]\n\n## ⚒ Forberedelse\n- [x] ⚒ Forberedelse\n- [ ] ⚒ Læs kapitel 2\n\nMine noter\n';
-  const want = '---\ntype: note\ncourse: Musik\ntopic: "T"\nstart: "2026-09-01 12:25"\nsource: "[[PLAN x]]"\ntags: []\n---\n\nSource: [[PLAN x]]\n\n## Preparation\n- [x] Forberedelse\n- [ ] Læs kapitel 2\n\nMine noter\n';
-  assert.equal(migrateNote(old, 'Fag/Musik/NOTER/E/[NOTE] 2026-09-01 - T.md').text, want);
+  const old = '---\ntype: note\nfag: Dansk\nuge: 2026-W36\nugedag: tirsdag\ndato: 2026-09-01\nemne: "T"\nstart: "2026-09-01 12:25"\nkilde: "[[PLAN x]]"\ntags: []\n---\n\nKilde: [[PLAN x]]\n\n## ⚒ Forberedelse\n- [x] ⚒ Forberedelse\n- [ ] ⚒ Læs kapitel 2\n\nMine noter\n';
+  const want = '---\ntype: note\ncourse: Dansk\ntopic: "T"\nstart: "2026-09-01 12:25"\nsource: "[[PLAN x]]"\ntags: []\n---\n\nSource: [[PLAN x]]\n\n## Preparation\n- [x] Forberedelse\n- [ ] Læs kapitel 2\n\nMine noter\n';
+  assert.equal(migrateNote(old, 'Fag/Dansk/NOTER/E/[NOTE] 2026-09-01 - T.md').text, want);
 });
 
 test('type: note uden [NOTE]-præfiks er brugerens egen og røres ikke', () => {
-  const own = '---\ntype: note\nfag: Musik\ndato: 2026-09-01\n---\n\ntekst\n';
-  const r = migrateNote(own, 'Fag/Musik/NOTER/E/Min note.md');
+  const own = '---\ntype: note\nfag: Dansk\ndato: 2026-09-01\n---\n\ntekst\n';
+  const r = migrateNote(own, 'Fag/Dansk/NOTER/E/Min note.md');
   assert.equal(r.text, own);
   assert.equal(r.changed, false);
 });
 
 test('egne typer (viden, litteraturnote) og noter uden frontmatter røres ikke', () => {
   for (const t of ['viden', 'litteraturnote']) {
-    const own = `---\ntype: ${t}\nfag: Musik\nemne: x\ndato: 2026-09-01\n---\n\n## Materialer\n`;
+    const own = `---\ntype: ${t}\nfag: Dansk\nemne: x\ndato: 2026-09-01\n---\n\n## Materialer\n`;
     assert.equal(migrateNote(own, 'Fag/a.md').changed, false);
   }
   assert.equal(migrateNote('bare tekst\n', 'Fag/a.md').changed, false);
-  assert.deepEqual(leftovers('---\ntype: viden\nfag: Musik\nemne: x\n---\n'), ['fag', 'emne']);
+  assert.deepEqual(leftovers('---\ntype: viden\nfag: Dansk\nemne: x\n---\n'), ['fag', 'emne']);
 });
 
 test('materiale: lektion/used_in-stemplet og kilde følger med', () => {
-  const old = '---\nfag: Musik\nuge: 2026-W36\nugedag: tirsdag\ndato: 2026-09-01\ntype: materiale\nkilde: "[[Fag/Musik/RAW/E/Bog.pdf]]"\nhentet: "2026-09-06 08:00"\nemne: "T"\nstart: "2026-09-01 12:25"\nlektion: "36016:1"\nused_in:\n  - "36016:2"\n---\n\nbrødtekst\n';
-  const want = '---\ncourse: Musik\ntype: material\nsource: "[[Fag/Musik/RAW/E/Bog.pdf]]"\nfetched: "2026-09-06 08:00"\ntopic: "T"\nstart: "2026-09-01 12:25"\nlesson: "36016:1"\nused_in:\n  - "36016:2"\n---\n\nbrødtekst\n';
-  assert.equal(migrateNote(old, 'Fag/Musik/MD/E/Bog.md').text, want);
+  const old = '---\nfag: Dansk\nuge: 2026-W36\nugedag: tirsdag\ndato: 2026-09-01\ntype: materiale\nkilde: "[[Fag/Dansk/RAW/E/Bog.pdf]]"\nhentet: "2026-09-06 08:00"\nemne: "T"\nstart: "2026-09-01 12:25"\nlektion: "12345:1"\nused_in:\n  - "12345:2"\n---\n\nbrødtekst\n';
+  const want = '---\ncourse: Dansk\ntype: material\nsource: "[[Fag/Dansk/RAW/E/Bog.pdf]]"\nfetched: "2026-09-06 08:00"\ntopic: "T"\nstart: "2026-09-01 12:25"\nlesson: "12345:1"\nused_in:\n  - "12345:2"\n---\n\nbrødtekst\n';
+  assert.equal(migrateNote(old, 'Fag/Dansk/MD/E/Bog.md').text, want);
 });
 
 test('type: dublet: nøgler og overskrifter migreres, typen beholdes', () => {
@@ -150,8 +150,8 @@ test('keepLocation: room/teacher fra den gamle note bevares, nye værdier vinder
 });
 
 test('opgavenote', () => {
-  const old = '---\ntype: opgave\nfag: Musik\ndeadline: "2026-10-01 12:00"\nkilde: "https://via.itslearning.com/x?ElementID=1"\nhentet: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Åbn opgaven i itslearning](https://x)\n\n## Opgavebeskrivelse\n- [[Noter/Opgaver/O/MD/O.md]]\n';
-  const want = '---\ntype: assignment\ncourse: Musik\ndeadline: "2026-10-01 12:00"\nsource: "https://via.itslearning.com/x?ElementID=1"\nfetched: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Open the assignment in itslearning](https://x)\n\n## Assignment description\n- [[Noter/Opgaver/O/MD/O.md]]\n';
+  const old = '---\ntype: opgave\nfag: Dansk\ndeadline: "2026-10-01 12:00"\nkilde: "https://via.itslearning.com/x?ElementID=1"\nhentet: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Åbn opgaven i itslearning](https://x)\n\n## Opgavebeskrivelse\n- [[Noter/Opgaver/O/MD/O.md]]\n';
+  const want = '---\ntype: assignment\ncourse: Dansk\ndeadline: "2026-10-01 12:00"\nsource: "https://via.itslearning.com/x?ElementID=1"\nfetched: "2026-09-06 08:00"\n---\n\n# O\n\nDeadline: x\n\n[Open the assignment in itslearning](https://x)\n\n## Assignment description\n- [[Noter/Opgaver/O/MD/O.md]]\n';
   assert.equal(migrateNote(old, 'Noter/Opgaver/O/O.md').text, want);
 });
 

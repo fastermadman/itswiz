@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const plugin = require('./_bootstrap.js');
 
 // Fagnavne er en indstilling (#270); testene forudsætter disse to.
-plugin.applyCourseNames({ courseNames: { 'LSmu-2527': 'Musik', 'LSkr-2628': 'Religion' } });
+plugin.applyCourseNames({ courseNames: { 'LSmu-2527': 'Dansk', 'LSkr-2628': 'Religion' } });
 
 const NOW = '2026-10-13T09:00:00.000Z';
 const plan = (over = {}) => ({
@@ -19,18 +19,18 @@ const mapOf = (it, over = {}) => ({ [it.key]: { eventId: 5, start: it.start, end
 
 test('lektion: titel uden præfiks uden Hold Course, vægur-tid uden zone, planer uden tid springes over', () => {
   const [it] = items();
-  assert.strictEqual(it.title, 'Musik: Når børn synger');
+  assert.strictEqual(it.title, 'Dansk: Når børn synger');
   assert.strictEqual(it.start, '2026-10-13T12:25:00');
   assert.strictEqual(it.end, '2026-10-13T15:45:00');
   assert.strictEqual(items({ '1:11': plan({ start: '2026-10-13T00:01:00', stop: '2026-10-13T23:59:00' }) }).length, 0);
 });
 
 test('farvecirkel: klassens colorIndex fra Hold Course, ukendt fag og uden synk = intet præfiks', () => {
-  const colors = plugin.fagColors({ semesters: [{ classes: [{ vswFag: 'Musik', colorIndex: 5 }, { vswFag: 'Religion', colorIndex: 0 }, { name: 'Dansk', colorIndex: 3 }] }] });
-  assert.deepStrictEqual(colors, { Musik: 5, Religion: 0 });
+  const colors = plugin.fagColors({ semesters: [{ classes: [{ vswFag: 'Dansk', colorIndex: 5 }, { vswFag: 'Religion', colorIndex: 0 }, { name: 'Dansk', colorIndex: 3 }] }] });
+  assert.deepStrictEqual(colors, { Dansk: 5, Religion: 0 });
   const calItems = (c) => plugin.calendarItems({ plans: { '1:10': plan() }, orphanPlans: {}, tasks: [{ CourseTitle: 'LSkr-2628', TaskTitle: 'Essay', Deadline: '2026-10-20T12:00:00', TaskUrl: 'https://via.itslearning.com/x?ElementID=7' }] }, NOW, c);
-  assert.deepStrictEqual(calItems(colors).map((i) => i.title), ['🟢 Musik: Når børn synger', '🟡 ⚑ Religion: aflevering: Essay']);
-  assert.deepStrictEqual(calItems({}).map((i) => i.title), ['Musik: Når børn synger', '⚑ Religion: aflevering: Essay']);
+  assert.deepStrictEqual(calItems(colors).map((i) => i.title), ['🟢 Dansk: Når børn synger', '🟡 ⚑ Religion: aflevering: Essay']);
+  assert.deepStrictEqual(calItems({}).map((i) => i.title), ['Dansk: Når børn synger', '⚑ Religion: aflevering: Essay']);
 });
 
 test('vindue: planer før i går og null-planer springes over', () => {

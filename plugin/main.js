@@ -39,7 +39,7 @@ function applyCourseNames(settings) {
 }
 
 // #202: Hold Course-pluginets egen data.json, ikke en vaultsti under FAG_ROOT/OPGAVER_ROOT — læst
-// (aldrig skrevet) for at se om Valdemar har trykket Done DER, uden om et kryds i [NOTE]-stubben.
+// (aldrig skrevet) for at se om brugeren har trykket Done DER, uden om et kryds i [NOTE]-stubben.
 const HOLD_COURSE_DATA_PATH = ".obsidian/plugins/hold-course/data.json";
 
 // Versionsmarkøren tvinger én genskrivning af alle lektionsplan-noter når frontmatter-skemaet
@@ -110,7 +110,7 @@ async function collectRangeInPage(startUnix, endUnix, courses) {
   }
 
   // itslearning kan have en plan der aldrig får et event.PlanIds-link (issue #92, live-verificeret
-  // 2026-08-17: en Musik-lektion med reelt indhold i Planner havde intet linket kalender-event —
+  // 2026-08-17: en lektion med reelt indhold i Planner havde intet linket kalender-event —
   // det ene event i vinduet var et generisk lokale-bookings-event for en helt anden tidsblok).
   // plans/current/v1 lister planer direkte pr. fag, uafhængigt af myEvents — bruges HER kun til at
   // finde planId'er der mangler i planKeys nedenfor. Selve plan-indholdet hentes stadig via
@@ -119,13 +119,13 @@ async function collectRangeInPage(startUnix, endUnix, courses) {
   async function fetchCoursePlansPage(courseId, pageIndex, pageSize) {
     // ItsWiz: all/v1 frem for current/v1. current/v1 starter i dag, så planer i daysBack-delen af
     // vinduet manglede; all/v1 er hele kursets historik, ældste først (målt 2026-10-12: 103 planer
-    // for Musik, 3 sider).
+    // for et fag, 3 sider).
     const url = `${BASE}/restapi/personal/course/${courseId}/plans/all/v1?PageIndex=${pageIndex}&PageSize=${pageSize}&ChildId=0`;
     return fetchJson(url);
   }
 
   // Kappet til 5 sider (250 planer) som sikkerhed mod et kursus med usædvanligt mange planer —
-  // ikke observeret i praksis (20 planer dækkede ~6 uger frem for Musik), men bedre en for lav grænse
+  // ikke observeret i praksis (20 planer dækkede ~6 uger frem for ét fag), men bedre en for lav grænse
   // for daysForward end en uendelig løkke. Stopper tidligere hvis en side kommer tilbage kortere end
   // pageSize (sidste side) eller tom.
   const ORPHAN_PLAN_PAGE_SIZE = 50;
@@ -183,7 +183,7 @@ async function collectRangeInPage(startUnix, endUnix, courses) {
         // Svaret er grupperet i sektioner ("Afleveringsfrist senere", "Der er ikke nogen deadline",
         // ...) — data.EntityArray er sektionerne, ikke opgaverne selv. De faktiske opgaver ligger
         // ét niveau dybere i hver sektions TaskDailyWorkflow.EntityArray. Bekræftet live 2026-08-12
-        // mod kursus 36016 (Musik).
+        // mod et enkelt kursus.
         const list = (data.EntityArray ?? []).flatMap((section) => section.TaskDailyWorkflow?.EntityArray ?? []);
         for (const task of list) {
           if (!task.Deadline || task.Deadline.startsWith("9999")) continue;
@@ -315,7 +315,7 @@ function sanitizeFilename(name) {
 // Udleder filendelsen fra den endelige download-URL — bruges når element.title ikke selv har
 // en endelse. Filecache-URL'er har en opak GUID-sti (intet filnavn i selve path'en); det rigtige
 // filnavn+endelse ligger derimod i response-content-disposition-query-parameteren
-// (fx filename="KRONIK Fortidsøglen klassisk musik.pdf"), så tjek den først og brug path'en
+// (fx filename="Tekst om emnet.pdf"), så tjek den først og brug path'en
 // som fallback for URL'er der rent faktisk har endelsen i stien.
 function extractExtension(url) {
   const parsed = new URL(url);
@@ -332,7 +332,7 @@ function extractExtension(url) {
 // watchForWopiAccessToken()'s URL (${wopiSrc}/contents?access_token=...) rammes når et
 // Office-dokument kun findes i Office-online-viseren, ikke i itslearnings egen filecache — den
 // har ingen filnavn/endelse noget sted, i modsætning til itslearnings egne URL'er. Bekræftet
-// live: elementet "Fælles pptx Klasseledelse i og med musik..." (titlen har intet .pptx-suffiks)
+// live: elementet "Fælles pptx om emnet..." (titlen har intet .pptx-suffiks)
 // løste kun via WOPI-kæden, og extractExtension() fejlede på content-URL'en alene. WOPI-
 // protokollens CheckFileInfo-endpoint (samme URL uden /contents) er en almindelig GET der
 // returnerer JSON med BaseFileName — standard WOPI, ikke itslearning-specifikt.
@@ -412,7 +412,7 @@ async function withRetry(fn) {
   }
 }
 
-// Elementets titel har ingen filendelse (fx "KRONIK Fortidsøglen klassisk musik") — de to
+// Elementets titel har ingen filendelse (fx "Tekst om emnet") — de to
 // download-kæder skelnes reelt af hvilket netværkskald der rammer først, ikke af titlen, så
 // prøv PDF-kæden (den korteste) først og fald tilbage til Office-kæden hvis den ikke rammer.
 // Returnerer altid { url, fileName } — Office-kæden har ingen tilsvarende FileName-kilde (den går
@@ -471,7 +471,7 @@ function courseDisplayName(courseName) {
 }
 
 // Mappenavn = fagnavn, uden symbol (#270): ikoner og farver ejes af Hold Course. Navnet bruges
-// også i `fag:`-frontmatter, som Seminarium.base filtrerer eksakt på (`fag == "Musik"`).
+// også i `fag:`-frontmatter, som en base filtrerer eksakt på (`fag == "<fag>"`).
 function courseFolderName(courseName) {
   return courseDisplayName(courseName);
 }
@@ -485,7 +485,7 @@ function courseFolderName(courseName) {
 // UDFYLDT lektion for en tom (issue #44) — match derfor case-insensitivt.
 // field.text er kun rent tekst når isPlainText er sat — nogle undervisere bruger rig tekst i
 // feltet, hvor text i stedet indeholder rå HTML (bekræftet live, fx "<p><span
-// style=...>...</span></p>" for et Musikforståelse-felt). stripHtml() bruges derfor altid, den
+// style=...>...</span></p>" for et felt). stripHtml() bruges derfor altid, den
 // er et no-op på allerede rent tekst.
 function planLiteratureText(plan) {
   const text = plan.fields?.find((f) => f.headingText?.toLowerCase().includes("litteratur"))?.text;
@@ -565,7 +565,7 @@ function mdPath(courseName, weekFolder, title) {
 }
 
 // § FAG/<fag>/NOTER/<enhed>/ — søskende til RAW/MD, ikke en separat NOTER-rod (issue #65 §11:
-// Valdemar har ADHD og har brug for ét sted pr. fag at kigge, ikke tre rødder at huske).
+// ét sted pr. fag at kigge, ikke tre rødder at huske).
 // Mappen er enhed-grupperet ligesom RAW/MD (issue #209: 21 enkeltfil-mapper for 6 enheder i
 // Religion, samme overhead #150/#155 allerede løste for MD/) — filnavnet bærer stadig dato+enhed
 // (weekFolder), så stubbene sorterer kronologisk i Finder uden at behøve egen mappe hver.
@@ -575,13 +575,13 @@ function noteStubPath(courseName, enhedFolder, weekFolder) {
 
 // Stubbens Forberedelse-sektion (issue #59): kun titlen som afkrydsningslinje, aldrig indholdet.
 // Indholdet står i lektionsplan-notens AUTO-blok, som kilde: wikilinker til, og som genskrives når
-// underviseren retter noget. Stod teksten også her, ville Valdemars egen fil — der per design
+// underviseren retter noget. Stod teksten også her, ville brugerens egen fil — der per design
 // aldrig overskrives — drifte væk fra itslearning uden at nogen kunne se det.
 const FORB_HEADING = "## Preparation";
 
 // Skriver kun hvis filen ikke findes i forvejen — modsat lektionsplan-noten (som genskrives når
-// planen ændrer sig), er denne stub udelukkende til at give Valdemar et sted at skrive: findes
-// den allerede, er den hans, og røres aldrig igen. Et rigtigt exists-tjek (readFromVault),
+// planen ændrer sig), er denne stub udelukkende til at give brugeren et sted at skrive: findes
+// den allerede, er den brugerens, og røres aldrig igen. Et rigtigt exists-tjek (readFromVault),
 // ikke written.has(noteId) (muterbar download-log) — samme klasse beskyttelse som
 // already_converted() i watch_viastudywiz.py, se 12-notestruktur-egne-noter.md §6.
 // Eneste undtagelse er nye afkrydsningslinjer, som APPENDES (se nedenfor) — eksisterende linjer,
@@ -635,7 +635,7 @@ async function writeLectureNoteStub(plan, weekFolder, lektionsplanPath, forbered
   try {
     const existing = await readFromVault(path);
     if (existing != null) {
-      // issue #70: kun når afkrydsningen allerede er sat af Valdemar — nye stubbe kan ikke have
+      // issue #70: kun når afkrydsningen allerede er sat af brugeren — nye stubbe kan ikke have
       // et flueben, så tjekket giver først mening her, ikke ved førstegangs-skrivning nedenfor.
       // #202: to UAFHÆNGIGE kilder til "allerede markeret Done", forenet — et kryds direkte i
       // noten (#70's oprindelige vej, uden om Hold Course) ELLER `assignment.status === 'done'`
@@ -769,7 +769,7 @@ const AUTO_BLOCK_RE = new RegExp(`${AUTO_START}[\\s\\S]*?${AUTO_END}`);
 
 // Lektionsplan-noten har to zoner: frontmatter + AUTO-sektionen er 100% maskin-ejet og
 // genskrives hver gang planens indhold ændrer sig (issue #61) — alt uden for AUTO-markørerne er
-// Valdemars eget og røres aldrig. Findes markørerne ikke i en eksisterende fil (en note skrevet
+// brugerens eget og røres aldrig. Findes markørerne ikke i en eksisterende fil (en note skrevet
 // før denne splejsning fandtes), regnes hele det gamle indhold som hans eget og bevares under
 // den nye AUTO-sektion i stedet for at gætte på hvor den gamle grænse gik.
 function spliceAutoSection(existingBody, autoContent) {
@@ -824,7 +824,7 @@ async function existingMaterialeIds(plan, courseName, weekFolder) {
 }
 
 // Samme mønster som existingMaterialeIds, men for RAW-originalen — bruges kun til at afgøre om et
-// ekstra RAW-link er trygt at vise ved siden af MD-linket (Valdemars ønske: kunne åbne selve
+// ekstra RAW-link er trygt at vise ved siden af MD-linket (ønsket: kunne åbne selve
 // PDF'en/docx'en direkte, ikke kun MinerU-konverteringen). rawPath(title) er kun pålidelig når
 // titlen selv bærer endelsen (isPdf/isOffice) — "unknown type"-elementer får deres endelse tilføjet
 // FØRST ved selve downloadet (se downloadFileElements), så et gæt her ville nogle gange pege på en
@@ -842,7 +842,7 @@ async function existingRawIds(plan, courseName, weekFolder) {
 
 // [[fuld/sti/Titel.md]] viser hele stien som synlig linktekst i Obsidian — ulæseligt i en liste med
 // flere materialer. |alias giver kort, læsbar tekst uden at give slip på det fulde, entydige mål.
-// Aliasset er selve FILNAVNET inkl. ægte endelse (Valdemars ønske, 2026-08-30) — .md/.pdf/.pptx
+// Aliasset er selve FILNAVNET inkl. ægte endelse (2026-08-30) — .md/.pdf/.pptx
 // osv. fortæller i sig selv om det er MinerU-noten eller originalfilen, uden at opdigte en
 // markør. rawLink() bruger samme princip; kun itslearning-linket (writePlanNotes) får en "(web)"-
 // markør i stedet, fordi det IKKE er en fil med en ægte endelse — at kalde den ".html" ville være
@@ -869,7 +869,7 @@ function fileLink(courseName, weekFolder, title, hasMd) {
 // ugens materialer sammen (og giver Obsidian Bases noget at gruppere efter). Frontmatter og
 // AUTO-sektionen genskrives når planens indhold (beskrivelse/materialer/emne) reelt ændrer sig —
 // sporet via et content-hash pr. plan (getPlanNoteRecords), ikke bare "er filen skrevet før", så
-// underviserens rettelser ikke drifter væk fra noten (issue #61). Alt Valdemar selv skriver i
+// underviserens rettelser ikke drifter væk fra noten (issue #61). Alt brugeren selv skriver i
 // filen uden for AUTO-markørerne bevares uanset, se spliceAutoSection.
 // Returnerer false hvis vault-tilladelsen manglede — kalderen bruger det til at springe resten
 // af kørslen over (tilladelsen kommer ikke tilbage af sig selv midt i et løb) og til at tænde
@@ -887,7 +887,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // RAW/MD/NOTER files alle efter enhed (issue #209) — kun selve stub-FILNAVNET bærer "<dato> - <emne>".
     const weekFolder = enhedFolder(plan);
     const courseName = plan.courseName ?? "ukendt-fag";
-    // Mappenavn og fag:-felt er samme fagnavn (#270), så Seminarium.base kan filtrere eksakt på det (issue #63).
+    // Mappenavn og fag:-felt er samme fagnavn (#270), så en base kan filtrere eksakt på det (issue #63).
     const fag = sanitizeFilename(courseFolderName(courseName));
     const fagField = courseDisplayName(courseName);
     const existingIds = await existingMaterialeIds(plan, courseName, weekFolder);
@@ -910,7 +910,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
         if (md.reason === "shared") {
           // Materialet bliver liggende under det gamle emne, hvor søskende-lektionerne stadig
           // bruger det. Ikke en fejl der kan rettes automatisk: en delt fil har ingen enkelt
-          // ejer at flytte med (samme grundproblem som #183), så det er Valdemars beslutning.
+          // ejer at flytte med (samme grundproblem som #183), så det er brugerens beslutning.
           recordError(`Lesson moved (${fagField}, ${prevRecord.weekFolder} → ${weekFolder}): `
             + `materials were NOT moved: the folder is shared with other lessons in the same unit. Move it manually in Obsidian if it should follow.`);
         } else {
@@ -925,7 +925,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       }
     }
     // Links til MD-noten (navigations-graf) er hovedlinket, men et ekstra RAW-link er tilføjet ved
-    // siden af (issue #135-opfølgning, Valdemars ønske) — MinerU-renderingen er ikke altid trofast
+    // siden af (issue #135-opfølgning) — MinerU-renderingen er ikke altid trofast
     // mod originalens layout/billeder, og indtil nu var originalen kun tilgængelig via et ekstra
     // klik ind i MD-notens eget kilde:-felt. Kun vist når RAW-filen rent faktisk findes under det
     // gættede navn (existingRawIds, se dens kommentar for hvorfor "unknown type"-elementer udelades).
@@ -952,23 +952,23 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Samme tekst som AUTO-sektionens brødtekst nedenfor, men som eget felt: Hold Course-synken
     // (issue #113) læser kun frontmatter, ikke AUTO-blokken. "Lesson Description" på lektionen i
     // Hold Course (main.js, hold-course#172) er netop den read-only boks planens beskrivelse hører
-    // hjemme i — IKKE "Key Concepts & Lesson Goal", som er en anden, Valdemar-ejet fritekstboks
+    // hjemme i — IKKE "Key Concepts & Lesson Goal", som er en anden, brugerejet fritekstboks
     // (rettet her, 2026-09-09 — den gamle kommentar navngav den forkerte).
     const beskrivelse = stripHtml(plan.description).trim();
     // #205: samme Forberedelse-instruktion som AUTO-blokkens "## ⚒ Forberedelse" nedenfor
     // (el.body), men som EGET felt af samme grund som beskrivelse ovenfor — Hold Course-synken
-    // læser kun frontmatter. Uden dette felt kunne Valdemar se AT der var en Forberedelse, men
+    // læser kun frontmatter. Uden dette felt kunne brugeren se AT der var en Forberedelse, men
     // ikke HVAD den bad om, uden at åbne [PLAN]-noten. Underoverskrift kun ved flere elementer,
     // samme regel som forberedelseLines nedenfor bruger til AUTO-blokken.
     const forberedelseTekst = forberedelse
       .map((el) => (forberedelse.length > 1 ? `**${el.titel}**\n\n${stripHtml(el.body, true)}` : stripHtml(el.body, true)))
       .join("\n\n").trim();
-    // Ikke alle undervisere udfylder "Tilhørende litteratur"-feltet — LivsOplysning vedhæfter i
+    // Ikke alle undervisere udfylder "Tilhørende litteratur"-feltet — nogle undervisere vedhæfter i
     // stedet læsestoffet som almindelige fil-elementer og skriver selve læse-instruktionen
     // ("Forberedelse: Læs indledningen af...") ind i planens frie beskrivelsestekst i stedet for i
-    // et separat felt (bekræftet live 2026-08-27: 0 af 6 LivsOplysning-planer har et udfyldt
+    // et separat felt (bekræftet live 2026-08-27: 0 af 6 planer har et udfyldt
     // litteratur- eller Arbejdsopgave-felt, men alle har vedhæftede fil-elementer). Uden dette felt
-    // var LivsOplysnings læsestof usynligt for alt der læser frontmatter (Hold Course-synken,
+    // var læsestoffet usynligt for alt der læser frontmatter (Hold Course-synken,
     // issue #113) — det stod kun i AUTO-sektionens "## Materialer", som er fritekst.
     // Samme fil-elementer som "## Materialer" ovenfor, minus dem litteratur_filer allerede har
     // fanget (samme fil skal ikke stå i begge felter) — NON_FILE_TYPE_NAMES udelukker i forvejen
@@ -985,7 +985,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     if (!stubOk) return false;
 
     // Ligger i AUTO-blokken, så underviserens rettelser følger med (issue #61) — i modsætning til
-    // afkrydsningerne i stubben, som er Valdemars og aldrig overskrives. Underoverskrift kun ved
+    // afkrydsningerne i stubben, som er brugerens og aldrig overskrives. Underoverskrift kun ved
     // flere elementer: 13 af 16 hedder bare "Forberedelse", og "## ⚒ Forberedelse / ### Forberedelse"
     // er ren støj. Link tilbage til itslearning, fordi billeder i beskrivelsen ikke overlever
     // stripHtml (deres URL'er er kortlivede tokens fra filerepository).
@@ -1012,7 +1012,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
     // Bagsiden af det: et NYT frontmatter-felt når aldrig ud til noter hvis AUTO-indholdet er
     // uændret — en lektion uden Forberedelse ville aldrig få `forberedelse: false`, og basens
     // `!= false`-filter ville så se et felt der slet ikke findes. Det er derfor FRONTMATTER_VERSION
-    // (modulniveau, se toppen af filen) tvinger én genskrivning ved et bump. (Valdemars eget
+    // (modulniveau, se toppen af filen) tvinger én genskrivning ved et bump. (brugerens eget
     // indhold uden for AUTO-markørerne bevares af spliceAutoSection, så genskrivningen er ufarlig.)
     const currentHash = simpleHash(`v${FRONTMATTER_VERSION}\n${autoContent}`);
     if (prevRecord?.hash === currentHash) {
@@ -1103,7 +1103,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
   return true;
 }
 
-// Stabilt id pr. opgave: ElementID fra TaskUrl (fx main.aspx?CourseID=36016&ElementID=4831051&...).
+// Stabilt id pr. opgave: ElementID fra TaskUrl (fx main.aspx?CourseID=12345&ElementID=4831051&...).
 // Falder tilbage til kursus+titel hvis URL'en mangler/ser anderledes ud, så dedup stadig virker.
 function taskId(task) {
   const elementId = task.TaskUrl ? new URL(task.TaskUrl).searchParams.get("ElementID") : null;
@@ -1139,7 +1139,7 @@ function extractAssignmentFile(html) {
 
 // NOTER/OPGAVER/<opgave>/ er opgavens egen mappe (kladde, uddrag, aflevering) — jf. ValdiVault
 // 12-notestruktur-egne-noter.md §2. Noten her er kun indgangen: deadline + link til itslearning.
-// Skrives én gang og aldrig igen, netop fordi mappen er Valdemars eget skriveområde — en
+// Skrives én gang og aldrig igen, netop fordi mappen er brugerens eget skriveområde — en
 // gensynkronisering må ikke overskrive det han selv har skrevet i noten (samme regel som
 // lektionsplan-noterne, af en stærkere grund).
 async function writeTaskNotes(tasks) {
@@ -1400,7 +1400,7 @@ let isRunning = false;
 // tilbageblikket til BACKFILL_DAYS_BACK i stedet for settings' daysBack — bredt nok til at nå en
 // hel studieuddannelse tilbage, ikke kun indeværende semester. Bagefter falder kørslerne tilbage
 // til det normale, korte vindue. Ingen ekstra manuel indstilling at huske at ændre og ændre
-// tilbage, og ingen risiko for det (#113s driftsfælde) hvis Valdemar glemmer det.
+// tilbage, og ingen risiko for det (#113s driftsfælde) hvis brugeren glemmer det.
 const FRONTMATTER_VERSION_KEY = "syncedFrontmatterVersion";
 const BACKFILL_DAYS_BACK = 400;
 
@@ -3417,7 +3417,7 @@ async function queueConversion(file) {
 }
 
 // Syncthing-konflikter blev løst af watcheren, den eneste proces der så hele vaulten. Scriptet
-// ligger i vaulten selv og findes kun hos Valdemar; mangler det, sker intet.
+// ligger i vaulten selv og findes kun hos den enkelte bruger; mangler det, sker intet.
 function resolveSyncConflict(file) {
   const path = require("path");
   const base = plugin.app.vault.adapter.getBasePath();

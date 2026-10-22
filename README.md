@@ -70,8 +70,7 @@ never touched again. It is the user's writing surface.
 
 `NOTER/` is a sibling of `RAW/`+`MD/`, not a separate top root. See
 `12-notestruktur-egne-noter.md` §11 in ValdiVault for why (short version:
-one place per subject instead of several roots to remember, decided with
-ADHD in mind in issue #65).
+one place per subject instead of several roots to remember; issue #65).
 
 ### ⚒ Forberedelse (preparation): read-something vs. do-something (issue #59)
 
