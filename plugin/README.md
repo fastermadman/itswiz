@@ -21,10 +21,11 @@ which was deleted in #244.
 
 ## Recommended setup
 
-Defaults in a new vault (*Courses folder* = `Fag`, *Assignments folder* = `Noter/Opgaver`):
+Defaults in a new vault (*Courses folder* = `Courses`, *Assignments folder* = `Noter/Opgaver`; the first run asks for both names and suggests these.
+An installation that already has a `Fag` folder keeps `Fag`, nothing is moved):
 
 ```
-Fag/
+Courses/
   LivsOplysning/
     RAW/<unit>/…      originals (for e-ink readers)
     MD/<unit>/…       [PLAN] notes and converted materials
