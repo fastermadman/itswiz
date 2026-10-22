@@ -39,6 +39,17 @@ test('ekstra mappe: RAW-undermappen og bagudvendt skråstreg accepteres', () => 
   plugin.applyRoots({});
 });
 
+test('ekstra mappe "/" = hele vaulten (#308), men kun RAW-mapper', () => {
+  plugin.applyRoots({ extraFolders: ['/'] });
+  assert.ok(plugin.inRawBranch('almind/DK-LOM/RAW/a.pdf'));
+  assert.ok(plugin.inRawBranch('RAW/a.pdf'));
+  assert.ok(!plugin.inRawBranch('almind/DK-LOM/a.pdf'));
+  assert.match(plugin.materialeFrontmatter('almind/DK-LOM/RAW/a.pdf', [], 'x'), /^---\nfolder: "DK-LOM"\n/);
+  plugin.applyRoots({ extraFolders: [' ', ''] });
+  assert.ok(!plugin.inRawBranch('almind/DK-LOM/RAW/a.pdf'));
+  plugin.applyRoots({});
+});
+
 test('standardrod er Courses, og gemt fagRoot røres ikke (#304)', () => {
   plugin.applyRoots({});
   assert.ok(plugin.inRawBranch('Courses/Musik/RAW/a.pdf'));
