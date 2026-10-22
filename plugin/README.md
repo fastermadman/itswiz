@@ -8,7 +8,8 @@ which was deleted in #244.
 
 1. Install **Obsidian42 - BRAT** (Community plugins) and enable it.
 2. BRAT → *Add beta plugin* → `https://github.com/FasterMadman/itswiz`. Enable **ItsWiz** under Community plugins.
-3. Click the graduation-cap icon in the left ribbon and log in to itslearning. Press **Harvest now**.
+3. Click the graduation-cap icon in the left ribbon and log in to itslearning. In the settings under *Courses*, press
+   **Fetch** and tick the courses to harvest (none are ticked at first), then press **Harvest now**.
 4. *MinerU key* (optional, only for converting PDF/Office files to notes): get a free key at mineru.net
    (log in → API → token), paste it into ItsWiz' settings and turn *Convert RAW files* on.
 5. *Calendar*: itslearning only shows events from courses you have **starred**. Star the courses you want
@@ -36,8 +37,9 @@ Noter/
 Changing either folder in the settings moves the old folder if it exists (links follow). Names with symbols
 (`§`, `✎`) work, but are harder to type in a terminal.
 
-**Course names.** Each itslearning course code gets a name in the settings (new codes appear there after the
-first run; empty = the code itself). The name is the folder name, `course:` in the notes, the Hold Course class
+**Courses.** Only ticked courses are harvested; unticking one stops new harvests but leaves what is in the vault.
+Each itslearning course code can also get a name in the settings (all your courses appear there after *Fetch*
+or a run; empty = the code itself). The name is the folder name, `course:` in the notes, the Hold Course class
 and, with Hold Course sync on, the calendar title gets a colour circle matching the class colour. A changed
 name only applies to new notes: existing folders are not renamed.
 
