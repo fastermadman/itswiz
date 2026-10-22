@@ -60,7 +60,7 @@ const FRONTMATTER_VERSION = 12; // 12 = engelske nøgler/overskrifter, uden uge/
 // #295: alle kursuskort (starred + unstarred; starred er ikke et signal). Selvstændig funktion, fordi
 // den serialiseres ind i siden (se inPage).
 async function fetchCourseCardsInPage() {
-  const BASE = "https://via.itslearning.com";
+  const BASE = location.origin; // the tab is on the user's itslearning host (#296)
   const get = async (url) => {
     const res = await fetch(url);
     if (!(res.headers.get("content-type") ?? "").includes("application/json")) {
@@ -77,7 +77,7 @@ async function fetchCourseCardsInPage() {
 
 // courses: de kort brugeren har valgt (filterCourses), ikke alle.
 async function collectRangeInPage(startUnix, endUnix, courses) {
-  const BASE = "https://via.itslearning.com";
+  const BASE = location.origin; // the tab is on the user's itslearning host (#296)
 
   async function fetchJson(url, options) {
     const res = await fetch(url, options);
@@ -939,9 +939,9 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       .filter((el) => el.typeName === "Link" || (!NON_FILE_TYPE_NAMES.has(el.typeName) && hasFile(el)))
       .map((el) => {
         if (el.typeName === "Link") return `- ${el.title} (link — open the lesson plan in itslearning to follow it)`;
-        if (!existingIds.has(el.id)) return `- ${rawLink(courseName, weekFolder, el.title)} · [${el.title} (web)](https://via.itslearning.com${el.url})`;
+        if (!existingIds.has(el.id)) return `- ${rawLink(courseName, weekFolder, el.title)} · [${el.title} (web)](${BASE}${el.url})`;
         const raw = rawIds.has(el.id) ? ` · ${rawLink(courseName, weekFolder, el.title)}` : "";
-        return `- ${mdLink(courseName, weekFolder, el.title)}${raw} · [${el.title} (web)](https://via.itslearning.com${el.url})`;
+        return `- ${mdLink(courseName, weekFolder, el.title)}${raw} · [${el.title} (web)](${BASE}${el.url})`;
       });
     const topic = plan.topic?.name?.trim();
     const literature = planLiteratureText(plan);
@@ -994,7 +994,7 @@ async function writePlanNotes(plans, tabId, syncTaskCompletion) {
       ...(forberedelse.length > 1 ? [`### ${el.titel}`, ""] : []),
       stripHtml(el.body, true) || "_(no content fetched — open in itslearning)_",
       "",
-      `[Open "${el.titel}" in itslearning](https://via.itslearning.com${el.url})`,
+      `[Open "${el.titel}" in itslearning](${BASE}${el.url})`,
     ]);
 
     const autoContent = [
@@ -1415,15 +1415,33 @@ let plugin = null;
 let harvestWin = null; // skjult itslearning-vindue, kun under en kørsel
 let net = null; // netværksopsnapning, kun under en kørsel
 
+// #296: the itslearning address is a setting; VIA stays the default so existing installations are unchanged.
+const DEFAULT_ITSLEARNING_HOST = "via.itslearning.com";
+// Accepts "school.itslearning.com", "https://school.itslearning.com/anything" etc.; empty/invalid -> default.
+function normalizeItslearningHost(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return DEFAULT_ITSLEARNING_HOST;
+  try {
+    const host = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : "https://" + raw).hostname.toLowerCase();
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) ? host : DEFAULT_ITSLEARNING_HOST;
+  } catch {
+    return DEFAULT_ITSLEARNING_HOST;
+  }
+}
+function applyItslearningHost(settings) {
+  BASE = "https://" + normalizeItslearningHost(settings?.itslearningHost);
+  START_URL = `${BASE}/CourseCards`;
+}
+
 const VIEW_TYPE = "itswiz-browser";
 // Egen partition: Electron tillader kun én webRequest-lytter pr. event pr. session, og Obsidians
 // Web viewer holder allerede onBeforeRequest på sin egen partition (adblock).
 const PARTITION = "persist:itswiz";
-const BASE = "https://via.itslearning.com";
+let BASE = "https://" + DEFAULT_ITSLEARNING_HOST;
 // Forsiden (BASE selv) er login-siden, og at indlæse den logger en aktiv session ud: REST-API'et
 // svarer 401 bagefter i alle vinduer på partitionen (målt trin for trin 2026-10-12). Start derfor
 // altid på en side der kræver login; er man logget ud, sender itslearning selv videre til login.
-const START_URL = `${BASE}/CourseCards`;
+let START_URL = `${BASE}/CourseCards`;
 const TEST_ROOT = "ItsWiz-test";
 const WATCH_URLS = ["*://*.itslearning.com/*", "*://*.officeapps.live.com/*"];
 
@@ -1538,6 +1556,7 @@ const DEFAULT_SETTINGS = {
   pdfableText: false,
   enableHoldCourseSync: false,
   enableCalendarSync: false,
+  itslearningHost: DEFAULT_ITSLEARNING_HOST,
   fagRoot: "Courses",
   opgaverRoot: "Noter/Opgaver",
   selectedCourses: [],
@@ -1870,7 +1889,7 @@ async function expandFolderElement(tabId, element, depth = 0) {
     console.warn(`VIAstudyWiz: Mappe "${element.title}" er over 5 niveauer dyb, stopper rekursion`);
     return [];
   }
-  const children = await inPage(fetchFolderElementsInPage, `https://via.itslearning.com${element.url}`);
+  const children = await inPage(fetchFolderElementsInPage, BASE + element.url);
   const expanded = [];
   for (const child of children ?? []) {
     if (child.typeName === "Mappe") {
@@ -3436,7 +3455,7 @@ function scanExisting() {
 
 const HC_KNOWN_DATA_VERSION = 2;
 const HC_COLOR_PALETTE_SIZE = 6;
-const HC_COURSE_URL = "https://via.itslearning.com/Course/Course.aspx?CourseId=";
+const HC_COURSE_PATH = "/Course/Course.aspx?CourseId=";
 const FORLOEB_HEADER = "> Generated file — do not edit; edit in Hold Course.";
 const PREP_DAY_RE = /sat\s+af\s+til[^.\n]{0,60}forbere/i;
 
@@ -3707,7 +3726,7 @@ function ensureAllSemesters(data, plans, tasks, newId) {
   return termYearToSem;
 }
 
-const courseUrl = (courseId) => (courseId ? HC_COURSE_URL + courseId : "");
+const courseUrl = (courseId) => (courseId ? BASE + HC_COURSE_PATH + courseId : "");
 
 function ensureClass(sem, fag, newId, courseId = "") {
   const url = courseUrl(courseId);
@@ -4402,6 +4421,17 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     }
 
+    new Setting(containerEl)
+      .setName("itslearning address")
+      .setDesc("Your school's itslearning address, e.g. school.itslearning.com. Reopen the ItsWiz browser tab after changing it.")
+      .addText((t) =>
+        t.setPlaceholder(DEFAULT_ITSLEARNING_HOST).setValue(s.itslearningHost ?? DEFAULT_ITSLEARNING_HOST).onChange((v) => {
+          s.itslearningHost = normalizeItslearningHost(v);
+          applyItslearningHost(s);
+          save();
+        })
+      );
+
     containerEl.createEl("h3", { text: "Folders" });
     for (const [key, name, desc] of [
       ["fagRoot", "Courses folder", "Holds one folder per course (RAW, MD, NOTER). Default: Courses (existing installations keep Fag). If you change it and the old folder exists, it is moved (links follow)."],
@@ -4529,6 +4559,7 @@ class ItsWizPlugin extends Plugin {
       pinLegacyRoots(this.data.settings, this.data, await this.app.vault.adapter.exists("Fag")),
     ];
     if (migrated.some(Boolean)) await this.saveData(this.data);
+    applyItslearningHost(this.data.settings);
     applyRoots(this.data.settings);
     applyCourseNames(this.data.settings);
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
@@ -4585,6 +4616,7 @@ module.exports = ItsWizPlugin;
 // Til node --test (test/_bootstrap.js): kun ren logik, ingen Obsidian/Electron.
 Object.assign(module.exports, {
   sanitizeFilename,
+  normalizeItslearningHost,
   filterCourses,
   migrateSelectedCourses,
   pinLegacyRoots,

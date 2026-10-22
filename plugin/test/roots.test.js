@@ -80,3 +80,12 @@ test('spørgsmålet om mappenavne stilles kun i en ny, urørt vault (#304)', () 
   assert.equal(plugin.needsFolderQuestion({ fagRoot: 'Fag' }), false);
   assert.equal(plugin.needsFolderQuestion({ opgaverRoot: 'X' }), false);
 });
+
+test('itslearning-adressen normaliseres, tom/ugyldig giver VIA (#296)', () => {
+  const n = plugin.normalizeItslearningHost;
+  assert.equal(n(''), 'via.itslearning.com');
+  assert.equal(n(undefined), 'via.itslearning.com');
+  assert.equal(n('skole.itslearning.com'), 'skole.itslearning.com');
+  assert.equal(n(' https://Skole.itslearning.com/CourseCards '), 'skole.itslearning.com');
+  assert.equal(n('not a host'), 'via.itslearning.com');
+});
