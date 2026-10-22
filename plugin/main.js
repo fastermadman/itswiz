@@ -12,8 +12,10 @@ let OPGAVER_ROOT = "Noter/Opgaver";
 // Extra folders outside Fag whose RAW/ branches are converted too; their notes get `folder:`, not `course:`.
 let EXTRA_FOLDERS = [];
 // Accepts what people paste: an absolute path inside the vault, and/or the RAW folder itself.
+// "/" means the whole vault and normalises to "" (every RAW/ branch anywhere); a blank field is undefined and ignored.
 function extraFolderPath(value) {
   let v = String(value ?? "").trim();
+  if (!v) return undefined;
   try {
     const base = plugin?.app?.vault?.adapter?.getBasePath?.();
     if (base && v.startsWith(base + "/")) v = v.slice(base.length + 1);
@@ -22,11 +24,11 @@ function extraFolderPath(value) {
 }
 const normRoot = (v, fallback) => (String(v ?? "").trim().replace(/^\/+|\/+$/g, "") || fallback);
 function applyRoots(settings) {
-  EXTRA_FOLDERS = (settings?.extraFolders ?? []).map(extraFolderPath).filter(Boolean);
+  EXTRA_FOLDERS = (settings?.extraFolders ?? []).map(extraFolderPath).filter((r) => r !== undefined);
   FAG_ROOT = normRoot(settings?.fagRoot, "Courses");
   OPGAVER_ROOT = normRoot(settings?.opgaverRoot, "Noter/Opgaver");
 }
-const underRoot = (path, root) => path.startsWith(`${root}/`);
+const underRoot = (path, root) => root === "" || path.startsWith(`${root}/`);
 
 // Fagnavne er en indstilling (#270, plan i #266): kursuskode -> navn. Navnet bruges til mappen,
 // `fag:`, kalendertitlen og Hold Course-klassen. Ukendt kode eller tomt navn = den rå kode.
@@ -4415,7 +4417,7 @@ class ItsWizSettingTab extends PluginSettingTab {
     }
 
     containerEl.createEl("h3", { text: "Extra folders" });
-    containerEl.createEl("p", { text: "Folders outside the courses folder whose RAW/ subfolders are converted too, e.g. almind/SFF (RAW sits directly inside). Their notes get `folder:` with the folder name instead of `course:`.", cls: "setting-item-description" });
+    containerEl.createEl("p", { text: "Folders outside the courses folder whose RAW/ subfolders are converted too, e.g. almind/SFF (RAW sits directly inside). Their notes get `folder:` with the folder name instead of `course:`. Enter / to cover every RAW/ folder in the whole vault.", cls: "setting-item-description" });
     s.extraFolders ??= [];
     s.extraFolders.forEach((folder, i) => {
       new Setting(containerEl)
