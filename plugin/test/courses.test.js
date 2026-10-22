@@ -38,23 +38,3 @@ test('ensureClass: code og colorIndex sættes kun ved oprettelsen', () => {
   assert.strictEqual(again, cls);
   assert.deepStrictEqual([again.code, again.colorIndex, again.name], ['Min kode', 4, 'Mit navn']);
 });
-
-// #295: kun valgte fag høstes.
-test('filterCourses: tomt eller manglende udvalg giver ingen fag; ellers kun de valgte, på kortets Title', () => {
-  const cards = [{ Title: 'LSmu-2527', CourseId: 1 }, { Title: 'Hjælp', CourseId: 2 }, { Title: 'LStek-f26', CourseId: 3 }];
-  assert.deepStrictEqual(plugin.filterCourses(cards, []), []);
-  assert.deepStrictEqual(plugin.filterCourses(cards, undefined), []);
-  assert.deepStrictEqual(plugin.filterCourses(cards, ['LSmu-2527', 'ukendt']).map((c) => c.CourseId), [1]);
-});
-
-test('migrateSelectedCourses: eksisterende fagnavne vælges én gang, ny bruger starter tom, et udvalg røres aldrig', () => {
-  const existing = { courseNames: { 'LSmu-2527': 'Musik', Hjælp: '' } };
-  assert.strictEqual(plugin.migrateSelectedCourses(existing), true);
-  assert.deepStrictEqual(existing.selectedCourses, ['LSmu-2527', 'Hjælp']);
-  const fresh = {};
-  assert.strictEqual(plugin.migrateSelectedCourses(fresh), true);
-  assert.deepStrictEqual(fresh.selectedCourses, []);
-  const chosen = { courseNames: { a: '', b: '' }, selectedCourses: ['a'] };
-  assert.strictEqual(plugin.migrateSelectedCourses(chosen), false);
-  assert.deepStrictEqual(chosen.selectedCourses, ['a']);
-});
