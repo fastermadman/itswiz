@@ -54,27 +54,7 @@ const FRONTMATTER_VERSION = 12; // 12 = engelske nøgler/overskrifter, uden uge/
 // Kører selve API-kaldene inde i en åben via.itslearning.com-fane (ikke fra service workeren),
 // fordi myEvents-POST'et afvises med 403 når Origin er chrome-extension://... i stedet for
 // den rigtige side-origin (CSRF/Origin-tjek server-side).
-//
-// #295: alle kursuskort (starred + unstarred; starred er ikke et signal). Selvstændig funktion, fordi
-// den serialiseres ind i siden (se inPage).
-async function fetchCourseCardsInPage() {
-  const BASE = "https://via.itslearning.com";
-  const get = async (url) => {
-    const res = await fetch(url);
-    if (!(res.headers.get("content-type") ?? "").includes("application/json")) {
-      throw new Error(`Non-JSON response from ${url} (status ${res.status})`);
-    }
-    return res.json();
-  };
-  const [starred, unstarred] = await Promise.all([
-    get(`${BASE}/restapi/personal/courses/cards/starred/v1`),
-    get(`${BASE}/restapi/personal/courses/cards/unstarred/v1`),
-  ]);
-  return [...starred.EntityArray, ...unstarred.EntityArray];
-}
-
-// courses: de kort brugeren har valgt (filterCourses), ikke alle.
-async function collectRangeInPage(startUnix, endUnix, courses) {
+async function collectRangeInPage(startUnix, endUnix) {
   const BASE = "https://via.itslearning.com";
 
   async function fetchJson(url, options) {
@@ -84,6 +64,14 @@ async function collectRangeInPage(startUnix, endUnix, courses) {
       throw new Error(`Non-JSON response from ${url} (status ${res.status}, content-type "${contentType}")`);
     }
     return res.json();
+  }
+
+  async function fetchCourses() {
+    const [starred, unstarred] = await Promise.all([
+      fetchJson(`${BASE}/restapi/personal/courses/cards/starred/v1`),
+      fetchJson(`${BASE}/restapi/personal/courses/cards/unstarred/v1`),
+    ]);
+    return [...starred.EntityArray, ...unstarred.EntityArray];
   }
 
   async function fetchMyEvents(courseIds, start, end) {
@@ -223,6 +211,7 @@ async function collectRangeInPage(startUnix, endUnix, courses) {
     return body.innerHTML;
   }
 
+  const courses = await fetchCourses();
   const courseIds = courses.map((c) => c.CourseId);
   const events = await fetchMyEvents(courseIds, startUnix, endUnix);
   const tasks = await fetchTasks(courses);
@@ -1511,18 +1500,7 @@ const DEFAULT_SETTINGS = {
   enableCalendarSync: false,
   fagRoot: "Fag",
   opgaverRoot: "Noter/Opgaver",
-  selectedCourses: [],
 };
-
-// #295: kun valgte fag høstes; standard er ingen. courseNames er kodelisten (fyldes fra kortene), så en
-// eksisterende installation uden udvalg får dem den allerede kender valgt én gang, og en ny starter tom.
-function migrateSelectedCourses(settings) {
-  if (settings.selectedCourses != null) return false;
-  settings.selectedCourses = Object.keys(settings.courseNames ?? {});
-  return true;
-}
-// Kortets Title er kursuskoden (samme nøgle som courseNames).
-const filterCourses = (cards, selected) => cards.filter((c) => (selected ?? []).includes(c.Title));
 
 async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...plugin.data.settings };
@@ -1976,7 +1954,7 @@ async function tick() {
   }
 }
 
-async function inPageLoggedIn(func, ...args) {
+async function collect(startUnix, endUnix) {
   // Udløbet login svarer 401 med JSON ("Accesstoken is empty, invalid or has expired."), målt
   // 2026-10-12, ikke kun en login-side som #134 så i Chrome.
   if (!(await isLoggedIn())) {
@@ -1984,21 +1962,12 @@ async function inPageLoggedIn(func, ...args) {
     await loadStart();
   }
   try {
-    return await inPage(func, ...args);
+    return await inPage(collectRangeInPage, startUnix, endUnix);
   } catch (err) {
     // #134: et ikke-JSON-svar betyder næsten altid udløbet login.
     if (/Non-JSON/.test(err.message)) throw new Error(LOGIN_ERROR);
     throw err;
   }
-}
-
-// #295: henter alle kort, men resten af kørslen kun for de valgte. Uden valgte fag er resultatet tomt
-// (kun allCourses), så kortene stadig kan registreres og vælges.
-async function collect(startUnix, endUnix) {
-  const allCourses = await inPageLoggedIn(fetchCourseCardsInPage);
-  const courses = filterCourses(allCourses, plugin.data.settings.selectedCourses);
-  if (!courses.length) return { allCourses, courses, events: [], plans: {}, orphanPlans: {}, okCourseIds: [], tasks: [] };
-  return { allCourses, ...(await inPageLoggedIn(collectRangeInPage, startUnix, endUnix, courses)) };
 }
 
 // Ukendte kursuskoder fra en høst tilføjes til indstillingen courseNames med tomt navn (= den rå
@@ -2007,7 +1976,6 @@ async function collect(startUnix, endUnix) {
 async function registerCourseCodes(result) {
   const names = (plugin.data.settings.courseNames ??= {});
   const codes = [
-    ...(result.allCourses ?? []).map((c) => c.Title),
     ...Object.values({ ...result.plans, ...result.orphanPlans }).map((p) => p?.courseName),
     ...(result.tasks ?? []).map((t) => t.CourseTitle),
   ].filter((c) => c && !(c in names));
@@ -2032,10 +2000,6 @@ async function collectAndDownload(startUnix, endUnix) {
       `VIAstudyWiz: hentede ${result.courses.length} fag, ${result.events.length} events, ${Object.keys(result.plans).length} planer, ${(result.tasks ?? []).length} opgaver med deadline`
     );
     await registerCourseCodes(result);
-    if (!result.courses.length) {
-      new Notice("ItsWiz: no courses selected. Pick them under Settings → ItsWiz → Courses.");
-      return result;
-    }
     // Download FØR noteskrivning (#129): writePlanNotes linker kun til filer der findes.
     if (settings.enableFileDownloads) {
       // ItsWiz: myEvents returnerer kun begivenheder fra stjernemarkerede rum (målt 2026-10-12:
@@ -2089,10 +2053,9 @@ async function runCollectAndDownload({ auto = false } = {}) {
     if (isBackfill) {
       console.log(`VIAstudyWiz: frontmatter-version ${syncedVersion ?? "(ingen)"} -> ${FRONTMATTER_VERSION}, backfiller ${BACKFILL_DAYS_BACK} dage tilbage`);
     }
-    const result = await collectAndDownload(start, end);
+    await collectAndDownload(start, end);
     plugin.loginNotified = false;
-    // Uden valgte fag er der ikke backfillet noget, så versionen må ikke stemples (#295).
-    if (isBackfill && result.courses.length) {
+    if (isBackfill) {
       plugin.data[FRONTMATTER_VERSION_KEY] = FRONTMATTER_VERSION;
       await plugin.saveData(plugin.data);
     }
@@ -2106,23 +2069,6 @@ async function runCollectAndDownload({ auto = false } = {}) {
     plugin.lastRun = { ...plugin.lastRun, finishedAt: new Date().toISOString(), files: runFilesDownloaded, errors: runErrorMessages, changed: runChangedNotes };
     isRunning = false;
     updateStatusBar();
-  }
-}
-
-// #295: hent kursuslisten uden at høste, så fagene kan vælges før første kørsel.
-async function fetchCourseList() {
-  if (isRunning) return new Notice("ItsWiz: a run is already in progress.");
-  isRunning = true;
-  try {
-    await openHarvestWindow();
-    await registerCourseCodes({ allCourses: await inPageLoggedIn(fetchCourseCardsInPage) });
-    new Notice("ItsWiz: course list updated.");
-  } catch (err) {
-    if (err.message === LOGIN_ERROR) notifyLoginNeeded(false);
-    else new Notice(`ItsWiz: could not fetch courses\n${err.message ?? err}`, 0);
-  } finally {
-    closeHarvestWindow();
-    isRunning = false;
   }
 }
 
@@ -4320,31 +4266,17 @@ class ItsWizSettingTab extends PluginSettingTab {
     });
     new Setting(containerEl).addButton((b) => b.setButtonText("+").setTooltip("Add folder").onClick(() => ((s.extraFolders.push(""), this.display()))));
 
-    containerEl.createEl("h3", { text: "Courses" });
-    containerEl.createEl("p", { text: "Tick the itslearning courses ItsWiz should harvest. None are ticked at first. The name is used for the folder, `course:` in the notes, the calendar and Hold Course; empty = the course code itself. A name change only applies to new notes; existing folders are not renamed. Unticking a course stops new harvests; what is already in the vault stays.", cls: "setting-item-description" });
-    new Setting(containerEl)
-      .setName("Fetch course list")
-      .setDesc("Looks up your courses in itslearning without harvesting anything. Needs a login.")
-      .addButton((b) => b.setButtonText("Fetch").onClick(async () => (await fetchCourseList(), this.display())));
+    containerEl.createEl("h3", { text: "Course names" });
+    containerEl.createEl("p", { text: "The name used for each itslearning course code: the folder, `course:` in the notes, the calendar and Hold Course. Empty = the code itself. Courses appear here after the first run. A change only applies to new notes; existing folders are not renamed.", cls: "setting-item-description" });
     s.courseNames ??= {};
-    s.selectedCourses ??= [];
     for (const code of Object.keys(s.courseNames)) {
-      new Setting(containerEl)
-        .setName(code)
-        .addToggle((t) =>
-          t.setValue(s.selectedCourses.includes(code)).onChange((v) => {
-            s.selectedCourses = s.selectedCourses.filter((c) => c !== code);
-            if (v) s.selectedCourses.push(code);
-            save();
-          })
-        )
-        .addText((t) =>
-          t.setPlaceholder(code).setValue(s.courseNames[code]).onChange((v) => {
-            s.courseNames[code] = v.trim();
-            applyCourseNames(s);
-            save();
-          })
-        );
+      new Setting(containerEl).setName(code).addText((t) =>
+        t.setPlaceholder(code).setValue(s.courseNames[code]).onChange((v) => {
+          s.courseNames[code] = v.trim();
+          applyCourseNames(s);
+          save();
+        })
+      );
     }
 
     containerEl.createEl("h3", { text: "Conversion to markdown (MinerU)" });
@@ -4398,7 +4330,6 @@ class ItsWizPlugin extends Plugin {
       { downloadedElementIds: [], planNoteContentHashes: {}, syncedFrontmatterVersion: null, settings: {}, calendarEventMap: {}, calendarDeleteQueue: [] },
       await this.loadData()
     );
-    if (migrateSelectedCourses(this.data.settings)) await this.saveData(this.data);
     applyRoots(this.data.settings);
     applyCourseNames(this.data.settings);
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
@@ -4454,8 +4385,6 @@ module.exports = ItsWizPlugin;
 // Til node --test (test/_bootstrap.js): kun ren logik, ingen Obsidian/Electron.
 Object.assign(module.exports, {
   sanitizeFilename,
-  filterCourses,
-  migrateSelectedCourses,
   extractExtension,
   enhedFolder,
   planNoteName,
