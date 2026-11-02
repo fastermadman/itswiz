@@ -3253,6 +3253,41 @@ function layoutsOf(parts) {
   return layouts.every(Boolean) ? layouts : null;
 }
 
+// ── #315: what happens to a file ──
+// Actions: auto = as before #315; onebit = scanned pages become 1-bit (PDFable), then MinerU, never the text route;
+// text = the PDF's own text layer (PDFable --text), MinerU if the file does not qualify; mineru = the original goes
+// to MinerU without PDFable; skip = no note. A digital PDF is never turned into 1-bit (it would lose its text layer).
+// ponytail: "ask" is one global switch; per-folder asking would need a fourth lookup level.
+const CONVERSION_ACTIONS = ["auto", "onebit", "text", "mineru", "skip"];
+const CONVERSION_LABELS = {
+  auto: "Automatic",
+  onebit: "Scans as 1-bit (PDFable), then MinerU",
+  text: "Text only (PDFable, digital PDFs)",
+  mineru: "MinerU only (original, no PDFable)",
+  skip: "Skip (no note)",
+};
+const isPdfExt = (ext) => String(ext).toLowerCase() === "pdf";
+const allowedActions = (ext) => (isPdfExt(ext) ? CONVERSION_ACTIONS : ["auto", "skip"]);
+const validAction = (ext, action) => (allowedActions(ext).includes(action) ? action : null);
+// The RAW folder a file sits in: one folder = one RAW + its MD folder (a course, an assignment or an extra folder).
+const rawFolderOf = (path) => mdTargets(path).rawRoot;
+// Folder, then file type, then auto. conv: settings.conversion.
+function folderAction(path, ext, conv) {
+  return validAction(ext, conv?.byFolder?.[rawFolderOf(path)]) ?? validAction(ext, conv?.byType?.[String(ext).toLowerCase()]) ?? "auto";
+}
+// A per-file answer from the dialog wins over everything.
+function resolveAction(path, ext, conv, decided) {
+  return validAction(ext, decided?.[path]) ?? folderAction(path, ext, conv);
+}
+// "ask": the file waits for a choice. A forced conversion never asks, and never skips.
+function gateConversion(path, ext, conv, decided, { force = false } = {}) {
+  const action = resolveAction(path, ext, conv, decided);
+  if (force) return action === "skip" ? "auto" : action;
+  return conv?.ask && decided?.[path] == null && action !== "skip" ? "ask" : action;
+}
+const textActionSet = (conv, decided) =>
+  [...Object.values(conv?.byType ?? {}), ...Object.values(conv?.byFolder ?? {}), ...Object.values(decided ?? {})].includes("text");
+
 // ── Vault-siden ──
 
 async function planNotesIn(mdDir) {
@@ -3317,6 +3352,12 @@ async function processDocument(file, { force = false } = {}) {
   const t = mdTargets(file.path);
   const marker = errorMarkerPath(file.path);
   if (!force && ((await existsInVault(t.md)) || (await plugin.app.vault.adapter.exists(normalizePath(marker))))) return;
+  // #315: the action for this file. Skip needs no bytes, so a skipped folder costs nothing at startup.
+  const conv = (await getSettings()).conversion;
+  const decided = plugin.data.convDecided;
+  const action = gateConversion(file.path, file.extension, conv, decided, { force });
+  if (action === "skip") return;
+  if (!conv?.ask && plugin.data.convPending?.[file.path]) await setPending(file.path, false);
   const bytes = await plugin.app.vault.readBinary(file);
   const digest = sha256(bytes);
 
@@ -3330,6 +3371,7 @@ async function processDocument(file, { force = false } = {}) {
       return;
     }
   }
+  if (action === "ask") return setPending(file.path, true);
 
   try {
     // #275: _attachments/ holds one copy per converted file, never overwritten (annotations made on it
@@ -3339,7 +3381,8 @@ async function processDocument(file, { force = false } = {}) {
     // #283: a digital PDF the rule trusts is written from its text layer, without MinerU. A forced conversion of such a
     // note goes to MinerU, so the choice can be undone per file.
     const wasText = force && readFrontmatterField((await readFromVault(t.md)) ?? "", "converter") === "pdfable-text";
-    const fromText = !wasText && (await getSettings()).pdfableText ? await pdfableText(file, bytes) : null;
+    const wantText = action === "text" || (action === "auto" && (await getSettings()).pdfableText);
+    const fromText = !wasText && wantText ? await pdfableText(file, bytes) : null;
     if (fromText != null) {
       await writeNote(file, { body: fromText.body, sektion: null, images: fromText.images, converter: "pdfable-text" });
       if (needCopy) await writeVaultFile(copyPath, bytes);
@@ -3363,10 +3406,10 @@ async function processDocument(file, { force = false } = {}) {
     if (!mineruToken()) return;
     let zips = cachedZips(digest);
     // #281: a digital PDF keeps its own text: no 1-bit pass, the original goes to MinerU and is copied as it is.
-    const digital = (!zips || needCopy) && await pdfableDigital(file, bytes);
+    const digital = action !== "mineru" && (!zips || needCopy) && await pdfableDigital(file, bytes);
     if (digital) console.log(`ItsWiz: digital PDF, left untouched: ${file.name}`);
     // null: no PDFable, digital, nothing to do on a cache hit, or PDFable failed or wrote no file (not smaller).
-    const oneBit = digital || (zips && !needCopy) ? null : await pdfable(file, bytes);
+    const oneBit = digital || action === "mineru" || (zips && !needCopy) ? null : await pdfable(file, bytes);
     if (zips) console.log(`ItsWiz: cache-hit, springer MinerU over: ${file.name}`);
     else {
       console.log(`ItsWiz: uploader til MinerU: ${file.name}${oneBit ? ` (1-bit, ${oneBit.byteLength} B; original ${bytes.byteLength} B)` : ` (${bytes.byteLength} B)`}`);
@@ -3398,6 +3441,109 @@ async function processDocument(file, { force = false } = {}) {
   }
 }
 
+// ── #315: files waiting for a choice ──
+// plugin.data.convPending: path -> time it started waiting. plugin.data.convDecided: path -> the answer from the dialog.
+async function setPending(path, waiting) {
+  plugin.data.convPending ??= {};
+  if (waiting === !!plugin.data.convPending[path]) return;
+  if (waiting) plugin.data.convPending[path] = formatNow();
+  else delete plugin.data.convPending[path];
+  await plugin.saveData(plugin.data);
+  if (waiting) scheduleWaitingNotice();
+}
+
+let waitingNoticeTimer = null;
+function scheduleWaitingNotice() {
+  clearTimeout(waitingNoticeTimer);
+  // One notice after the burst, not one per file.
+  waitingNoticeTimer = setTimeout(() => {
+    const n = Object.keys(plugin.data.convPending ?? {}).length;
+    if (!n) return;
+    const notice = new Notice(`ItsWiz: ${n} file(s) wait for a choice. Click here, or run "Files waiting for a choice".`, 20000);
+    notice.noticeEl?.addEventListener("click", () => openWaitingFiles());
+  }, 5000);
+}
+
+async function waitingFiles() {
+  const { vault } = plugin.app;
+  const files = [];
+  for (const path of Object.keys(plugin.data.convPending ?? {})) {
+    const f = vault.getAbstractFileByPath(path);
+    // Gone, or converted in the meantime (forced): no longer waiting.
+    if (!(f instanceof TFile) || (await existsInVault(mdTargets(path).md))) await setPending(path, false);
+    else files.push(f);
+  }
+  return files;
+}
+
+class WaitingFilesModal extends Modal {
+  constructor(app, files) {
+    super(app);
+    this.files = files;
+    this.choices = new Map();
+    this.dropdowns = [];
+    this.remember = false;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    const conv = (plugin.data.settings.conversion ??= {});
+    contentEl.createEl("h3", { text: "ItsWiz: files waiting for a choice" });
+    const groups = new Map();
+    for (const f of this.files) groups.set(rawFolderOf(f.path), [...(groups.get(rawFolderOf(f.path)) ?? []), f]);
+    new Setting(contentEl)
+      .setName("Same choice for every folder")
+      .addDropdown((d) => {
+        d.addOption("", "—");
+        for (const a of CONVERSION_ACTIONS) d.addOption(a, CONVERSION_LABELS[a]);
+        d.onChange((v) => v && this.dropdowns.forEach(([folder, dd]) => (this.choices.set(folder, v), dd.setValue(v))));
+      });
+    for (const [folder, files] of groups) {
+      const first = files.find((f) => isPdfExt(f.extension)) ?? files[0];
+      this.choices.set(folder, folderAction(first.path, first.extension, conv));
+      new Setting(contentEl)
+        .setName(folder)
+        .setDesc(files.map((f) => f.name).join(", "))
+        .addDropdown((d) => {
+          for (const a of CONVERSION_ACTIONS) d.addOption(a, CONVERSION_LABELS[a]);
+          d.setValue(this.choices.get(folder)).onChange((v) => this.choices.set(folder, v));
+          this.dropdowns.push([folder, d]);
+        });
+    }
+    new Setting(contentEl)
+      .setName("Remember as each folder's default")
+      .setDesc("Office files only take Automatic or Skip; other choices become Automatic for them.")
+      .addToggle((t) => t.onChange((v) => (this.remember = v)));
+    new Setting(contentEl)
+      .addButton((b) => b.setButtonText("Run").setCta().onClick(() => this.run()))
+      .addButton((b) => b.setButtonText("Close").onClick(() => this.close()));
+  }
+  async run() {
+    const conv = (plugin.data.settings.conversion ??= {});
+    plugin.data.convDecided ??= {};
+    const go = [];
+    for (const f of this.files) {
+      const folder = rawFolderOf(f.path);
+      const choice = this.choices.get(folder);
+      plugin.data.convDecided[f.path] = validAction(f.extension, choice) ?? "auto";
+      delete plugin.data.convPending[f.path];
+      go.push(f);
+      if (this.remember) (conv.byFolder ??= {})[folder] = choice;
+    }
+    await plugin.saveData(plugin.data);
+    this.close();
+    for (const f of go) queueConversion(f);
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+async function openWaitingFiles() {
+  const files = await waitingFiles();
+  if (!files.length) return new Notice("ItsWiz: no files are waiting for a choice.");
+  new WaitingFilesModal(plugin.app, files).open();
+}
+
 // Én fil ad gangen, som watcheren: MinerU-kø og upload-båndbredde deles alligevel.
 let conversionQueue = Promise.resolve();
 const queuedConversions = new Set();
@@ -3407,7 +3553,8 @@ function isConvertible(file) {
 }
 
 async function queueConversion(file) {
-  const { enableConversion, pdfableText: useText } = await getSettings();
+  const { enableConversion, pdfableText, conversion } = await getSettings();
+  const useText = pdfableText || textActionSet(conversion, plugin.data.convDecided);
   if (!enableConversion || !(mineruToken() || useText || /^(docx|pptx)$/i.test(file.extension)) || !isConvertible(file) || queuedConversions.has(file.path)) return;
   queuedConversions.add(file.path);
   conversionQueue = conversionQueue
@@ -4512,6 +4659,30 @@ class ItsWizSettingTab extends PluginSettingTab {
       .setName("Use PDF text for digital PDFs")
       .setDesc("Needs the PDFable program. A PDF that is digital on every page, with no picture-heavy pages, gets its note straight from the PDF's text layer: instant, no upload, no MinerU key needed. Everything else still goes to MinerU. Experimental, so off by default; \"force\" on such a note converts it with MinerU instead.")
       .addToggle((t) => t.setValue(s.pdfableText ?? false).onChange((v) => ((s.pdfableText = v), save(), v && scanExisting())));
+
+    // #315: what happens to each file, by type and by RAW folder. Order of precedence: answer per file, folder, file type, automatic.
+    const conv = (s.conversion ??= {});
+    conv.byType ??= {};
+    conv.byFolder ??= {};
+    new Setting(containerEl)
+      .setName("Ask before converting new files")
+      .setDesc("New files wait in a list instead of being converted. You get a notice, and the command \"Files waiting for a choice\" opens a dialog with one choice per folder. Off: every file simply gets its folder's or type's action.")
+      .addToggle((t) => t.setValue(conv.ask ?? false).onChange((v) => ((conv.ask = v), save(), !v && scanExisting())))
+      .addButton((b) => b.setButtonText("Waiting files").onClick(() => openWaitingFiles()));
+    const actionSetting = (name, ext, current, set, withDefault) =>
+      new Setting(containerEl).setName(name).addDropdown((d) => {
+        if (withDefault) d.addOption("", "Use the file type's action");
+        for (const a of allowedActions(ext)) d.addOption(a, CONVERSION_LABELS[a]);
+        d.setValue(current ?? (withDefault ? "" : "auto")).onChange((v) => (set(v), save()));
+      });
+    for (const [ext, name] of [["pdf", "PDF"], ["docx", "Word (docx)"], ["pptx", "PowerPoint (pptx)"]]) {
+      actionSetting(`Action for ${name}`, ext, conv.byType[ext], (v) => (conv.byType[ext] = v));
+    }
+    const rawFolders = new Set(Object.keys(conv.byFolder));
+    for (const f of this.app.vault.getAllLoadedFiles()) if (f instanceof TFolder && f.name === "RAW" && inRawBranch(`${f.path}/x`)) rawFolders.add(f.path);
+    for (const folder of [...rawFolders].sort()) {
+      actionSetting(folder, "pdf", conv.byFolder[folder], (v) => (v ? (conv.byFolder[folder] = v) : delete conv.byFolder[folder]), true);
+    }
     containerEl.createEl("h3", { text: "Calendar" });
     new Setting(containerEl)
       .setName("Personal calendar events in itslearning")
@@ -4565,6 +4736,7 @@ class ItsWizPlugin extends Plugin {
     this.registerView(VIEW_TYPE, (leaf) => new ItsWizView(leaf, this));
     this.addRibbonIcon("wand-sparkles", "ItsWiz", () => this.openView());
     this.addCommand({ id: "open", name: "Open itslearning", callback: () => this.openView() });
+    this.addCommand({ id: "waiting-files", name: "Files waiting for a choice", callback: () => openWaitingFiles() });
     this.addCommand({ id: "harvest", name: "Harvest now", callback: () => runCollectAndDownload() });
     this.addCommand({ id: "path-test", name: "Path test (one file per download route into ItsWiz-test/)", callback: () => runPathTest() });
     this.addCommand({ id: "remove-calendar", name: "Remove all ItsWiz calendar events", callback: () => removeAllCalendarEvents() });
@@ -4636,6 +4808,11 @@ Object.assign(module.exports, {
   mdTargets,
   copyTarget,
   pdfableArgs,
+  allowedActions,
+  folderAction,
+  resolveAction,
+  gateConversion,
+  textActionSet,
   hasMineruWarning,
   isDigitalPdf,
   parseTextReport,

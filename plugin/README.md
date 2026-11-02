@@ -12,6 +12,9 @@ which was deleted in #244.
    **Fetch** and tick the courses to harvest (none are ticked at first), then press **Harvest now**.
 4. *MinerU key* (optional, only for converting PDF/Office files to notes): get a free key at mineru.net
    (log in → API → token), paste it into ItsWiz' settings and turn *Convert RAW files* on.
+   Under *Conversion* you can pick what happens to PDF/Word/PowerPoint files, per file type and per `RAW/` folder
+   (automatic, scans as 1-bit then MinerU, text only, MinerU only, or skip). *Ask before converting new files* makes
+   new files wait: a notice appears, and the command *Files waiting for a choice* opens a dialog with one choice per folder.
 5. *Calendar*: itslearning only shows events from courses you have **starred**. Star the courses you want
    in itslearning, then turn on *Personal calendar events in itslearning*.
 6. What ItsWiz writes to the vault: everything under the courses folder (lesson plans in `MD/`, downloaded files in
