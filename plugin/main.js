@@ -1553,6 +1553,7 @@ const DEFAULT_SETTINGS = {
   enableTaskCompletionSync: false,
   alarmIntervalHours: 24,
   enableConversion: false,
+  notifyConversion: true,
   pdfableText: false,
   enableHoldCourseSync: false,
   enableCalendarSync: false,
@@ -3388,6 +3389,7 @@ async function processDocument(file, { force = false } = {}) {
       if (needCopy) await writeVaultFile(copyPath, bytes);
       if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
       console.log(`ItsWiz: written from the PDF's text layer, no MinerU: ${file.name}`);
+      convStats.done++;
       return;
     }
     // #286: docx and pptx are read straight from the file. A file that cannot be read falls through to MinerU.
@@ -3400,6 +3402,7 @@ async function processDocument(file, { force = false } = {}) {
         if (needCopy) await writeVaultFile(copyPath, bytes);
         if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
         console.log(`ItsWiz: written from the ${ext.slice(1)} text, no MinerU: ${file.name}`);
+        convStats.done++;
         return;
       }
     }
@@ -3431,7 +3434,9 @@ async function processDocument(file, { force = false } = {}) {
     // En gammel fejlmarkør (fx fra før opdelingen, #211) må ikke stå tilbage, når MD'en findes.
     if (await plugin.app.vault.adapter.exists(normalizePath(marker))) await plugin.app.vault.adapter.remove(normalizePath(marker));
     console.log(`ItsWiz: færdig: ${file.name}`);
+    convStats.done++;
   } catch (err) {
+    convStats.failed++;
     if (!(err instanceof MineruError)) {
       console.warn(`ItsWiz: forbigående fejl ved ${file.name} (prøves igen ved næste start): ${err.message}`);
       return;
@@ -3439,6 +3444,21 @@ async function processDocument(file, { force = false } = {}) {
     console.error(`ItsWiz: fejl ved ${file.name}: ${err.message}`);
     await plugin.app.vault.adapter.write(normalizePath(marker), err.message);
   }
+}
+
+// ── #318: one notice when a batch of conversions is done ──
+// done: notes written (MinerU, text layer or Office); failed: MinerU errors and transient errors. Skipped, waiting and
+// duplicate files count for neither.
+const convStats = { done: 0, failed: 0 };
+function conversionSummary(done, failed) {
+  if (!done && !failed) return null;
+  return `ItsWiz: ${done} file(s) converted${failed ? `, ${failed} failed (see the status bar and console)` : ""}.`;
+}
+async function reportConversions() {
+  const { done, failed } = convStats;
+  convStats.done = convStats.failed = 0;
+  const text = conversionSummary(done, failed);
+  if (text && (await getSettings()).notifyConversion !== false) new Notice(text, failed ? 0 : 15000);
 }
 
 // ── #315: files waiting for a choice ──
@@ -3560,7 +3580,10 @@ async function queueConversion(file) {
   conversionQueue = conversionQueue
     .then(() => processDocument(file))
     .catch((err) => console.error(`ItsWiz: konvertering af ${file.path} fejlede:`, err))
-    .finally(() => queuedConversions.delete(file.path));
+    .finally(() => {
+      queuedConversions.delete(file.path);
+      if (!queuedConversions.size) reportConversions();
+    });
 }
 
 // Syncthing-konflikter blev løst af watcheren, den eneste proces der så hele vaulten. Scriptet
@@ -4660,6 +4683,11 @@ class ItsWizSettingTab extends PluginSettingTab {
       .setDesc("Needs the PDFable program. A PDF that is digital on every page, with no picture-heavy pages, gets its note straight from the PDF's text layer: instant, no upload, no MinerU key needed. Everything else still goes to MinerU. Experimental, so off by default; \"force\" on such a note converts it with MinerU instead.")
       .addToggle((t) => t.setValue(s.pdfableText ?? false).onChange((v) => ((s.pdfableText = v), save(), v && scanExisting())));
 
+    new Setting(containerEl)
+      .setName("Notify when conversion is done")
+      .setDesc("One notice after a batch of conversions, with the number converted and failed. Nothing is shown if nothing was converted.")
+      .addToggle((t) => t.setValue(s.notifyConversion ?? true).onChange((v) => ((s.notifyConversion = v), save())));
+
     // #315: what happens to each file, by type and by RAW folder. Order of precedence: answer per file, folder, file type, automatic.
     const conv = (s.conversion ??= {});
     conv.byType ??= {};
@@ -4808,6 +4836,7 @@ Object.assign(module.exports, {
   mdTargets,
   copyTarget,
   pdfableArgs,
+  conversionSummary,
   allowedActions,
   folderAction,
   resolveAction,
