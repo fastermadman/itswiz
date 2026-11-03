@@ -4571,27 +4571,27 @@ class ItsWizSettingTab extends PluginSettingTab {
     const s = this.plugin.data.settings;
     const save = () => this.plugin.saveData(this.plugin.data);
     containerEl.empty();
-    for (const [key, name, desc] of [
-      ["daysBack", "Days back", "How far back each run looks."],
-      ["daysForward", "Days ahead", "How far ahead each run looks."],
-      ["alarmIntervalHours", "Interval (hours)", "Runs automatically at Obsidian start and then at this interval."],
-    ]) {
-      new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
-        t.setValue(String(s[key] ?? DEFAULT_SETTINGS[key])).onChange((v) => {
-          if (Number.isFinite(Number(v)) && v.trim() !== "") (s[key] = Number(v)), save();
-        })
-      );
-    }
-    for (const [key, name, desc] of [
-      ["enableFileDownloads", "Download materials and write notes", "Off: a run only fetches data from itslearning."],
-      ["enableTaskCompletionSync", "Mark preparation tasks as completed in itslearning", "Ticked in the NOTER stub note or Done in Hold Course (#70, #202)."],
-    ]) {
-      new Setting(containerEl).setName(name).setDesc(desc).addToggle((t) =>
-        t.setValue(s[key] ?? DEFAULT_SETTINGS[key]).onChange((v) => ((s[key] = v), save()))
-      );
-    }
-
-    new Setting(containerEl)
+    // #317: one foldable <details> per group. Open/closed lives on the tab instance, so a display() after Fetch,
+    // add/remove folder etc. keeps the section the user is in open. A new user lands on the two sections needed first.
+    this.openSections ??= new Set(["itslearning", "courses"]);
+    let el = containerEl;
+    const section = (key, title, parent = containerEl) => {
+      const details = parent.createEl("details", { cls: "itswiz-section" });
+      details.dataset.key = key;
+      details.open = this.openSections.has(key);
+      // Inline instead of a styles.css (BRAT/installs carry only main.js and manifest.json); no colours, so every theme applies.
+      details.createEl("summary", { text: title, cls: "itswiz-section-title" }).style.cssText = "cursor:pointer;font-weight:600;padding:8px 0;";
+      // While a search is active, sections are opened by the search, not by the user: do not remember that.
+      details.addEventListener("toggle", () => !this.query && (details.open ? this.openSections.add(key) : this.openSections.delete(key)));
+      el = details.createDiv({ cls: "itswiz-section-body" });
+      el.style.cssText = "padding-left:12px;";
+      return el;
+    };
+    const search = containerEl.createEl("input", { type: "search", placeholder: "Search settings" });
+    search.style.cssText = "width:100%;margin-bottom:8px;";
+    search.value = this.query ?? "";
+    section("itslearning", "itslearning and harvesting");
+    new Setting(el)
       .setName("itslearning address")
       .setDesc("Your school's itslearning address, e.g. school.itslearning.com. Reopen the ItsWiz browser tab after changing it.")
       .addText((t) =>
@@ -4601,13 +4601,34 @@ class ItsWizSettingTab extends PluginSettingTab {
           save();
         })
       );
+    new Setting(el)
+      .setName("Download materials and write notes")
+      .setDesc("Off: a run only fetches data from itslearning.")
+      .addToggle((t) => t.setValue(s.enableFileDownloads ?? DEFAULT_SETTINGS.enableFileDownloads).onChange((v) => ((s.enableFileDownloads = v), save())));
+    // Set and forget: the harvest window and the interval.
+    section("itslearning-more", "More harvest options", el);
+    for (const [key, name, desc] of [
+      ["daysBack", "Days back", "How far back each run looks."],
+      ["daysForward", "Days ahead", "How far ahead each run looks."],
+      ["alarmIntervalHours", "Interval (hours)", "Runs automatically at Obsidian start and then at this interval."],
+    ]) {
+      new Setting(el).setName(name).setDesc(desc).addText((t) =>
+        t.setValue(String(s[key] ?? DEFAULT_SETTINGS[key])).onChange((v) => {
+          if (Number.isFinite(Number(v)) && v.trim() !== "") (s[key] = Number(v)), save();
+        })
+      );
+    }
+    new Setting(el)
+      .setName("Mark preparation tasks as completed in itslearning")
+      .setDesc("Ticked in the NOTER stub note or Done in Hold Course (#70, #202).")
+      .addToggle((t) => t.setValue(s.enableTaskCompletionSync ?? DEFAULT_SETTINGS.enableTaskCompletionSync).onChange((v) => ((s.enableTaskCompletionSync = v), save())));
 
-    containerEl.createEl("h3", { text: "Folders" });
+    section("folders", "Folders");
     for (const [key, name, desc] of [
       ["fagRoot", "Courses folder", "Holds one folder per course (RAW, MD, NOTER). Default: Courses (existing installations keep Fag). If you change it and the old folder exists, it is moved (links follow)."],
       ["opgaverRoot", "Assignments folder", "The full path to the assignments, e.g. Noter/Opgaver. If you change it and the old folder exists, it is moved (links follow)."],
     ]) {
-      new Setting(containerEl).setName(name).setDesc(desc).addText((t) =>
+      new Setting(el).setName(name).setDesc(desc).addText((t) =>
         t.setPlaceholder(DEFAULT_SETTINGS[key]).setValue(s[key] ?? DEFAULT_SETTINGS[key]).onChange((v) => {
           clearTimeout(this.rootTimer);
           // Vent til der er holdt op med at skrive, ellers flyttes mappen for hvert tastetryk.
@@ -4616,29 +4637,30 @@ class ItsWizSettingTab extends PluginSettingTab {
       );
     }
 
-    containerEl.createEl("h3", { text: "Extra folders" });
-    containerEl.createEl("p", { text: "Folders outside the courses folder whose RAW/ subfolders are converted too, e.g. almind/SFF (RAW sits directly inside). Their notes get `folder:` with the folder name instead of `course:`. Enter / to cover every RAW/ folder in the whole vault.", cls: "setting-item-description" });
+    const foldersEl = el;
+    section("extra-folders", "Extra folders", foldersEl);
+    el.createEl("p", { text: "Folders outside the courses folder whose RAW/ subfolders are converted too, e.g. almind/SFF (RAW sits directly inside). Their notes get `folder:` with the folder name instead of `course:`. Enter / to cover every RAW/ folder in the whole vault.", cls: "setting-item-description" });
     s.extraFolders ??= [];
     s.extraFolders.forEach((folder, i) => {
-      new Setting(containerEl)
+      new Setting(el)
         .addText((t) => t.setPlaceholder("almind/SFF").setValue(folder).onChange((v) => {
           clearTimeout(this.extraTimer);
           this.extraTimer = setTimeout(() => ((s.extraFolders[i] = v.trim()), applyRoots(s), save(), s.enableConversion && scanExisting()), 1500);
         }))
         .addExtraButton((b) => b.setIcon("trash").setTooltip("Remove").onClick(() => ((s.extraFolders.splice(i, 1), applyRoots(s), save(), this.display()))));
     });
-    new Setting(containerEl).addButton((b) => b.setButtonText("+").setTooltip("Add folder").onClick(() => ((s.extraFolders.push(""), this.display()))));
+    new Setting(el).addButton((b) => b.setButtonText("+").setTooltip("Add folder").onClick(() => ((s.extraFolders.push(""), this.display()))));
 
-    containerEl.createEl("h3", { text: "Courses" });
-    containerEl.createEl("p", { text: "Tick the itslearning courses ItsWiz should harvest. None are ticked at first. The name is used for the folder, `course:` in the notes, the calendar and Hold Course; empty = the course code itself. A name change only applies to new notes; existing folders are not renamed. Unticking a course stops new harvests; what is already in the vault stays.", cls: "setting-item-description" });
-    new Setting(containerEl)
+    section("courses", "Courses");
+    el.createEl("p", { text: "Tick the itslearning courses ItsWiz should harvest. None are ticked at first. The name is used for the folder, `course:` in the notes, the calendar and Hold Course; empty = the course code itself. A name change only applies to new notes; existing folders are not renamed. Unticking a course stops new harvests; what is already in the vault stays.", cls: "setting-item-description" });
+    new Setting(el)
       .setName("Fetch course list")
       .setDesc("Looks up your courses in itslearning without harvesting anything. Needs a login.")
       .addButton((b) => b.setButtonText("Fetch").onClick(async () => (await fetchCourseList(), this.display())));
     s.courseNames ??= {};
     s.selectedCourses ??= [];
     for (const code of Object.keys(s.courseNames)) {
-      new Setting(containerEl)
+      new Setting(el)
         .setName(code)
         .addToggle((t) =>
           t.setValue(s.selectedCourses.includes(code)).onChange((v) => {
@@ -4656,15 +4678,16 @@ class ItsWizSettingTab extends PluginSettingTab {
         );
     }
 
-    containerEl.createEl("h3", { text: "File types" });
-    containerEl.createEl("p", { text: "Which attachments are downloaded, by file extension. Applies to materials and assignment attachments. Files already in the vault are not removed; a file you switch back on is fetched on the next run.", cls: "setting-item-description" });
+    const coursesEl = el;
+    section("file-types", "File types and size limit", coursesEl);
+    el.createEl("p", { text: "Which attachments are downloaded, by file extension. Applies to materials and assignment attachments. Files already in the vault are not removed; a file you switch back on is fetched on the next run.", cls: "setting-item-description" });
     s.fileTypes ??= {};
     for (const [category, name] of [["pdf", "PDF"], ["word", "Word (doc, docx)"], ["powerpoint", "PowerPoint (ppt, pptx)"], ["excel", "Excel and CSV"], ["image", "Images"], ["video", "Video"], ["audio", "Audio"], ["other", "Other file types"]]) {
-      new Setting(containerEl).setName(name).addToggle((t) =>
+      new Setting(el).setName(name).addToggle((t) =>
         t.setValue(fileTypeEnabled(s, category)).onChange((v) => ((s.fileTypes[category] = v), save()))
       );
     }
-    new Setting(containerEl)
+    new Setting(el)
       .setName("Largest file (MB)")
       .setDesc("Bigger files are not saved. 0 = no limit. The file is still downloaded before the size is known, but not written to the vault.")
       .addText((t) =>
@@ -4673,60 +4696,54 @@ class ItsWizSettingTab extends PluginSettingTab {
         })
       );
 
-    containerEl.createEl("h3", { text: "Conversion to markdown (MinerU)" });
-    new Setting(containerEl)
+    section("conversion", "Conversion to markdown (MinerU)");
+    new Setting(el)
       .setName("Convert RAW files")
       .setDesc("Sends new PDF and Office files under RAW/ to MinerU and writes the MD note. Optional: when off, the lesson plans link to the original file.")
       .addToggle((t) => t.setValue(s.enableConversion ?? false).onChange((v) => ((s.enableConversion = v), save(), v && scanExisting())));
-    new Setting(containerEl)
-      .setName("Use PDF text for digital PDFs")
-      .setDesc("Needs the PDFable program. A PDF that is digital on every page, with no picture-heavy pages, gets its note straight from the PDF's text layer: instant, no upload, no MinerU key needed. Everything else still goes to MinerU. Experimental, so off by default; \"force\" on such a note converts it with MinerU instead.")
-      .addToggle((t) => t.setValue(s.pdfableText ?? false).onChange((v) => ((s.pdfableText = v), save(), v && scanExisting())));
-
-    new Setting(containerEl)
-      .setName("Notify when conversion is done")
-      .setDesc("One notice after a batch of conversions, with the number converted and failed. Nothing is shown if nothing was converted.")
-      .addToggle((t) => t.setValue(s.notifyConversion ?? true).onChange((v) => ((s.notifyConversion = v), save())));
-
     // #315: what happens to each file, by type and by RAW folder. Order of precedence: answer per file, folder, file type, automatic.
     const conv = (s.conversion ??= {});
     conv.byType ??= {};
     conv.byFolder ??= {};
-    new Setting(containerEl)
+    new Setting(el)
       .setName("Ask before converting new files")
       .setDesc("New files wait in a list instead of being converted. You get a notice, and the command \"Files waiting for a choice\" opens a dialog with one choice per folder. Off: every file simply gets its folder's or type's action.")
       .addToggle((t) => t.setValue(conv.ask ?? false).onChange((v) => ((conv.ask = v), save(), !v && scanExisting())))
       .addButton((b) => b.setButtonText("Waiting files").onClick(() => openWaitingFiles()));
     const actionSetting = (name, ext, current, set, withDefault) =>
-      new Setting(containerEl).setName(name).addDropdown((d) => {
+      new Setting(el).setName(name).addDropdown((d) => {
         if (withDefault) d.addOption("", "Use the file type's action");
         for (const a of allowedActions(ext)) d.addOption(a, CONVERSION_LABELS[a]);
         d.setValue(current ?? (withDefault ? "" : "auto")).onChange((v) => (set(v), save()));
       });
-    for (const [ext, name] of [["pdf", "PDF"], ["docx", "Word (docx)"], ["pptx", "PowerPoint (pptx)"]]) {
+    actionSetting("Action for PDF", "pdf", conv.byType.pdf, (v) => (conv.byType.pdf = v));
+    const conversionEl = el;
+    // Set and forget: the rest of the conversion options.
+    section("conversion-more", "More conversion options", conversionEl);
+    new Setting(el)
+      .setName("Use PDF text for digital PDFs")
+      .setDesc("Needs the PDFable program. A PDF that is digital on every page, with no picture-heavy pages, gets its note straight from the PDF's text layer: instant, no upload, no MinerU key needed. Everything else still goes to MinerU. Experimental, so off by default; \"force\" on such a note converts it with MinerU instead.")
+      .addToggle((t) => t.setValue(s.pdfableText ?? false).onChange((v) => ((s.pdfableText = v), save(), v && scanExisting())));
+    new Setting(el)
+      .setName("Notify when conversion is done")
+      .setDesc("One notice after a batch of conversions, with the number converted and failed. Nothing is shown if nothing was converted.")
+      .addToggle((t) => t.setValue(s.notifyConversion ?? true).onChange((v) => ((s.notifyConversion = v), save())));
+    for (const [ext, name] of [["docx", "Word (docx)"], ["pptx", "PowerPoint (pptx)"]]) {
       actionSetting(`Action for ${name}`, ext, conv.byType[ext], (v) => (conv.byType[ext] = v));
     }
     const rawFolders = new Set(Object.keys(conv.byFolder));
+    section("rawFolders", "Action per RAW folder", conversionEl);
     for (const f of this.app.vault.getAllLoadedFiles()) if (f instanceof TFolder && f.name === "RAW" && inRawBranch(`${f.path}/x`)) rawFolders.add(f.path);
     for (const folder of [...rawFolders].sort()) {
       actionSetting(folder, "pdf", conv.byFolder[folder], (v) => (v ? (conv.byFolder[folder] = v) : delete conv.byFolder[folder]), true);
     }
-    containerEl.createEl("h3", { text: "Calendar" });
-    new Setting(containerEl)
-      .setName("Personal calendar events in itslearning")
-      .setDesc("One event per lesson and assignment deadline, with the full lesson plan. ItsWiz only touches events it created itself. The command \"Remove all ItsWiz calendar events\" deletes them again. Only shows events from courses you have starred in itslearning.")
-      .addToggle((t) => t.setValue(s.enableCalendarSync ?? false).onChange((v) => ((s.enableCalendarSync = v), save())));
-    containerEl.createEl("h3", { text: "Hold Course" });
-    new Setting(containerEl)
-      .setName("Sync to Hold Course")
-      .setDesc("Lesson plans, materials and assignments are written into Hold Course, and the Boox copy is kept up to date.")
-      .addToggle((t) => t.setValue(s.enableHoldCourseSync ?? false).onChange((v) => ((s.enableHoldCourseSync = v), save(), v && scheduleHoldCourseSync(0))));
+    section("minerupdfable", "MinerU and PDFable", conversionEl);
     const tokenDesc = createFragment((f) => {
       f.appendText("Get one at ");
       f.createEl("a", { text: "mineru.net", href: MINERU_TOKEN_URL });
       f.appendText(" (log in → API → token).");
     });
-    new Setting(containerEl)
+    new Setting(el)
       .setName("MinerU key")
       .setDesc(tokenDesc)
       .addText((t) => {
@@ -4739,10 +4756,36 @@ class ItsWizSettingTab extends PluginSettingTab {
           new Notice(ok ? "ItsWiz: the MinerU key works." : "ItsWiz: MinerU rejected the key.");
         })
       );
-    new Setting(containerEl)
+    new Setting(el)
       .setName("PDFable-program")
       .setDesc("Optional. Path to the PDFable program (the pdfable file), which straightens skewed, rotated and double-page scans before MinerU and writes a small reading copy to _attachments/ next to the note. Empty: the original is uploaded and copied to _attachments/.")
       .addText((t) => t.setPlaceholder("/path/to/pdfable").setValue(pdfablePath()).onChange((v) => this.app.saveLocalStorage(PDFABLE_PATH_KEY, v.trim() || null)));
+
+    // #317: search. Rows that do not match are hidden, sections with a match open; clearing restores the folded state.
+    const applySearch = () => {
+      this.query = search.value.trim().toLowerCase();
+      const q = this.query;
+      for (const r of containerEl.querySelectorAll(".setting-item")) r.style.display = !q || r.textContent.toLowerCase().includes(q) ? "" : "none";
+      for (const t of containerEl.querySelectorAll(".itswiz-section-body > p")) t.style.display = q ? "none" : "";
+      const sections = [...containerEl.querySelectorAll("details.itswiz-section")].reverse(); // inner first
+      for (const d of sections) {
+        const hit = [...d.querySelectorAll(".setting-item")].some((r) => r.style.display !== "none");
+        d.style.display = !q || hit ? "" : "none";
+        d.open = q ? hit : this.openSections.has(d.dataset.key);
+      }
+    };
+    search.addEventListener("input", applySearch);
+    if (search.value) applySearch();
+    section("calendar", "Calendar");
+    new Setting(el)
+      .setName("Personal calendar events in itslearning")
+      .setDesc("One event per lesson and assignment deadline, with the full lesson plan. ItsWiz only touches events it created itself. The command \"Remove all ItsWiz calendar events\" deletes them again. Only shows events from courses you have starred in itslearning.")
+      .addToggle((t) => t.setValue(s.enableCalendarSync ?? false).onChange((v) => ((s.enableCalendarSync = v), save())));
+    section("holdcourse", "Hold Course");
+    new Setting(el)
+      .setName("Sync to Hold Course")
+      .setDesc("Lesson plans, materials and assignments are written into Hold Course, and the Boox copy is kept up to date.")
+      .addToggle((t) => t.setValue(s.enableHoldCourseSync ?? false).onChange((v) => ((s.enableHoldCourseSync = v), save(), v && scheduleHoldCourseSync(0))));
   }
 }
 
