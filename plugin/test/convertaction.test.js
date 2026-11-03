@@ -48,3 +48,10 @@ test('textActionSet sees text anywhere', () => {
   assert.ok(plugin.textActionSet({ byFolder: { [RAW]: 'text' } }, {}));
   assert.ok(plugin.textActionSet({}, { [PDF]: 'text' }));
 });
+
+test('conversionSummary: nothing, converted, failed (#318)', () => {
+  assert.strictEqual(plugin.conversionSummary(0, 0), null);
+  assert.strictEqual(plugin.conversionSummary(3, 0), 'ItsWiz: 3 file(s) converted.');
+  assert.match(plugin.conversionSummary(2, 1), /2 file\(s\) converted, 1 failed/);
+  assert.match(plugin.conversionSummary(0, 1), /0 file\(s\) converted, 1 failed/);
+});
