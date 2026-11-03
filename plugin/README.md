@@ -8,7 +8,7 @@ which was deleted in #244.
 
 1. Install **Obsidian42 - BRAT** (Community plugins) and enable it.
 2. BRAT → *Add beta plugin* → `https://github.com/FasterMadman/itswiz`. Enable **ItsWiz** under Community plugins.
-3. Click the graduation-cap icon in the left ribbon and log in to itslearning. In the settings, the *Courses and file types* section is open; press
+3. Click the graduation-cap icon in the left ribbon and log in to itslearning. In the settings, the *Courses* section is open; press
    **Fetch** and tick the courses to harvest (none are ticked at first), then press **Harvest now**.
 4. *MinerU key* (optional, only for converting PDF/Office files to notes): get a free key at mineru.net
    (log in → API → token), paste it into ItsWiz' settings (*Conversion to markdown* → *MinerU and PDFable*) and turn *Convert RAW files* on.
